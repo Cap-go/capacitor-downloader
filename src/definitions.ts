@@ -1,4 +1,4 @@
-import type { PluginListenerHandle } from "@capacitor/core";
+import type { PluginListenerHandle } from '@capacitor/core';
 
 export interface DownloadTask {
   id: string;
@@ -22,9 +22,18 @@ export interface CapacitorDownloaderPlugin {
   stop(id: string): Promise<void>;
   checkStatus(id: string): Promise<DownloadTask>;
   getFileInfo(path: string): Promise<{ size: number; type: string }>;
-  
-  addListener(eventName: 'downloadProgress', listenerFunc: (progress: { id: string; progress: number }) => void): Promise<PluginListenerHandle>;
-  addListener(eventName: 'downloadCompleted', listenerFunc: (result: { id: string }) => void): Promise<PluginListenerHandle>;
-  addListener(eventName: 'downloadFailed', listenerFunc: (error: { id: string; error: string }) => void): Promise<PluginListenerHandle>;
+
+  addListener(
+    eventName: 'downloadProgress',
+    listenerFunc: (progress: { id: string; progress: number }) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'downloadCompleted',
+    listenerFunc: (result: { id: string }) => void,
+  ): Promise<PluginListenerHandle>;
+  addListener(
+    eventName: 'downloadFailed',
+    listenerFunc: (error: { id: string; error: string }) => void,
+  ): Promise<PluginListenerHandle>;
   removeAllListeners(): Promise<void>;
 }

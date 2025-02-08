@@ -16,7 +16,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "resume", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "checkStatus", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "getFileInfo", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getFileInfo", returnType: CAPPluginReturnPromise)
     ]
 
     private var tasks: [String: URLSessionDownloadTask] = [:]

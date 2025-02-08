@@ -9,13 +9,11 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
-
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
-
 import java.io.File;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -70,9 +68,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
-                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setAllowedOverMetered(true)
-                .setAllowedOverRoaming(true);
+            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true);
 
         // Handle custom destination
         File destinationFile = new File(getContext().getExternalFilesDir(null), destination);
@@ -81,7 +79,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         JSObject headers = call.getObject("headers");
         if (headers != null) {
-            for (Iterator<String> it = headers.keys(); it.hasNext(); ) {
+            for (Iterator<String> it = headers.keys(); it.hasNext();) {
                 String key = it.next();
                 request.addRequestHeader(key, headers.getString(key));
             }
@@ -107,14 +105,16 @@ public class CapacitorDownloaderPlugin extends Plugin {
     }
 
     private void startProgressCheck(final String id, final long downloadId) {
-        handler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (checkDownloadStatus(id)) {
-                    handler.postDelayed(this, 1000); // Check every second
+        handler.post(
+            new Runnable() {
+                @Override
+                public void run() {
+                    if (checkDownloadStatus(id)) {
+                        handler.postDelayed(this, 1000); // Check every second
+                    }
                 }
             }
-        });
+        );
     }
 
     private boolean checkDownloadStatus(String id) {

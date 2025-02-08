@@ -1,11 +1,9 @@
-name: Build source code and test it
+name: Build source code and check lint
 
 on:
   push:
-    branches:
-      - renovate/**
-  pull_request:
-    branches: [ main ]
+    tags:
+      - "*"
 
 jobs:
   build_android:
@@ -22,6 +20,10 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '21'
+          cache: 'gradle'
+          cache-dependency-path: | # optional
+            android/.gradle/*.gradle*
+            android/**/gradle-wrapper.properties
       - name: Build
         id: build_code
         run: npm run verify:android
@@ -31,15 +33,26 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - uses: actions/cache@v4
+        id: cocoapods-cache
+        with:
+          path: ios/Pods
+          key: ${{ runner.os }}-pods-${{ hashFiles('ios/Podfile.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
       - name: Install dependencies
         id: install_code
         run: bun i
       - name: Build
         id: build_code
         run: bun run verify:ios
-  web:
+  deploy:
+    needs: [build_android, build_ios]
     runs-on: ubuntu-latest
-    name: 'Build code and test'
+    name: "Build code and npm release"
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -56,3 +69,14 @@ jobs:
       - name: Verify
         id: verify_code
         run: bun run verify:web
+      - uses: JS-DevTools/npm-publish@v3
+        if: ${{ !contains(github.ref, '-alpha.') }}
+        with:
+          token: ${{ secrets.NPM_TOKEN }}
+          provenance: true
+      - uses: JS-DevTools/npm-publish@v3
+        if: ${{ contains(github.ref, '-alpha.') }}
+        with:
+          token: ${{ secrets.NPM_TOKEN }}
+          tag: next
+          provenance: true

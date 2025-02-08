@@ -1,6 +1,6 @@
 {
   "name": "@capgo/capacitor-downloader",
-  "version": "0.0.12",
+  "version": "7.0.0",
   "description": "Download file in background or foreground",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",
@@ -15,7 +15,7 @@
     "Package.swift",
     "CapgoCapacitorDownloader.podspec"
   ],
-  "author": "Martin Donadieu",
+  "author": "Martin Donadieu <martin@capgo.app>",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -27,7 +27,12 @@
   "keywords": [
     "capacitor",
     "plugin",
-    "native"
+    "native",
+    "download",
+    "downloader",
+    "download file",
+    "download file in background",
+    "download file in foreground"
   ],
   "scripts": {
     "verify": "npm run verify:ios && npm run verify:android && npm run verify:web",
@@ -35,8 +40,8 @@
     "verify:android": "cd android && ./gradlew clean build test && cd ..",
     "verify:web": "npm run build",
     "lint": "npm run eslint && npm run prettier -- --check && npm run swiftlint -- lint",
-    "fmt": "npm run eslint -- --fix && npm run prettier -- --write && npm run swiftlint -- --fix --format",
-    "eslint": "eslint . --ext ts",
+    "fmt": "npm run eslint -- --fix && npm run prettier -- --write && npm run swiftlint -- --autocorrect --format",
+    "eslint": "eslint . --ext .ts",
     "prettier": "prettier \"**/*.{css,html,ts,js,java}\" --plugin=prettier-plugin-java",
     "swiftlint": "node-swiftlint",
     "docgen": "docgen --api CapacitorDownloaderPlugin --output-readme README.md --output-json dist/docs.json",
@@ -46,29 +51,33 @@
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {
-    "@capacitor/android": "^6.0.0",
-    "@capacitor/core": "^6.0.0",
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/cli": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
     "@capacitor/docgen": "^0.3.0",
-    "@capacitor/ios": "^6.0.0",
+    "@capacitor/ios": "^7.0.0",
     "@ionic/eslint-config": "^0.4.0",
     "@ionic/prettier-config": "^4.0.0",
     "@ionic/swiftlint-config": "^2.0.0",
+    "@types/node": "^22.13.1",
     "eslint": "^8.57.0",
-    "prettier": "^3.3.3",
-    "prettier-plugin-java": "^2.6.5",
+    "eslint-plugin-import": "^2.31.0",
+    "husky": "^9.1.7",
+    "prettier": "^3.4.2",
+    "prettier-plugin-java": "^2.6.7",
     "rimraf": "^6.0.1",
-    "rollup": "^4.24.0",
+    "rollup": "^4.34.6",
     "swiftlint": "^2.0.0",
-    "typescript": "~4.1.5"
+    "typescript": "^5.7.3"
   },
   "peerDependencies": {
-    "@capacitor/core": "^6.0.0"
+    "@capacitor/core": ">=7.0.0"
   },
-  "prettier": "@ionic/prettier-config",
-  "swiftlint": "@ionic/swiftlint-config",
   "eslintConfig": {
     "extends": "@ionic/eslint-config/recommended"
   },
+  "prettier": "@ionic/prettier-config",
+  "swiftlint": "@ionic/swiftlint-config",
   "capacitor": {
     "ios": {
       "src": "ios"

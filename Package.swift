@@ -10,7 +10,7 @@ let package = Package(
             targets: ["CapacitorDownloaderPlugin"])
     ],
     dependencies: [
-        .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", from: "7.0.1")
+        .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", from: "7.1.0")
     ],
     targets: [
         .target(

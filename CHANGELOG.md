@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [7.0.10](https://github.com/Cap-go/capacitor-downloader/compare/7.0.9...7.0.10) (2025-10-08)
+
+
+### Bug Fixes
+
+* swift version ([a806b91](https://github.com/Cap-go/capacitor-downloader/commit/a806b91fbab4b213e4140f5c5b56a342244a4410))
+
 ## [7.0.9](https://github.com/Cap-go/capacitor-downloader/compare/7.0.8...7.0.9) (2025-10-08)
 
 ## [7.0.8](https://github.com/Cap-go/capacitor-downloader/compare/7.0.7...7.0.8) (2025-10-08)

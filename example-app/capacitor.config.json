@@ -1,0 +1,10 @@
+{
+  "appId": "com.example.capgo.capacitor.downloader",
+  "appName": "@capgo/capacitor-downloader example",
+  "webDir": "dist",
+  "plugins": {
+    "SplashScreen": {
+      "launchAutoHide": false
+    }
+  }
+}

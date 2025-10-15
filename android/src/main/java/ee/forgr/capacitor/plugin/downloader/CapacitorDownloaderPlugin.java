@@ -79,7 +79,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         JSObject headers = call.getObject("headers");
         if (headers != null) {
-            for (Iterator<String> it = headers.keys(); it.hasNext();) {
+            for (Iterator<String> it = headers.keys(); it.hasNext(); ) {
                 String key = it.next();
                 request.addRequestHeader(key, headers.getString(key));
             }

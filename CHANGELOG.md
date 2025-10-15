@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [7.0.17](https://github.com/Cap-go/capacitor-downloader/compare/7.0.16...7.0.17) (2025-10-15)
+
+
+### Bug Fixes
+
+* lock and lint ([2708a6f](https://github.com/Cap-go/capacitor-downloader/commit/2708a6fce34d99dbf793d115de62e0140481ba22))
+
 ## [7.0.16](https://github.com/Cap-go/capacitor-downloader/compare/7.0.15...7.0.16) (2025-10-15)
 
 

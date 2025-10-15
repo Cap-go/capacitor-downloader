@@ -41,8 +41,8 @@ label {
 }
 
 select,
-input[type="text"],
-input[type="number"],
+input[type='text'],
+input[type='number'],
 textarea {
   width: 100%;
   padding: 0.65rem 0.75rem;
@@ -101,7 +101,8 @@ pre#plugin-output {
   padding: 1.2rem;
   background: rgba(15, 23, 42, 0.6);
   border-radius: 12px;
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
   max-height: 280px;
   overflow-y: auto;
   white-space: pre-wrap;

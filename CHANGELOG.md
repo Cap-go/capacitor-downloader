@@ -2,6 +2,8 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [7.0.21](https://github.com/Cap-go/capacitor-downloader/compare/7.0.20...7.0.21) (2025-10-22)
+
 ## [7.0.20](https://github.com/Cap-go/capacitor-downloader/compare/7.0.19...7.0.20) (2025-10-20)
 
 ## [7.0.19](https://github.com/Cap-go/capacitor-downloader/compare/7.0.18...7.0.19) (2025-10-16)

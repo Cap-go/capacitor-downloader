@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [7.1.0](https://github.com/Cap-go/capacitor-downloader/compare/7.0.21...7.1.0) (2025-10-23)
+
+
+### Features
+
+* add plugin version retrieval method and update workflows for changelog generation ([b5f134e](https://github.com/Cap-go/capacitor-downloader/commit/b5f134e2622516d0ae107d1d267710a545331628))
+
 ## [7.0.21](https://github.com/Cap-go/capacitor-downloader/compare/7.0.20...7.0.21) (2025-10-22)
 
 ## [7.0.20](https://github.com/Cap-go/capacitor-downloader/compare/7.0.19...7.0.20) (2025-10-20)

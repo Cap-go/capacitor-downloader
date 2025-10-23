@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [7.1.3](https://github.com/Cap-go/capacitor-downloader/compare/7.1.2...7.1.3) (2025-10-23)
+
+
+### Bug Fixes
+
+* update capacitor-swift-pm to version 7.0.0 ([c555d56](https://github.com/Cap-go/capacitor-downloader/commit/c555d56ebb8c1c7544723165aabe4e65bbc160ae))
+
 ## [7.1.2](https://github.com/Cap-go/capacitor-downloader/compare/7.1.1...7.1.2) (2025-10-23)
 
 

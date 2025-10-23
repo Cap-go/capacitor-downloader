@@ -27,4 +27,8 @@ export class CapacitorDownloaderWeb extends WebPlugin implements CapacitorDownlo
     console.log('GET FILE INFO', path);
     throw new Error('Method not implemented.');
   }
+
+  async getPluginVersion(): Promise<{ version: string }> {
+    return { version: 'web' };
+  }
 }

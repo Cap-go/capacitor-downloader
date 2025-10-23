@@ -8,6 +8,7 @@ import Capacitor
 
 @objc(CapacitorDownloaderPlugin)
 public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
+    private let PLUGIN_VERSION: String = ""
     public let identifier = "CapacitorDownloaderPlugin"
     public let jsName = "CapacitorDownloader"
     public let pluginMethods: [CAPPluginMethod] = [
@@ -16,7 +17,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "resume", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "checkStatus", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "getFileInfo", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "getFileInfo", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getPluginVersion", returnType: CAPPluginReturnPromise)
     ]
 
     private var tasks: [String: URLSessionDownloadTask] = [:]
@@ -173,4 +175,9 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         let progress = Float(totalBytesWritten) / Float(totalBytesExpectedToWrite)
         notifyListeners("downloadProgress", data: ["id": id, "progress": progress])
     }
+
+    @objc func getPluginVersion(_ call: CAPPluginCall) {
+        call.resolve(["version": self.PLUGIN_VERSION])
+    }
+
 }

@@ -22,6 +22,8 @@ import java.util.Map;
 @CapacitorPlugin(name = "CapacitorDownloader")
 public class CapacitorDownloaderPlugin extends Plugin {
 
+    private final String PLUGIN_VERSION = "";
+
     private DownloadManager downloadManager;
     private final Map<String, Long> downloads = new HashMap<>();
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -257,6 +259,17 @@ public class CapacitorDownloaderPlugin extends Plugin {
         super.handleOnDestroy();
         if (downloadReceiver != null) {
             getContext().unregisterReceiver(downloadReceiver);
+        }
+    }
+
+    @PluginMethod
+    public void getPluginVersion(final PluginCall call) {
+        try {
+            final JSObject ret = new JSObject();
+            ret.put("version", this.PLUGIN_VERSION);
+            call.resolve(ret);
+        } catch (final Exception e) {
+            call.reject("Could not get plugin version", e);
         }
     }
 }

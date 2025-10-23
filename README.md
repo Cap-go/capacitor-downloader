@@ -32,6 +32,7 @@ npx cap sync
 * [`addListener('downloadCompleted', ...)`](#addlistenerdownloadcompleted-)
 * [`addListener('downloadFailed', ...)`](#addlistenerdownloadfailed-)
 * [`removeAllListeners()`](#removealllisteners)
+* [`getPluginVersion()`](#getpluginversion)
 * [Interfaces](#interfaces)
 
 </docgen-index>
@@ -176,6 +177,19 @@ addListener(eventName: 'downloadFailed', listenerFunc: (error: { id: string; err
 ```typescript
 removeAllListeners() => Promise<void>
 ```
+
+--------------------
+
+
+### getPluginVersion()
+
+```typescript
+getPluginVersion() => Promise<{ version: string; }>
+```
+
+Get the native Capacitor plugin version
+
+**Returns:** <code>Promise&lt;{ version: string; }&gt;</code>
 
 --------------------
 

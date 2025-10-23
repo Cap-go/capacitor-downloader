@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [7.1.2](https://github.com/Cap-go/capacitor-downloader/compare/7.1.1...7.1.2) (2025-10-23)
+
+
+### Bug Fixes
+
+* remove footer in discord ([d8c1e7e](https://github.com/Cap-go/capacitor-downloader/commit/d8c1e7efc79338cca6d9bef6e911ea2b92fedfda))
+
 ## [7.1.1](https://github.com/Cap-go/capacitor-downloader/compare/7.1.0...7.1.1) (2025-10-23)
 
 

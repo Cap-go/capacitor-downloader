@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [7.1.1](https://github.com/Cap-go/capacitor-downloader/compare/7.1.0...7.1.1) (2025-10-23)
+
+
+### Bug Fixes
+
+* update Discord webhook username to include repository name ([720b250](https://github.com/Cap-go/capacitor-downloader/commit/720b25089f5f39320f819d02e716f7569d65b344))
+
 ## [7.1.0](https://github.com/Cap-go/capacitor-downloader/compare/7.0.21...7.1.0) (2025-10-23)
 
 

@@ -49,7 +49,7 @@ if (!id) {
   throw new Error('Provide a download id first.');
 }
 await plugin.pause(id);
-return \`Pause requested for ${id}.\`;
+return `Pause requested for ${id}.`;
               },
             },
 {
@@ -63,7 +63,7 @@ if (!id) {
   throw new Error('Provide a download id first.');
 }
 await plugin.resume(id);
-return \`Resume requested for ${id}.\`;
+return `Resume requested for ${id}.`;
               },
             },
 {
@@ -77,7 +77,7 @@ if (!id) {
   throw new Error('Provide a download id first.');
 }
 await plugin.stop(id);
-return \`Stop requested for ${id}.\`;
+return `Stop requested for ${id}.`;
               },
             },
 {

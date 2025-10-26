@@ -44,15 +44,20 @@ npx cap sync
 <docgen-api>
 <!--Update the source file JSDoc comments and rerun docgen to update the docs below-->
 
+Capacitor plugin for downloading files with background support.
+Provides resumable downloads with progress tracking.
+
 ### download(...)
 
 ```typescript
 download(options: DownloadOptions) => Promise<DownloadTask>
 ```
 
-| Param         | Type                                                        |
-| ------------- | ----------------------------------------------------------- |
-| **`options`** | <code><a href="#downloadoptions">DownloadOptions</a></code> |
+Start a new download task.
+
+| Param         | Type                                                        | Description              |
+| ------------- | ----------------------------------------------------------- | ------------------------ |
+| **`options`** | <code><a href="#downloadoptions">DownloadOptions</a></code> | - Download configuration |
 
 **Returns:** <code>Promise&lt;<a href="#downloadtask">DownloadTask</a>&gt;</code>
 
@@ -65,9 +70,12 @@ download(options: DownloadOptions) => Promise<DownloadTask>
 pause(id: string) => Promise<void>
 ```
 
-| Param    | Type                |
-| -------- | ------------------- |
-| **`id`** | <code>string</code> |
+Pause an active download.
+Download can be resumed later from the same position.
+
+| Param    | Type                | Description                        |
+| -------- | ------------------- | ---------------------------------- |
+| **`id`** | <code>string</code> | - ID of the download task to pause |
 
 --------------------
 
@@ -78,9 +86,12 @@ pause(id: string) => Promise<void>
 resume(id: string) => Promise<void>
 ```
 
-| Param    | Type                |
-| -------- | ------------------- |
-| **`id`** | <code>string</code> |
+Resume a paused download.
+Continues from where it was paused.
+
+| Param    | Type                | Description                         |
+| -------- | ------------------- | ----------------------------------- |
+| **`id`** | <code>string</code> | - ID of the download task to resume |
 
 --------------------
 
@@ -91,9 +102,12 @@ resume(id: string) => Promise<void>
 stop(id: string) => Promise<void>
 ```
 
-| Param    | Type                |
-| -------- | ------------------- |
-| **`id`** | <code>string</code> |
+Stop and cancel a download permanently.
+Downloaded data will be deleted.
+
+| Param    | Type                | Description                       |
+| -------- | ------------------- | --------------------------------- |
+| **`id`** | <code>string</code> | - ID of the download task to stop |
 
 --------------------
 
@@ -104,9 +118,11 @@ stop(id: string) => Promise<void>
 checkStatus(id: string) => Promise<DownloadTask>
 ```
 
-| Param    | Type                |
-| -------- | ------------------- |
-| **`id`** | <code>string</code> |
+Check the current status of a download.
+
+| Param    | Type                | Description                        |
+| -------- | ------------------- | ---------------------------------- |
+| **`id`** | <code>string</code> | - ID of the download task to check |
 
 **Returns:** <code>Promise&lt;<a href="#downloadtask">DownloadTask</a>&gt;</code>
 
@@ -119,9 +135,11 @@ checkStatus(id: string) => Promise<DownloadTask>
 getFileInfo(path: string) => Promise<{ size: number; type: string; }>
 ```
 
-| Param      | Type                |
-| ---------- | ------------------- |
-| **`path`** | <code>string</code> |
+Get information about a downloaded file.
+
+| Param      | Type                | Description                  |
+| ---------- | ------------------- | ---------------------------- |
+| **`path`** | <code>string</code> | - Local file path to inspect |
 
 **Returns:** <code>Promise&lt;{ size: number; type: string; }&gt;</code>
 
@@ -134,10 +152,13 @@ getFileInfo(path: string) => Promise<{ size: number; type: string; }>
 addListener(eventName: 'downloadProgress', listenerFunc: (progress: { id: string; progress: number; }) => void) => Promise<PluginListenerHandle>
 ```
 
-| Param              | Type                                                                  |
-| ------------------ | --------------------------------------------------------------------- |
-| **`eventName`**    | <code>'downloadProgress'</code>                                       |
-| **`listenerFunc`** | <code>(progress: { id: string; progress: number; }) =&gt; void</code> |
+Listen for download progress updates.
+Fired periodically as download progresses.
+
+| Param              | Type                                                                  | Description                           |
+| ------------------ | --------------------------------------------------------------------- | ------------------------------------- |
+| **`eventName`**    | <code>'downloadProgress'</code>                                       | - Must be 'downloadProgress'          |
+| **`listenerFunc`** | <code>(progress: { id: string; progress: number; }) =&gt; void</code> | - Callback receiving progress updates |
 
 **Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
 
@@ -150,10 +171,13 @@ addListener(eventName: 'downloadProgress', listenerFunc: (progress: { id: string
 addListener(eventName: 'downloadCompleted', listenerFunc: (result: { id: string; }) => void) => Promise<PluginListenerHandle>
 ```
 
-| Param              | Type                                              |
-| ------------------ | ------------------------------------------------- |
-| **`eventName`**    | <code>'downloadCompleted'</code>                  |
-| **`listenerFunc`** | <code>(result: { id: string; }) =&gt; void</code> |
+Listen for download completion.
+Fired when a download finishes successfully.
+
+| Param              | Type                                              | Description                                  |
+| ------------------ | ------------------------------------------------- | -------------------------------------------- |
+| **`eventName`**    | <code>'downloadCompleted'</code>                  | - Must be 'downloadCompleted'                |
+| **`listenerFunc`** | <code>(result: { id: string; }) =&gt; void</code> | - Callback receiving completion notification |
 
 **Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
 
@@ -166,10 +190,13 @@ addListener(eventName: 'downloadCompleted', listenerFunc: (result: { id: string;
 addListener(eventName: 'downloadFailed', listenerFunc: (error: { id: string; error: string; }) => void) => Promise<PluginListenerHandle>
 ```
 
-| Param              | Type                                                            |
-| ------------------ | --------------------------------------------------------------- |
-| **`eventName`**    | <code>'downloadFailed'</code>                                   |
-| **`listenerFunc`** | <code>(error: { id: string; error: string; }) =&gt; void</code> |
+Listen for download failures.
+Fired when a download encounters an error.
+
+| Param              | Type                                                            | Description                            |
+| ------------------ | --------------------------------------------------------------- | -------------------------------------- |
+| **`eventName`**    | <code>'downloadFailed'</code>                                   | - Must be 'downloadFailed'             |
+| **`listenerFunc`** | <code>(error: { id: string; error: string; }) =&gt; void</code> | - Callback receiving error information |
 
 **Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
 
@@ -182,6 +209,9 @@ addListener(eventName: 'downloadFailed', listenerFunc: (error: { id: string; err
 removeAllListeners() => Promise<void>
 ```
 
+Remove all event listeners.
+Cleanup method to prevent memory leaks.
+
 --------------------
 
 
@@ -191,7 +221,7 @@ removeAllListeners() => Promise<void>
 getPluginVersion() => Promise<{ version: string; }>
 ```
 
-Get the native Capacitor plugin version
+Get the plugin version number.
 
 **Returns:** <code>Promise&lt;{ version: string; }&gt;</code>
 
@@ -203,23 +233,27 @@ Get the native Capacitor plugin version
 
 #### DownloadTask
 
-| Prop           | Type                                                                 |
-| -------------- | -------------------------------------------------------------------- |
-| **`id`**       | <code>string</code>                                                  |
-| **`progress`** | <code>number</code>                                                  |
-| **`state`**    | <code>'PENDING' \| 'RUNNING' \| 'PAUSED' \| 'DONE' \| 'ERROR'</code> |
+Represents the current state and progress of a download task.
+
+| Prop           | Type                                                                 | Description                             |
+| -------------- | -------------------------------------------------------------------- | --------------------------------------- |
+| **`id`**       | <code>string</code>                                                  | Unique identifier for the download task |
+| **`progress`** | <code>number</code>                                                  | Download progress from 0 to 100         |
+| **`state`**    | <code>'PENDING' \| 'RUNNING' \| 'PAUSED' \| 'DONE' \| 'ERROR'</code> | Current state of the download           |
 
 
 #### DownloadOptions
 
-| Prop              | Type                                     |
-| ----------------- | ---------------------------------------- |
-| **`id`**          | <code>string</code>                      |
-| **`url`**         | <code>string</code>                      |
-| **`destination`** | <code>string</code>                      |
-| **`headers`**     | <code>{ [key: string]: string; }</code>  |
-| **`network`**     | <code>'cellular' \| 'wifi-only'</code>   |
-| **`priority`**    | <code>'high' \| 'normal' \| 'low'</code> |
+Configuration options for starting a download.
+
+| Prop              | Type                                     | Description                                      |
+| ----------------- | ---------------------------------------- | ------------------------------------------------ |
+| **`id`**          | <code>string</code>                      | Unique identifier for this download task         |
+| **`url`**         | <code>string</code>                      | URL of the file to download                      |
+| **`destination`** | <code>string</code>                      | Local file path where the download will be saved |
+| **`headers`**     | <code>{ [key: string]: string; }</code>  | Optional HTTP headers to include in the request  |
+| **`network`**     | <code>'cellular' \| 'wifi-only'</code>   | Network type requirement for download            |
+| **`priority`**    | <code>'high' \| 'normal' \| 'low'</code> | Download priority level                          |
 
 
 #### PluginListenerHandle

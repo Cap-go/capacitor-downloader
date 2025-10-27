@@ -1,4 +1,4 @@
-package app.capgo.downloader;
+package app.capgo.accelerometer;
 
 import com.getcapacitor.BridgeActivity;
 

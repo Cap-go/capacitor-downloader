@@ -1,4 +1,4 @@
-# @capgo/capacitor-downloader
+# @capgo/capacitor-accelerometer
  <a href="https://capgo.app/"><img src='https://raw.githubusercontent.com/Cap-go/capgo/main/assets/capgo_banner.png' alt='Capgo - Instant updates for capacitor'/></a>
 
 <div align="center">
@@ -7,18 +7,18 @@
 </div>
 
 
-Download file in background or foreground
+Access raw accelerometer measurements across iOS, Android, and the Web.
 
 WIP: the plugin is not yet ready for production
 
 ## Documentation
 
-The most complete doc is available here: https://capgo.app/docs/plugins/downloader/
+The most complete doc is available here: https://capgo.app/docs/plugins/accelerometer/
 
 ## Install
 
 ```bash
-npm install @capgo/capacitor-downloader
+npm install @capgo/capacitor-accelerometer
 npx cap sync
 ```
 
@@ -26,179 +26,130 @@ npx cap sync
 
 <docgen-index>
 
-* [`download(...)`](#download)
-* [`pause(...)`](#pause)
-* [`resume(...)`](#resume)
-* [`stop(...)`](#stop)
-* [`checkStatus(...)`](#checkstatus)
-* [`getFileInfo(...)`](#getfileinfo)
-* [`addListener('downloadProgress', ...)`](#addlistenerdownloadprogress-)
-* [`addListener('downloadCompleted', ...)`](#addlistenerdownloadcompleted-)
-* [`addListener('downloadFailed', ...)`](#addlistenerdownloadfailed-)
+* [`getMeasurement()`](#getmeasurement)
+* [`isAvailable()`](#isavailable)
+* [`startMeasurementUpdates()`](#startmeasurementupdates)
+* [`stopMeasurementUpdates()`](#stopmeasurementupdates)
+* [`checkPermissions()`](#checkpermissions)
+* [`requestPermissions()`](#requestpermissions)
+* [`addListener('measurement', ...)`](#addlistenermeasurement-)
 * [`removeAllListeners()`](#removealllisteners)
-* [`getPluginVersion()`](#getpluginversion)
 * [Interfaces](#interfaces)
+* [Type Aliases](#type-aliases)
 
 </docgen-index>
 
 <docgen-api>
 <!--Update the source file JSDoc comments and rerun docgen to update the docs below-->
 
-Capacitor plugin for downloading files with background support.
-Provides resumable downloads with progress tracking.
+Capacitor plugin contract for working with the device accelerometer.
 
-### download(...)
+### getMeasurement()
 
 ```typescript
-download(options: DownloadOptions) => Promise<DownloadTask>
+getMeasurement() => Promise<GetMeasurementResult>
 ```
 
-Start a new download task.
+Get the most recent accelerometer sample that was recorded by the native layer.
 
-| Param         | Type                                                        | Description              |
-| ------------- | ----------------------------------------------------------- | ------------------------ |
-| **`options`** | <code><a href="#downloadoptions">DownloadOptions</a></code> | - Download configuration |
+**Returns:** <code>Promise&lt;<a href="#measurement">Measurement</a>&gt;</code>
 
-**Returns:** <code>Promise&lt;<a href="#downloadtask">DownloadTask</a>&gt;</code>
+**Since:** 1.0.0
 
 --------------------
 
 
-### pause(...)
+### isAvailable()
 
 ```typescript
-pause(id: string) => Promise<void>
+isAvailable() => Promise<IsAvailableResult>
 ```
 
-Pause an active download.
-Download can be resumed later from the same position.
+Check if the current device includes an accelerometer sensor.
 
-| Param    | Type                | Description                        |
-| -------- | ------------------- | ---------------------------------- |
-| **`id`** | <code>string</code> | - ID of the download task to pause |
+**Returns:** <code>Promise&lt;<a href="#isavailableresult">IsAvailableResult</a>&gt;</code>
+
+**Since:** 1.0.0
 
 --------------------
 
 
-### resume(...)
+### startMeasurementUpdates()
 
 ```typescript
-resume(id: string) => Promise<void>
+startMeasurementUpdates() => Promise<void>
 ```
 
-Resume a paused download.
-Continues from where it was paused.
+Begin streaming accelerometer updates to the JavaScript layer.
 
-| Param    | Type                | Description                         |
-| -------- | ------------------- | ----------------------------------- |
-| **`id`** | <code>string</code> | - ID of the download task to resume |
+Call {@link addListener} with the `measurement` event to receive the updates.
+
+**Since:** 1.0.0
 
 --------------------
 
 
-### stop(...)
+### stopMeasurementUpdates()
 
 ```typescript
-stop(id: string) => Promise<void>
+stopMeasurementUpdates() => Promise<void>
 ```
 
-Stop and cancel a download permanently.
-Downloaded data will be deleted.
+Stop streaming accelerometer updates started via {@link startMeasurementUpdates}.
 
-| Param    | Type                | Description                       |
-| -------- | ------------------- | --------------------------------- |
-| **`id`** | <code>string</code> | - ID of the download task to stop |
+**Since:** 1.0.0
 
 --------------------
 
 
-### checkStatus(...)
+### checkPermissions()
 
 ```typescript
-checkStatus(id: string) => Promise<DownloadTask>
+checkPermissions() => Promise<PermissionStatus>
 ```
 
-Check the current status of a download.
+Return the current permission state for accessing motion data.
 
-| Param    | Type                | Description                        |
-| -------- | ------------------- | ---------------------------------- |
-| **`id`** | <code>string</code> | - ID of the download task to check |
+On platforms without explicit permissions this resolves to `granted`.
 
-**Returns:** <code>Promise&lt;<a href="#downloadtask">DownloadTask</a>&gt;</code>
+**Returns:** <code>Promise&lt;<a href="#permissionstatus">PermissionStatus</a>&gt;</code>
+
+**Since:** 1.0.0
 
 --------------------
 
 
-### getFileInfo(...)
+### requestPermissions()
 
 ```typescript
-getFileInfo(path: string) => Promise<{ size: number; type: string; }>
+requestPermissions() => Promise<PermissionStatus>
 ```
 
-Get information about a downloaded file.
+Request permission to access motion data if supported by the platform.
 
-| Param      | Type                | Description                  |
-| ---------- | ------------------- | ---------------------------- |
-| **`path`** | <code>string</code> | - Local file path to inspect |
+**Returns:** <code>Promise&lt;<a href="#permissionstatus">PermissionStatus</a>&gt;</code>
 
-**Returns:** <code>Promise&lt;{ size: number; type: string; }&gt;</code>
+**Since:** 1.0.0
 
 --------------------
 
 
-### addListener('downloadProgress', ...)
+### addListener('measurement', ...)
 
 ```typescript
-addListener(eventName: 'downloadProgress', listenerFunc: (progress: { id: string; progress: number; }) => void) => Promise<PluginListenerHandle>
+addListener(eventName: 'measurement', listenerFunc: (event: MeasurementEvent) => void) => Promise<PluginListenerHandle>
 ```
 
-Listen for download progress updates.
-Fired periodically as download progresses.
+Listen for measurement updates.
 
-| Param              | Type                                                                  | Description                           |
-| ------------------ | --------------------------------------------------------------------- | ------------------------------------- |
-| **`eventName`**    | <code>'downloadProgress'</code>                                       | - Must be 'downloadProgress'          |
-| **`listenerFunc`** | <code>(progress: { id: string; progress: number; }) =&gt; void</code> | - Callback receiving progress updates |
+| Param              | Type                                                                    | Description                                |
+| ------------------ | ----------------------------------------------------------------------- | ------------------------------------------ |
+| **`eventName`**    | <code>'measurement'</code>                                              | Only the `measurement` event is supported. |
+| **`listenerFunc`** | <code>(event: <a href="#measurement">Measurement</a>) =&gt; void</code> | Callback invoked with each measurement.    |
 
 **Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
 
---------------------
-
-
-### addListener('downloadCompleted', ...)
-
-```typescript
-addListener(eventName: 'downloadCompleted', listenerFunc: (result: { id: string; }) => void) => Promise<PluginListenerHandle>
-```
-
-Listen for download completion.
-Fired when a download finishes successfully.
-
-| Param              | Type                                              | Description                                  |
-| ------------------ | ------------------------------------------------- | -------------------------------------------- |
-| **`eventName`**    | <code>'downloadCompleted'</code>                  | - Must be 'downloadCompleted'                |
-| **`listenerFunc`** | <code>(result: { id: string; }) =&gt; void</code> | - Callback receiving completion notification |
-
-**Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
-
---------------------
-
-
-### addListener('downloadFailed', ...)
-
-```typescript
-addListener(eventName: 'downloadFailed', listenerFunc: (error: { id: string; error: string; }) => void) => Promise<PluginListenerHandle>
-```
-
-Listen for download failures.
-Fired when a download encounters an error.
-
-| Param              | Type                                                            | Description                            |
-| ------------------ | --------------------------------------------------------------- | -------------------------------------- |
-| **`eventName`**    | <code>'downloadFailed'</code>                                   | - Must be 'downloadFailed'             |
-| **`listenerFunc`** | <code>(error: { id: string; error: string; }) =&gt; void</code> | - Callback receiving error information |
-
-**Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
+**Since:** 1.0.0
 
 --------------------
 
@@ -209,21 +160,9 @@ Fired when a download encounters an error.
 removeAllListeners() => Promise<void>
 ```
 
-Remove all event listeners.
-Cleanup method to prevent memory leaks.
+Remove all listeners that have been registered on the plugin.
 
---------------------
-
-
-### getPluginVersion()
-
-```typescript
-getPluginVersion() => Promise<{ version: string; }>
-```
-
-Get the plugin version number.
-
-**Returns:** <code>Promise&lt;{ version: string; }&gt;</code>
+**Since:** 1.0.0
 
 --------------------
 
@@ -231,29 +170,34 @@ Get the plugin version number.
 ### Interfaces
 
 
-#### DownloadTask
+#### Measurement
 
-Represents the current state and progress of a download task.
+The x, y and z axis acceleration values reported by the device motion sensors.
 
-| Prop           | Type                                                                 | Description                             |
-| -------------- | -------------------------------------------------------------------- | --------------------------------------- |
-| **`id`**       | <code>string</code>                                                  | Unique identifier for the download task |
-| **`progress`** | <code>number</code>                                                  | Download progress from 0 to 100         |
-| **`state`**    | <code>'PENDING' \| 'RUNNING' \| 'PAUSED' \| 'DONE' \| 'ERROR'</code> | Current state of the download           |
+| Prop    | Type                | Description                            | Since |
+| ------- | ------------------- | -------------------------------------- | ----- |
+| **`x`** | <code>number</code> | The acceleration on the x-axis in G's. | 1.0.0 |
+| **`y`** | <code>number</code> | The acceleration on the y-axis in G's. | 1.0.0 |
+| **`z`** | <code>number</code> | The acceleration on the z-axis in G's. | 1.0.0 |
 
 
-#### DownloadOptions
+#### IsAvailableResult
 
-Configuration options for starting a download.
+Result returned by {@link CapacitorAccelerometerPlugin.isAvailable}.
 
-| Prop              | Type                                     | Description                                      |
-| ----------------- | ---------------------------------------- | ------------------------------------------------ |
-| **`id`**          | <code>string</code>                      | Unique identifier for this download task         |
-| **`url`**         | <code>string</code>                      | URL of the file to download                      |
-| **`destination`** | <code>string</code>                      | Local file path where the download will be saved |
-| **`headers`**     | <code>{ [key: string]: string; }</code>  | Optional HTTP headers to include in the request  |
-| **`network`**     | <code>'cellular' \| 'wifi-only'</code>   | Network type requirement for download            |
-| **`priority`**    | <code>'high' \| 'normal' \| 'low'</code> | Download priority level                          |
+| Prop              | Type                 | Description                                                 | Since |
+| ----------------- | -------------------- | ----------------------------------------------------------- | ----- |
+| **`isAvailable`** | <code>boolean</code> | Whether an accelerometer sensor is available on the device. | 1.0.0 |
+
+
+#### PermissionStatus
+
+Permission information returned by {@link CapacitorAccelerometerPlugin.checkPermissions}
+and {@link CapacitorAccelerometerPlugin.requestPermissions}.
+
+| Prop                | Type                                                                                  | Description                                                             | Since |
+| ------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----- |
+| **`accelerometer`** | <code><a href="#accelerometerpermissionstate">AccelerometerPermissionState</a></code> | The permission state for accessing motion data on the current platform. | 1.0.0 |
 
 
 #### PluginListenerHandle
@@ -261,6 +205,36 @@ Configuration options for starting a download.
 | Prop         | Type                                      |
 | ------------ | ----------------------------------------- |
 | **`remove`** | <code>() =&gt; Promise&lt;void&gt;</code> |
+
+
+### Type Aliases
+
+
+#### GetMeasurementResult
+
+Alias for the most recent measurement.
+
+<code><a href="#measurement">Measurement</a></code>
+
+
+#### AccelerometerPermissionState
+
+Permission state union including `limited` for platforms that can throttle motion access.
+
+<code><a href="#permissionstate">PermissionState</a> | 'limited'</code>
+
+
+#### PermissionState
+
+<code>'prompt' | 'prompt-with-rationale' | 'granted' | 'denied'</code>
+
+
+#### MeasurementEvent
+
+Event payload emitted when {@link CapacitorAccelerometerPlugin.startMeasurementUpdates}
+is active.
+
+<code><a href="#measurement">Measurement</a></code>
 
 </docgen-api>
 

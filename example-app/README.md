@@ -1,15 +1,12 @@
-# Example App for `@capgo/capacitor-downloader`
+# Example App for `@capgo/capacitor-accelerometer`
 
-This Vite project links directly to the local plugin source so you can exercise the native APIs while developing.
+This Vite project links directly to the local plugin source so you can exercise the accelerometer APIs while developing.
 
-## Actions in this playground
+## Playground actions
 
-- **Start download** – Starts a background download (native platforms).
-- **Check status** – Queries progress for an existing download id.
-- **Pause download** – Pauses a running download (Android).
-- **Resume download** – Resumes a paused download (Android).
-- **Stop download** – Stops a download task.
-- **Get file info** – Reads metadata for a downloaded file.
+- **Start updates** – Begins streaming accelerometer measurements so you can confirm native wiring.
+- **Stop updates** – Stops the continuous stream.
+- **Read once** – Requests a single measurement snapshot without subscribing to events.
 
 ## Getting started
 

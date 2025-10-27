@@ -3,19 +3,35 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>@capgo/capacitor-downloader Example</title>
+    <title>@capgo/capacitor-accelerometer Example</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <main class="container">
-      <h1>@capgo/capacitor-downloader Example</h1>
-      <p class="lead">Run native plugin APIs with the source linked locally.</p>
-      <label for="action-select">Available actions</label>
-      <select id="action-select"></select>
-      <div id="action-description" class="action-description"></div>
-      <div id="action-form" class="form-grid"></div>
-      <button id="run-action">Run action</button>
-      <pre id="plugin-output">Select an action to begin.</pre>
+      <h1>@capgo/capacitor-accelerometer Example</h1>
+      <p class="lead">
+        Inspect accelerometer readings from the native plugin. Start continuous updates or request a single snapshot to
+        verify your wiring.
+      </p>
+
+      <div class="status-grid">
+        <div class="status-card">
+          <h2>Availability</h2>
+          <p id="availability">Checking...</p>
+        </div>
+        <div class="status-card">
+          <h2>Permission</h2>
+          <p id="permission">Checking...</p>
+        </div>
+      </div>
+
+      <div class="measurement-display" id="measurement">No data yet.</div>
+
+      <div class="actions">
+        <button id="start-updates">Start Updates</button>
+        <button id="stop-updates" class="secondary" disabled>Stop Updates</button>
+        <button id="read-once" class="secondary">Read Once</button>
+      </div>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>

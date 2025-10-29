@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [7.2.3](https://github.com/Cap-go/capacitor-downloader/compare/7.2.2...7.2.3) (2025-10-29)
+
+
+### Bug Fixes
+
+* CI/CD config ([04f9533](https://github.com/Cap-go/capacitor-downloader/commit/04f95338d1f1d666bf7e9ab96dbc98c7070c0ce7))
+* update AI model in build workflow ([16d00a4](https://github.com/Cap-go/capacitor-downloader/commit/16d00a4d699b1a68be16c99991831ef34b28a386))
+* update github action ([3322ecf](https://github.com/Cap-go/capacitor-downloader/commit/3322ecfb0ec664a746bdcdb06a244b267b3caeae))
+
 ## [7.2.2](https://github.com/Cap-go/capacitor-downloader/compare/7.2.1...7.2.2) (2025-10-27)
 
 

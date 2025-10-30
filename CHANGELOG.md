@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [7.2.4](https://github.com/Cap-go/capacitor-downloader/compare/7.2.3...7.2.4) (2025-10-30)
+
+
+### Bug Fixes
+
+* pluginVersion lint issue ([57c735a](https://github.com/Cap-go/capacitor-downloader/commit/57c735a70ff380efa442ac902b5a0b4069578419))
+
 ## [7.2.3](https://github.com/Cap-go/capacitor-downloader/compare/7.2.2...7.2.3) (2025-10-29)
 
 

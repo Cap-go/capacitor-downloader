@@ -8,7 +8,7 @@ import Capacitor
 
 @objc(CapacitorDownloaderPlugin)
 public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
-    private let PLUGIN_VERSION: String = "7.2.3"
+    private let pluginVersion: String = "7.2.3"
     public let identifier = "CapacitorDownloaderPlugin"
     public let jsName = "CapacitorDownloader"
     public let pluginMethods: [CAPPluginMethod] = [
@@ -177,7 +177,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
     }
 
     @objc func getPluginVersion(_ call: CAPPluginCall) {
-        call.resolve(["version": self.PLUGIN_VERSION])
+        call.resolve(["version": self.pluginVersion])
     }
 
 }

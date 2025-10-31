@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [7.2.5](https://github.com/Cap-go/capacitor-downloader/compare/7.2.4...7.2.5) (2025-10-31)
+
+
+### Bug Fixes
+
+* remove WIP status ([9a38d03](https://github.com/Cap-go/capacitor-downloader/commit/9a38d03aa677dcfec7dc650387300a765ec2a2e9))
+
 ## [7.2.4](https://github.com/Cap-go/capacitor-downloader/compare/7.2.3...7.2.4) (2025-10-30)
 
 

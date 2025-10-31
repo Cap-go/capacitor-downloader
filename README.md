@@ -9,7 +9,20 @@
 
 Download file in background or foreground
 
-WIP: the plugin is not yet ready for production
+## Why Capacitor Downloader?
+
+A reliable **native file downloader** built for Capacitor apps that continues downloads even when your app is backgrounded or closed:
+
+- **Background downloads** - Downloads continue even when app is minimized, backgrounded, or closed (main advantage)
+- **Progress tracking** - Real-time progress updates during downloads
+- **Network control** - Choose between WiFi-only or cellular network downloads
+- **Custom headers** - Add authentication tokens and custom HTTP headers
+- **Resumable downloads** - Pause and resume downloads (platform dependent)
+- **Event listeners** - Monitor download progress, completion, and failures
+- **Large file support** - Handle multi-gigabyte files without memory issues
+- **Free and open source** - No paid services required
+
+Perfect for downloading large media files, offline content, app updates, and any scenario where downloads need to survive app lifecycle events.
 
 ## Documentation
 

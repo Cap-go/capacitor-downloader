@@ -22,7 +22,7 @@ import java.util.Map;
 @CapacitorPlugin(name = "CapacitorDownloader")
 public class CapacitorDownloaderPlugin extends Plugin {
 
-    private final String pluginVersion = "7.2.7";
+    private final String pluginVersion = "7.2.8";
 
     private DownloadManager downloadManager;
     private final Map<String, Long> downloads = new HashMap<>();

@@ -11,7 +11,7 @@ const actions = [
               id: 'start-download',
               label: 'Start download',
               description: 'Starts a background download (native platforms).',
-              inputs: [{ name: 'id', label: 'Download id', type: 'text', value: 'example-download' }, { name: 'url', label: 'File URL', type: 'text', value: 'https://ipv4.download.thinkbroadband.com/5MB.zip' }, { name: 'destination', label: 'Destination path', type: 'text', value: 'downloads/sample.zip' }],
+              inputs: [{ name: 'id', label: 'Download id', type: 'text', value: 'example-download' }, { name: 'url', label: 'File URL', type: 'text', value: 'https://ipv4.download.thinkbroadband.com/200MB.zip' }, { name: 'destination', label: 'Destination path', type: 'text', value: 'downloads/sample.zip' }],
               run: async (values) => {
                 const id = values.id || 'example-download';
 const url = values.url || '';
@@ -70,7 +70,7 @@ return `Resume requested for ${id}.`;
               id: 'stop-download',
               label: 'Stop download',
               description: 'Stops a download task.',
-              inputs: [{ name: 'id', label: 'Download id', type: 'text', placeholder: 'Reuse last id automatically' }],
+              inputs: [{ name: 'id', label: 'Download id', type: 'text', placeholder: 'Reuse last id automatically', value: 'example-download' }],
               run: async (values) => {
                 const id = values.id || state.lastDownloadId;
 if (!id) {

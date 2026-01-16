@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import androidx.core.content.ContextCompat;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Handler;
@@ -46,7 +47,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 }
             }
         };
-        getContext().registerReceiver(downloadReceiver, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+        ContextCompat.registerReceiver(
+            getContext(),
+            downloadReceiver,
+            new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+            ContextCompat.RECEIVER_EXPORTED
+        );
     }
 
     private String getDownloadIdByValue(long value) {

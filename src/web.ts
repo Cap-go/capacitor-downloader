@@ -7,24 +7,24 @@ export class CapacitorDownloaderWeb extends WebPlugin implements CapacitorDownlo
     console.log('DOWNLOAD', options);
     throw new Error('Method not implemented.');
   }
-  async pause(id: string): Promise<void> {
-    console.log('PAUSE', id);
+  async pause(options: { id: string }): Promise<void> {
+    console.log('PAUSE', options.id);
     throw new Error('Method not implemented.');
   }
-  async resume(id: string): Promise<void> {
-    console.log('RESUME', id);
+  async resume(options: { id: string }): Promise<void> {
+    console.log('RESUME', options.id);
     throw new Error('Method not implemented.');
   }
-  async stop(id: string): Promise<void> {
-    console.log('STOP', id);
+  async stop(options: { id: string }): Promise<void> {
+    console.log('STOP', options.id);
     throw new Error('Method not implemented.');
   }
-  async checkStatus(id: string): Promise<DownloadTask> {
-    console.log('CHECK STATUS', id);
+  async checkStatus(options: { id: string }): Promise<DownloadTask> {
+    console.log('CHECK STATUS', options.id);
     throw new Error('Method not implemented.');
   }
-  async getFileInfo(path: string): Promise<{ size: number; type: string }> {
-    console.log('GET FILE INFO', path);
+  async getFileInfo(options: { path: string }): Promise<{ size: number; type: string }> {
+    console.log('GET FILE INFO', options.path);
     throw new Error('Method not implemented.');
   }
 

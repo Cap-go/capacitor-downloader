@@ -80,15 +80,15 @@ Start a new download task.
 ### pause(...)
 
 ```typescript
-pause(id: string) => Promise<void>
+pause(options: { id: string; }) => Promise<void>
 ```
 
 Pause an active download.
 Download can be resumed later from the same position.
 
-| Param    | Type                | Description                        |
-| -------- | ------------------- | ---------------------------------- |
-| **`id`** | <code>string</code> | - ID of the download task to pause |
+| Param         | Type                         | Description                               |
+| ------------- | ---------------------------- | ----------------------------------------- |
+| **`options`** | <code>{ id: string; }</code> | - Options containing the download task ID |
 
 --------------------
 
@@ -96,15 +96,15 @@ Download can be resumed later from the same position.
 ### resume(...)
 
 ```typescript
-resume(id: string) => Promise<void>
+resume(options: { id: string; }) => Promise<void>
 ```
 
 Resume a paused download.
 Continues from where it was paused.
 
-| Param    | Type                | Description                         |
-| -------- | ------------------- | ----------------------------------- |
-| **`id`** | <code>string</code> | - ID of the download task to resume |
+| Param         | Type                         | Description                               |
+| ------------- | ---------------------------- | ----------------------------------------- |
+| **`options`** | <code>{ id: string; }</code> | - Options containing the download task ID |
 
 --------------------
 
@@ -112,15 +112,15 @@ Continues from where it was paused.
 ### stop(...)
 
 ```typescript
-stop(id: string) => Promise<void>
+stop(options: { id: string; }) => Promise<void>
 ```
 
 Stop and cancel a download permanently.
 Downloaded data will be deleted.
 
-| Param    | Type                | Description                       |
-| -------- | ------------------- | --------------------------------- |
-| **`id`** | <code>string</code> | - ID of the download task to stop |
+| Param         | Type                         | Description                               |
+| ------------- | ---------------------------- | ----------------------------------------- |
+| **`options`** | <code>{ id: string; }</code> | - Options containing the download task ID |
 
 --------------------
 
@@ -128,14 +128,14 @@ Downloaded data will be deleted.
 ### checkStatus(...)
 
 ```typescript
-checkStatus(id: string) => Promise<DownloadTask>
+checkStatus(options: { id: string; }) => Promise<DownloadTask>
 ```
 
 Check the current status of a download.
 
-| Param    | Type                | Description                        |
-| -------- | ------------------- | ---------------------------------- |
-| **`id`** | <code>string</code> | - ID of the download task to check |
+| Param         | Type                         | Description                               |
+| ------------- | ---------------------------- | ----------------------------------------- |
+| **`options`** | <code>{ id: string; }</code> | - Options containing the download task ID |
 
 **Returns:** <code>Promise&lt;<a href="#downloadtask">DownloadTask</a>&gt;</code>
 
@@ -145,14 +145,14 @@ Check the current status of a download.
 ### getFileInfo(...)
 
 ```typescript
-getFileInfo(path: string) => Promise<{ size: number; type: string; }>
+getFileInfo(options: { path: string; }) => Promise<{ size: number; type: string; }>
 ```
 
 Get information about a downloaded file.
 
-| Param      | Type                | Description                  |
-| ---------- | ------------------- | ---------------------------- |
-| **`path`** | <code>string</code> | - Local file path to inspect |
+| Param         | Type                           | Description                        |
+| ------------- | ------------------------------ | ---------------------------------- |
+| **`options`** | <code>{ path: string; }</code> | - Options containing the file path |
 
 **Returns:** <code>Promise&lt;{ size: number; type: string; }&gt;</code>
 

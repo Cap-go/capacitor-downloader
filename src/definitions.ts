@@ -55,44 +55,44 @@ export interface CapacitorDownloaderPlugin {
    * Pause an active download.
    * Download can be resumed later from the same position.
    *
-   * @param id - ID of the download task to pause
+   * @param options - Options containing the download task ID
    * @returns Promise that resolves when paused
    */
-  pause(id: string): Promise<void>;
+  pause(options: { id: string }): Promise<void>;
 
   /**
    * Resume a paused download.
    * Continues from where it was paused.
    *
-   * @param id - ID of the download task to resume
+   * @param options - Options containing the download task ID
    * @returns Promise that resolves when resumed
    */
-  resume(id: string): Promise<void>;
+  resume(options: { id: string }): Promise<void>;
 
   /**
    * Stop and cancel a download permanently.
    * Downloaded data will be deleted.
    *
-   * @param id - ID of the download task to stop
+   * @param options - Options containing the download task ID
    * @returns Promise that resolves when stopped
    */
-  stop(id: string): Promise<void>;
+  stop(options: { id: string }): Promise<void>;
 
   /**
    * Check the current status of a download.
    *
-   * @param id - ID of the download task to check
+   * @param options - Options containing the download task ID
    * @returns Promise with current download task status
    */
-  checkStatus(id: string): Promise<DownloadTask>;
+  checkStatus(options: { id: string }): Promise<DownloadTask>;
 
   /**
    * Get information about a downloaded file.
    *
-   * @param path - Local file path to inspect
+   * @param options - Options containing the file path
    * @returns Promise with file size and MIME type
    */
-  getFileInfo(path: string): Promise<{ size: number; type: string }>;
+  getFileInfo(options: { path: string }): Promise<{ size: number; type: string }>;
 
   /**
    * Listen for download progress updates.

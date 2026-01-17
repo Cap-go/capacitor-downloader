@@ -34,7 +34,7 @@ return task;
 if (!id) {
   throw new Error('Provide a download id first.');
 }
-const status = await plugin.checkStatus(id);
+const status = await plugin.checkStatus({ id });
 return status;
               },
             },
@@ -48,7 +48,7 @@ return status;
 if (!id) {
   throw new Error('Provide a download id first.');
 }
-await plugin.pause(id);
+await plugin.pause({ id });
 return `Pause requested for ${id}.`;
               },
             },
@@ -62,7 +62,7 @@ return `Pause requested for ${id}.`;
 if (!id) {
   throw new Error('Provide a download id first.');
 }
-await plugin.resume(id);
+await plugin.resume({ id });
 return `Resume requested for ${id}.`;
               },
             },
@@ -76,7 +76,7 @@ return `Resume requested for ${id}.`;
 if (!id) {
   throw new Error('Provide a download id first.');
 }
-await plugin.stop(id);
+await plugin.stop({ id });
 return `Stop requested for ${id}.`;
               },
             },
@@ -89,7 +89,7 @@ return `Stop requested for ${id}.`;
                 if (!values.path) {
   throw new Error('Provide a file path.');
 }
-const info = await plugin.getFileInfo(values.path);
+const info = await plugin.getFileInfo({ path: values.path });
 return info;
               },
             }

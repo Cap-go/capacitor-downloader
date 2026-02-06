@@ -8,7 +8,7 @@ import Capacitor
 
 @objc(CapacitorDownloaderPlugin)
 public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
-    private let pluginVersion: String = "8.1.7"
+    private let pluginVersion: String = "8.1.8"
     public let identifier = "CapacitorDownloaderPlugin"
     public let jsName = "CapacitorDownloader"
     public let pluginMethods: [CAPPluginMethod] = [

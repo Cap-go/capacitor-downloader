@@ -126,7 +126,13 @@ public class CapacitorDownloaderPlugin extends Plugin {
     }
 
     private boolean checkDownloadStatus(String id) {
-        DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloads.get(id));
+        Long downloadId = downloads.get(id);
+
+        if (downloadId == null) {
+            return false; // Download was removed, stop polling
+        }
+
+        DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
         try (Cursor cursor = downloadManager.query(query)) {
             if (cursor.moveToFirst()) {
                 int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
@@ -152,6 +158,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     notifyListeners("downloadFailed", failedData);
                     return false; // Stop checking progress
                 }
+            } else {
+                return false; // Download no longer in DownloadManager, stop polling
             }
         }
         return true; // Continue checking progress

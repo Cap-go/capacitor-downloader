@@ -1,3 +1,5 @@
+import { CapacitorUpdater } from '@capgo/capacitor-updater';
+import { Capacitor } from '@capacitor/core';
 
 import './style.css';
 import { CapacitorDownloader } from '@capgo/capacitor-downloader';
@@ -7,92 +9,142 @@ const state = {};
 state.lastDownloadId = undefined;
 
 const actions = [
-{
-              id: 'start-download',
-              label: 'Start download',
-              description: 'Starts a background download (native platforms).',
-              inputs: [{ name: 'id', label: 'Download id', type: 'text', value: 'example-download' }, { name: 'url', label: 'File URL', type: 'text', value: 'https://ipv4.download.thinkbroadband.com/200MB.zip' }, { name: 'destination', label: 'Destination path', type: 'text', value: 'downloads/sample.zip' }],
-              run: async (values) => {
-                const id = values.id || 'example-download';
-const url = values.url || '';
-if (!url) {
-  throw new Error('Provide a URL to download.');
-}
-const destination = values.destination || 'downloads/sample.zip';
-const task = await plugin.download({ id, url, destination });
-state.lastDownloadId = task.id;
-return task;
-              },
-            },
-{
-              id: 'check-status',
-              label: 'Check status',
-              description: 'Queries progress for an existing download id.',
-              inputs: [{ name: 'id', label: 'Download id', type: 'text', placeholder: 'Reuse last id automatically' }],
-              run: async (values) => {
-                const id = values.id || state.lastDownloadId;
-if (!id) {
-  throw new Error('Provide a download id first.');
-}
-const status = await plugin.checkStatus({ id });
-return status;
-              },
-            },
-{
-              id: 'pause-download',
-              label: 'Pause download',
-              description: 'Pauses a running download (Android).',
-              inputs: [{ name: 'id', label: 'Download id', type: 'text', placeholder: 'Reuse last id automatically' }],
-              run: async (values) => {
-                const id = values.id || state.lastDownloadId;
-if (!id) {
-  throw new Error('Provide a download id first.');
-}
-await plugin.pause({ id });
-return `Pause requested for ${id}.`;
-              },
-            },
-{
-              id: 'resume-download',
-              label: 'Resume download',
-              description: 'Resumes a paused download (Android).',
-              inputs: [{ name: 'id', label: 'Download id', type: 'text', placeholder: 'Reuse last id automatically' }],
-              run: async (values) => {
-                const id = values.id || state.lastDownloadId;
-if (!id) {
-  throw new Error('Provide a download id first.');
-}
-await plugin.resume({ id });
-return `Resume requested for ${id}.`;
-              },
-            },
-{
-              id: 'stop-download',
-              label: 'Stop download',
-              description: 'Stops a download task.',
-              inputs: [{ name: 'id', label: 'Download id', type: 'text', placeholder: 'Reuse last id automatically', value: 'example-download' }],
-              run: async (values) => {
-                const id = values.id || state.lastDownloadId;
-if (!id) {
-  throw new Error('Provide a download id first.');
-}
-await plugin.stop({ id });
-return `Stop requested for ${id}.`;
-              },
-            },
-{
-              id: 'get-file-info',
-              label: 'Get file info',
-              description: 'Reads metadata for a downloaded file.',
-              inputs: [{ name: 'path', label: 'Absolute file path', type: 'text', placeholder: '/storage/emulated/0/Download/sample.zip' }],
-              run: async (values) => {
-                if (!values.path) {
-  throw new Error('Provide a file path.');
-}
-const info = await plugin.getFileInfo({ path: values.path });
-return info;
-              },
-            }
+  {
+    id: 'start-download',
+    label: 'Start download',
+    description: 'Starts a background download (native platforms).',
+    inputs: [
+      { name: 'id', label: 'Download id', type: 'text', value: 'example-download' },
+      {
+        name: 'url',
+        label: 'File URL',
+        type: 'text',
+        value: 'https://ipv4.download.thinkbroadband.com/200MB.zip',
+      },
+      {
+        name: 'destination',
+        label: 'Destination path',
+        type: 'text',
+        value: 'downloads/sample.zip',
+      },
+    ],
+    run: async (values) => {
+      const id = values.id || 'example-download';
+      const url = values.url || '';
+      if (!url) {
+        throw new Error('Provide a URL to download.');
+      }
+      const destination = values.destination || 'downloads/sample.zip';
+      const task = await plugin.download({ id, url, destination });
+      state.lastDownloadId = task.id;
+      return task;
+    },
+  },
+  {
+    id: 'check-status',
+    label: 'Check status',
+    description: 'Queries progress for an existing download id.',
+    inputs: [
+      {
+        name: 'id',
+        label: 'Download id',
+        type: 'text',
+        placeholder: 'Reuse last id automatically',
+      },
+    ],
+    run: async (values) => {
+      const id = values.id || state.lastDownloadId;
+      if (!id) {
+        throw new Error('Provide a download id first.');
+      }
+      const status = await plugin.checkStatus({ id });
+      return status;
+    },
+  },
+  {
+    id: 'pause-download',
+    label: 'Pause download',
+    description: 'Pauses a running download (Android).',
+    inputs: [
+      {
+        name: 'id',
+        label: 'Download id',
+        type: 'text',
+        placeholder: 'Reuse last id automatically',
+      },
+    ],
+    run: async (values) => {
+      const id = values.id || state.lastDownloadId;
+      if (!id) {
+        throw new Error('Provide a download id first.');
+      }
+      await plugin.pause({ id });
+      return `Pause requested for ${id}.`;
+    },
+  },
+  {
+    id: 'resume-download',
+    label: 'Resume download',
+    description: 'Resumes a paused download (Android).',
+    inputs: [
+      {
+        name: 'id',
+        label: 'Download id',
+        type: 'text',
+        placeholder: 'Reuse last id automatically',
+      },
+    ],
+    run: async (values) => {
+      const id = values.id || state.lastDownloadId;
+      if (!id) {
+        throw new Error('Provide a download id first.');
+      }
+      await plugin.resume({ id });
+      return `Resume requested for ${id}.`;
+    },
+  },
+  {
+    id: 'stop-download',
+    label: 'Stop download',
+    description: 'Stops a download task.',
+    inputs: [
+      {
+        name: 'id',
+        label: 'Download id',
+        type: 'text',
+        placeholder: 'Reuse last id automatically',
+        value: 'example-download',
+      },
+    ],
+    run: async (values) => {
+      const id = values.id || state.lastDownloadId;
+      if (!id) {
+        throw new Error('Provide a download id first.');
+      }
+      await plugin.stop({ id });
+      return `Stop requested for ${id}.`;
+    },
+  },
+  {
+    id: 'get-file-info',
+    label: 'Get file info',
+    description: 'Reads metadata for a downloaded file.',
+    inputs: [
+      {
+        name: 'path',
+        label: 'Absolute file path',
+        type: 'text',
+        placeholder: '/storage/emulated/0/Download/sample.zip',
+      },
+    ],
+    run: async (values) => {
+      if (!values.path) {
+        throw new Error('Provide a file path.');
+      }
+      const info = await plugin.getFileInfo({ path: values.path });
+      return info;
+    },
+  },
 ];
 
 const actionSelect = document.getElementById('action-select');
@@ -246,3 +298,9 @@ runButton.addEventListener('click', async () => {
 });
 
 populateActions();
+
+if (Capacitor.isNativePlatform()) {
+  CapacitorUpdater.notifyAppReady().catch((error) => {
+    console.error('Capgo notifyAppReady failed', error);
+  });
+}

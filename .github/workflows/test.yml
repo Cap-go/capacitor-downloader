@@ -5,7 +5,7 @@ on:
     branches:
       - renovate/**
   pull_request:
-    branches: [ main ]
+    branches: [ main, lts-v7 ]
   workflow_call:  # Allow this workflow to be called by other workflows
 
 jobs:

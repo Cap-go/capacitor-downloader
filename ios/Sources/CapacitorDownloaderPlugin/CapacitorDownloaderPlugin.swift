@@ -48,6 +48,9 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func idForTask(_ task: URLSessionDownloadTask) -> String? {
+        if let id = task.taskDescription, !id.isEmpty {
+            return id
+        }
         tasksLock.lock()
         defer { tasksLock.unlock() }
         return tasks.first(where: { $0.value == task })?.key
@@ -70,6 +73,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         let task = session.downloadTask(with: request)
+        task.taskDescription = id
         setTask(task, for: id)
         task.resume()
 

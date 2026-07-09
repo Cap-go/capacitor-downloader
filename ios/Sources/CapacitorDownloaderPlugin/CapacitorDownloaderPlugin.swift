@@ -22,11 +22,36 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     ]
 
     private var tasks: [String: URLSessionDownloadTask] = [:]
+    private let tasksLock = NSLock()
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.background(withIdentifier: "CapacitorDownloader")
         config.sessionSendsLaunchEvents = true
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }()
+
+    private func setTask(_ task: URLSessionDownloadTask, for id: String) {
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
+        tasks[id] = task
+    }
+
+    private func getTask(for id: String) -> URLSessionDownloadTask? {
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
+        return tasks[id]
+    }
+
+    private func removeTask(for id: String) {
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
+        tasks.removeValue(forKey: id)
+    }
+
+    private func idForTask(_ task: URLSessionDownloadTask) -> String? {
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
+        return tasks.first(where: { $0.value == task })?.key
+    }
 
     @objc func download(_ call: CAPPluginCall) {
         guard let id = call.getString("id"),
@@ -45,7 +70,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         let task = session.downloadTask(with: request)
-        tasks[id] = task
+        setTask(task, for: id)
         task.resume()
 
         call.resolve([
@@ -57,7 +82,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func pause(_ call: CAPPluginCall) {
         guard let id = call.getString("id"),
-              let task = tasks[id] else {
+              let task = getTask(for: id) else {
             call.reject("Task not found")
             return
         }
@@ -68,7 +93,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func resume(_ call: CAPPluginCall) {
         guard let id = call.getString("id"),
-              let task = tasks[id] else {
+              let task = getTask(for: id) else {
             call.reject("Task not found")
             return
         }
@@ -79,19 +104,19 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func stop(_ call: CAPPluginCall) {
         guard let id = call.getString("id"),
-              let task = tasks[id] else {
+              let task = getTask(for: id) else {
             call.reject("Task not found")
             return
         }
 
         task.cancel()
-        tasks.removeValue(forKey: id)
+        removeTask(for: id)
         call.resolve()
     }
 
     @objc func checkStatus(_ call: CAPPluginCall) {
         guard let id = call.getString("id"),
-              let task = tasks[id] else {
+              let task = getTask(for: id) else {
             call.reject("Task not found")
             return
         }
@@ -141,7 +166,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
 extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
     public func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        guard let id = tasks.first(where: { $0.value == downloadTask })?.key,
+        guard let id = idForTask(downloadTask),
               let destinationURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent(id) else {
             return
         }
@@ -156,11 +181,11 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let downloadTask = task as? URLSessionDownloadTask,
-              let id = tasks.first(where: { $0.value == downloadTask })?.key else {
+              let id = idForTask(downloadTask) else {
             return
         }
 
-        tasks.removeValue(forKey: id)
+        removeTask(for: id)
 
         if let error = error {
             notifyListeners("downloadFailed", data: ["id": id, "error": error.localizedDescription])
@@ -168,7 +193,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
     }
 
     public func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        guard let id = tasks.first(where: { $0.value == downloadTask })?.key else {
+        guard let id = idForTask(downloadTask) else {
             return
         }
 

@@ -76,7 +76,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setNotificationVisibility(DownloadNotificationVisibility.resolve(call.getString("notification")))
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(true);
 

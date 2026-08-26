@@ -56,14 +56,37 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         return tasks.first(where: { $0.value == task })?.key
     }
 
+    private func documentsDirectoryURL() -> URL? {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+    }
+
+    private func destinationURL(for id: String, storedDestination: String?) -> URL? {
+        guard let documentsDirectory = documentsDirectoryURL() else {
+            return nil
+        }
+
+        return DownloadDestinationResolver.resolveDestinationURL(
+            destination: storedDestination,
+            id: id,
+            documentsDirectory: documentsDirectory
+        )
+    }
+
+    private func prepareDestinationDirectory(for destinationURL: URL) throws {
+        let directoryURL = destinationURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+    }
+
     @objc func download(_ call: CAPPluginCall) {
         guard let id = call.getString("id"),
               let urlString = call.getString("url"),
-              let destination = call.getString("destination"),
               let url = URL(string: urlString) else {
             call.reject("Invalid parameters")
             return
         }
+
+        let destination = call.getString("destination") ?? ""
+        DownloadDestinationStore.shared.setDestination(destination, for: id)
 
         var request = URLRequest(url: url)
         if let headers = call.getObject("headers") as? [String: String] {
@@ -115,6 +138,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
         task.cancel()
         removeTask(for: id)
+        DownloadDestinationStore.shared.removeDestination(for: id)
         call.resolve()
     }
 
@@ -166,16 +190,39 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             "type": type
         ])
     }
+
+    @objc func getPluginVersion(_ call: CAPPluginCall) {
+        call.resolve(["version": self.pluginVersion])
+    }
 }
 
 extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
     public func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        guard let id = idForTask(downloadTask),
-              let destinationURL = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent(id) else {
+        guard let id = idForTask(downloadTask) else {
+            return
+        }
+
+        let storedDestination = DownloadDestinationStore.shared.takeDestination(for: id)
+        guard let destinationURL = destinationURL(for: id, storedDestination: storedDestination) else {
+            notifyListeners("downloadFailed", data: ["id": id, "error": "Unable to resolve destination"])
+            return
+        }
+
+        if let httpResponse = downloadTask.response as? HTTPURLResponse,
+           !DownloadHTTPValidator.isSuccessfulStatusCode(httpResponse.statusCode) {
+            try? FileManager.default.removeItem(at: location)
+            notifyListeners(
+                "downloadFailed",
+                data: ["id": id, "error": "HTTP \(httpResponse.statusCode)"]
+            )
             return
         }
 
         do {
+            try prepareDestinationDirectory(for: destinationURL)
+            if FileManager.default.fileExists(atPath: destinationURL.path) {
+                try FileManager.default.removeItem(at: destinationURL)
+            }
             try FileManager.default.moveItem(at: location, to: destinationURL)
             notifyListeners("downloadCompleted", data: ["id": id])
         } catch {
@@ -191,22 +238,36 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
         removeTask(for: id)
 
+        if error != nil {
+            _ = DownloadDestinationStore.shared.takeDestination(for: id)
+        }
+
         if let error = error {
             notifyListeners("downloadFailed", data: ["id": id, "error": error.localizedDescription])
         }
     }
 
-    public func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
+    public func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
         guard let id = idForTask(downloadTask) else {
             return
         }
 
-        let progress = Float(totalBytesWritten) / Float(totalBytesExpectedToWrite)
-        notifyListeners("downloadProgress", data: ["id": id, "progress": progress])
+        let bytesTotal = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : 0
+        let progress = bytesTotal > 0 ? Float(totalBytesWritten) / Float(bytesTotal) : 0
+        notifyListeners(
+            "downloadProgress",
+            data: [
+                "id": id,
+                "progress": progress,
+                "bytesWritten": totalBytesWritten,
+                "bytesTotal": bytesTotal
+            ]
+        )
     }
-
-    @objc func getPluginVersion(_ call: CAPPluginCall) {
-        call.resolve(["version": self.pluginVersion])
-    }
-
 }

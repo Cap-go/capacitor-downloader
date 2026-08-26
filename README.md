@@ -187,16 +187,16 @@ Get information about a downloaded file.
 ### addListener('downloadProgress', ...)
 
 ```typescript
-addListener(eventName: 'downloadProgress', listenerFunc: (progress: { id: string; progress: number; }) => void) => Promise<PluginListenerHandle>
+addListener(eventName: 'downloadProgress', listenerFunc: (progress: { id: string; progress: number; bytesWritten?: number | undefined; bytesTotal?: number | undefined; }) => void) => Promise<PluginListenerHandle>
 ```
 
 Listen for download progress updates.
 Fired periodically as download progresses.
 
-| Param              | Type                                                                  | Description                           |
-| ------------------ | --------------------------------------------------------------------- | ------------------------------------- |
-| **`eventName`**    | <code>'downloadProgress'</code>                                       | - Must be 'downloadProgress'          |
-| **`listenerFunc`** | <code>(progress: { id: string; progress: number; }) =&gt; void</code> | - Callback receiving progress updates |
+| Param              | Type                                                                                                              | Description                           |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| **`eventName`**    | <code>'downloadProgress'</code>                                                                                   | - Must be 'downloadProgress'          |
+| **`listenerFunc`** | <code>(progress: { id: string; progress: number; bytesWritten?: number; bytesTotal?: number; }) =&gt; void</code> | - Callback receiving progress updates |
 
 **Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
 

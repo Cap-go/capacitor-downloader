@@ -110,7 +110,14 @@ export interface CapacitorDownloaderPlugin {
    */
   addListener(
     eventName: 'downloadProgress',
-    listenerFunc: (progress: { id: string; progress: number }) => void,
+    listenerFunc: (progress: {
+      id: string;
+      progress: number;
+      /** Bytes written so far */
+      bytesWritten?: number;
+      /** Total bytes expected, or 0 when the server did not report a length */
+      bytesTotal?: number;
+    }) => void,
   ): Promise<PluginListenerHandle>;
 
   /**

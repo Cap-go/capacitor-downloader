@@ -58,7 +58,7 @@ export interface CapacitorDownloaderPlugin {
    *   id: 'my-download',
    *   url: 'https://example.com/file.pdf',
    *   destination: 'downloads/file.pdf',
-   *   notification: 'progress', // Android: hide notification after download completes
+   *   notification: 'hidden', // Android: no system notification; use downloadProgress events
    * });
    * ```
    */

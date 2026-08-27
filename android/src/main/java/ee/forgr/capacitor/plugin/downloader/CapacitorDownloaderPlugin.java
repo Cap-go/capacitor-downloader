@@ -23,7 +23,7 @@ import java.util.Map;
 @CapacitorPlugin(name = "CapacitorDownloader")
 public class CapacitorDownloaderPlugin extends Plugin {
 
-    private final String pluginVersion = "8.1.32";
+    private final String pluginVersion = "8.2.0";
 
     private DownloadManager downloadManager;
     private final Map<String, Long> downloads = new HashMap<>();
@@ -76,7 +76,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
-            .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            .setNotificationVisibility(DownloadNotificationVisibility.resolve(call.getString("notification")))
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(true);
 
@@ -100,7 +100,17 @@ public class CapacitorDownloaderPlugin extends Plugin {
             request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_MOBILE | DownloadManager.Request.NETWORK_WIFI);
         }
 
-        long downloadId = downloadManager.enqueue(request);
+        long downloadId;
+        try {
+            downloadId = downloadManager.enqueue(request);
+        } catch (SecurityException e) {
+            if ("hidden".equals(call.getString("notification"))) {
+                call.reject("Hidden downloads require android.permission.DOWNLOAD_WITHOUT_NOTIFICATION in the app manifest", e);
+            } else {
+                call.reject("Download could not be enqueued due to missing permission", e);
+            }
+            return;
+        }
         downloads.put(id, downloadId);
 
         JSObject result = new JSObject();

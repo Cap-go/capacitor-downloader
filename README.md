@@ -284,14 +284,15 @@ Represents the current state and progress of a download task.
 
 Configuration options for starting a download.
 
-| Prop              | Type                                     | Description                                      |
-| ----------------- | ---------------------------------------- | ------------------------------------------------ |
-| **`id`**          | <code>string</code>                      | Unique identifier for this download task         |
-| **`url`**         | <code>string</code>                      | URL of the file to download                      |
-| **`destination`** | <code>string</code>                      | Local file path where the download will be saved |
-| **`headers`**     | <code>{ [key: string]: string; }</code>  | Optional HTTP headers to include in the request  |
-| **`network`**     | <code>'cellular' \| 'wifi-only'</code>   | Network type requirement for download            |
-| **`priority`**    | <code>'high' \| 'normal' \| 'low'</code> | Download priority level                          |
+| Prop               | Type                                               | Description                                                                                                                                                                                                                                                                                                                     | Since |
+| ------------------ | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| **`id`**           | <code>string</code>                                | Unique identifier for this download task                                                                                                                                                                                                                                                                                        |       |
+| **`url`**          | <code>string</code>                                | URL of the file to download                                                                                                                                                                                                                                                                                                     |       |
+| **`destination`**  | <code>string</code>                                | Local file path where the download will be saved                                                                                                                                                                                                                                                                                |       |
+| **`headers`**      | <code>{ [key: string]: string; }</code>            | Optional HTTP headers to include in the request                                                                                                                                                                                                                                                                                 |       |
+| **`network`**      | <code>'cellular' \| 'wifi-only'</code>             | Network type requirement for download                                                                                                                                                                                                                                                                                           |       |
+| **`priority`**     | <code>'high' \| 'normal' \| 'low'</code>           | Download priority level                                                                                                                                                                                                                                                                                                         |       |
+| **`notification`** | <code>'completed' \| 'progress' \| 'hidden'</code> | Android DownloadManager notification visibility. - `'completed'` (default): show while downloading and keep the notification after completion. - `'progress'`: show while downloading, remove the notification when finished. - `'hidden'`: no system notification; use plugin progress events instead. Ignored on iOS and Web. | 8.2.0 |
 
 
 #### PluginListenerHandle

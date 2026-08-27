@@ -28,6 +28,18 @@ export interface DownloadOptions {
   network?: 'cellular' | 'wifi-only';
   /** Download priority level */
   priority?: 'high' | 'normal' | 'low';
+  /**
+   * Android DownloadManager notification visibility.
+   *
+   * - `'completed'` (default): show while downloading and keep the notification after completion.
+   * - `'progress'`: show while downloading, remove the notification when finished.
+   * - `'hidden'`: no system notification; use plugin progress events instead.
+   *
+   * Ignored on iOS and Web.
+   *
+   * @since 8.2.0
+   */
+  notification?: 'completed' | 'progress' | 'hidden';
 }
 
 /**
@@ -45,7 +57,8 @@ export interface CapacitorDownloaderPlugin {
    * const task = await Downloader.download({
    *   id: 'my-download',
    *   url: 'https://example.com/file.pdf',
-   *   destination: 'downloads/file.pdf'
+   *   destination: 'downloads/file.pdf',
+   *   notification: 'hidden', // Android: no system notification; use downloadProgress events
    * });
    * ```
    */

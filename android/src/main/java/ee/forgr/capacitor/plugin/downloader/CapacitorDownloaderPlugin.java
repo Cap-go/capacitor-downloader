@@ -104,7 +104,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
         try {
             downloadId = downloadManager.enqueue(request);
         } catch (SecurityException e) {
-            call.reject("Hidden downloads require android.permission.DOWNLOAD_WITHOUT_NOTIFICATION in the app manifest", e);
+            if ("hidden".equals(call.getString("notification"))) {
+                call.reject("Hidden downloads require android.permission.DOWNLOAD_WITHOUT_NOTIFICATION in the app manifest", e);
+            } else {
+                call.reject("Download could not be enqueued due to missing permission", e);
+            }
             return;
         }
         downloads.put(id, downloadId);

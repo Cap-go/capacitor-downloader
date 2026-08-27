@@ -100,7 +100,13 @@ public class CapacitorDownloaderPlugin extends Plugin {
             request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_MOBILE | DownloadManager.Request.NETWORK_WIFI);
         }
 
-        long downloadId = downloadManager.enqueue(request);
+        long downloadId;
+        try {
+            downloadId = downloadManager.enqueue(request);
+        } catch (SecurityException e) {
+            call.reject("Hidden downloads require android.permission.DOWNLOAD_WITHOUT_NOTIFICATION in the app manifest", e);
+            return;
+        }
         downloads.put(id, downloadId);
 
         JSObject result = new JSObject();

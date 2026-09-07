@@ -122,7 +122,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         final String notification = call.getString("notification");
         final long pendingToken = reservePendingDownload();
-        downloads.put(id, pendingToken);
+        if (downloads.putIfAbsent(id, pendingToken) != null) {
+            call.reject("Download already exists");
+            return;
+        }
         runDownloadManagerWork(
             call,
             () -> {
@@ -302,14 +305,20 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         final long systemDownloadId = downloadId;
-        runDownloadManagerWork(call, () -> {
-            try {
-                int removedDownloads = downloadManager.remove(systemDownloadId);
-                call.resolve(new JSObject().put("removed", removedDownloads > 0));
-            } catch (RuntimeException e) {
-                call.reject("Download could not be removed", e);
-            }
-        });
+        final String stoppedId = id;
+        runDownloadManagerWork(
+            call,
+            () -> {
+                try {
+                    int removedDownloads = downloadManager.remove(systemDownloadId);
+                    call.resolve(new JSObject().put("removed", removedDownloads > 0));
+                } catch (RuntimeException e) {
+                    downloads.putIfAbsent(stoppedId, systemDownloadId);
+                    call.reject("Download could not be removed", e);
+                }
+            },
+            () -> downloads.putIfAbsent(stoppedId, systemDownloadId)
+        );
     }
 
     @PluginMethod

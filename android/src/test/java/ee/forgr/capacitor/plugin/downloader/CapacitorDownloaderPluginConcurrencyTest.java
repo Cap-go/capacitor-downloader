@@ -166,15 +166,12 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     @Test
     public void checkStatusRejectsWhenQueryThrows() throws Exception {
         downloads.put("test-id", 42L);
-        DownloadManager throwingManager = mock(
-            DownloadManager.class,
-            invocation -> {
-                if ("query".equals(invocation.getMethod().getName())) {
-                    throw new RuntimeException("binder failure");
-                }
-                return org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+        DownloadManager throwingManager = mock(DownloadManager.class, (invocation) -> {
+            if ("query".equals(invocation.getMethod().getName())) {
+                throw new RuntimeException("binder failure");
             }
-        );
+            return org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+        });
         setField(plugin, "downloadManager", throwingManager);
 
         PluginCall call = mockPluginCall("test-id");

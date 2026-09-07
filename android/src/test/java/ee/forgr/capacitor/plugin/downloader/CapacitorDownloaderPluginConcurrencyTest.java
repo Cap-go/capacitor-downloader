@@ -108,6 +108,18 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     @Test
+    public void stopCancelsPendingDownloadWithoutCallingDownloadManager() throws Exception {
+        downloads.put("test-id", -1L);
+
+        PluginCall call = mockPluginCall("test-id");
+        plugin.stop(call);
+
+        assertFalse(downloads.containsKey("test-id"));
+        verify(downloadManager, org.mockito.Mockito.never()).remove(anyLong());
+        verify(call, timeout(5000)).resolve(any());
+    }
+
+    @Test
     public void stopRejectsUnknownDownloadWithoutCallingDownloadManager() throws Exception {
         PluginCall call = mockPluginCall("missing-id");
         plugin.stop(call);

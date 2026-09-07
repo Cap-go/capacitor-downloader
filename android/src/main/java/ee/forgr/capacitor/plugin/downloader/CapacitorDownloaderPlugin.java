@@ -118,6 +118,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             call,
             () -> {
                 if (!isTrackedDownload(id, PENDING_DOWNLOAD)) {
+                    call.reject("Download was cancelled");
                     return;
                 }
 
@@ -132,10 +133,15 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         call.reject("Download could not be enqueued due to missing permission", e);
                     }
                     return;
+                } catch (RuntimeException e) {
+                    downloads.remove(id, PENDING_DOWNLOAD);
+                    call.reject("Download could not be enqueued", e);
+                    return;
                 }
 
                 if (!downloads.replace(id, PENDING_DOWNLOAD, downloadId)) {
                     downloadManager.remove(downloadId);
+                    call.reject("Download was cancelled");
                     return;
                 }
 

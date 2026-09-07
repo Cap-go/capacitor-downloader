@@ -16,9 +16,12 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 
 @CapacitorPlugin(name = "CapacitorDownloader")
 public class CapacitorDownloaderPlugin extends Plugin {
@@ -26,13 +29,15 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private final String pluginVersion = "8.3.0";
 
     private DownloadManager downloadManager;
-    private final Map<String, Long> downloads = new HashMap<>();
+    private final Map<String, Long> downloads = new ConcurrentHashMap<>();
+    private ExecutorService downloadManagerExecutor;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private BroadcastReceiver downloadReceiver;
 
     @Override
     public void load() {
         downloadManager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
+        downloadManagerExecutor = Executors.newCachedThreadPool();
         registerDownloadReceiver();
     }
 
@@ -100,26 +105,29 @@ public class CapacitorDownloaderPlugin extends Plugin {
             request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_MOBILE | DownloadManager.Request.NETWORK_WIFI);
         }
 
-        long downloadId;
-        try {
-            downloadId = downloadManager.enqueue(request);
-        } catch (SecurityException e) {
-            if ("hidden".equals(call.getString("notification"))) {
-                call.reject("Hidden downloads require android.permission.DOWNLOAD_WITHOUT_NOTIFICATION in the app manifest", e);
-            } else {
-                call.reject("Download could not be enqueued due to missing permission", e);
+        final String notification = call.getString("notification");
+        runDownloadManagerWork(call, () -> {
+            long downloadId;
+            try {
+                downloadId = downloadManager.enqueue(request);
+            } catch (SecurityException e) {
+                if ("hidden".equals(notification)) {
+                    call.reject("Hidden downloads require android.permission.DOWNLOAD_WITHOUT_NOTIFICATION in the app manifest", e);
+                } else {
+                    call.reject("Download could not be enqueued due to missing permission", e);
+                }
+                return;
             }
-            return;
-        }
-        downloads.put(id, downloadId);
+            downloads.put(id, downloadId);
 
-        JSObject result = new JSObject();
-        result.put("id", id);
-        result.put("status", DownloadManager.STATUS_PENDING);
-        call.resolve(result);
+            JSObject result = new JSObject();
+            result.put("id", id);
+            result.put("status", DownloadManager.STATUS_PENDING);
+            call.resolve(result);
 
-        // Start a periodic progress check
-        startProgressCheck(id, downloadId);
+            // Start a periodic progress check
+            startProgressCheck(id, downloadId);
+        });
     }
 
     private void startProgressCheck(final String id, final long downloadId) {
@@ -190,13 +198,22 @@ public class CapacitorDownloaderPlugin extends Plugin {
     @PluginMethod
     public void stop(PluginCall call) {
         String id = call.getString("id");
-        if (id == null || !downloads.containsKey(id)) {
+        if (id == null) {
             call.reject("Download not found");
             return;
         }
-        int removedDownloads = downloadManager.remove(downloads.get(id));
-        downloads.remove(id);
-        call.resolve(new JSObject().put("removed", removedDownloads > 0));
+
+        Long downloadId = downloads.remove(id);
+        if (downloadId == null) {
+            call.reject("Download not found");
+            return;
+        }
+
+        final long systemDownloadId = downloadId;
+        runDownloadManagerWork(call, () -> {
+            int removedDownloads = downloadManager.remove(systemDownloadId);
+            call.resolve(new JSObject().put("removed", removedDownloads > 0));
+        });
     }
 
     @PluginMethod
@@ -207,14 +224,31 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
-        DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloads.get(id));
-        try (Cursor cursor = downloadManager.query(query)) {
-            if (cursor.moveToFirst()) {
-                JSObject result = getDownloadStatus(cursor);
-                call.resolve(result);
-            } else {
-                call.reject("Download not found");
+        final long downloadId = downloads.get(id);
+        runDownloadManagerWork(call, () -> {
+            DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
+            try (Cursor cursor = downloadManager.query(query)) {
+                if (cursor.moveToFirst()) {
+                    JSObject result = getDownloadStatus(cursor);
+                    call.resolve(result);
+                } else {
+                    call.reject("Download not found");
+                }
             }
+        });
+    }
+
+    private void runDownloadManagerWork(PluginCall call, Runnable work) {
+        ExecutorService executor = downloadManagerExecutor;
+        if (executor == null) {
+            call.reject("Download manager is not available");
+            return;
+        }
+
+        try {
+            executor.execute(work);
+        } catch (RejectedExecutionException e) {
+            call.reject("Download manager is shutting down", e);
         }
     }
 
@@ -283,6 +317,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
         super.handleOnDestroy();
         if (downloadReceiver != null) {
             getContext().unregisterReceiver(downloadReceiver);
+        }
+        if (downloadManagerExecutor != null) {
+            downloadManagerExecutor.shutdown();
+            downloadManagerExecutor = null;
         }
     }
 

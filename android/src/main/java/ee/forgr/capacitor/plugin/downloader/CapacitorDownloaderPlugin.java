@@ -22,16 +22,16 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicLong;
 
 @CapacitorPlugin(name = "CapacitorDownloader")
 public class CapacitorDownloaderPlugin extends Plugin {
-
-    private static final long PENDING_DOWNLOAD = -1L;
 
     private final String pluginVersion = "8.3.0";
 
     private DownloadManager downloadManager;
     private final Map<String, Long> downloads = new ConcurrentHashMap<>();
+    private final AtomicLong pendingDownloadSequence = new AtomicLong(0);
     private ExecutorService downloadManagerExecutor;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private BroadcastReceiver downloadReceiver;
@@ -64,11 +64,19 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
     private String getDownloadIdByValue(long value) {
         for (Map.Entry<String, Long> entry : downloads.entrySet()) {
-            if (entry.getValue() == value && value != PENDING_DOWNLOAD) {
+            if (entry.getValue() == value && value > 0) {
                 return entry.getKey();
             }
         }
         return null;
+    }
+
+    private static boolean isPendingDownload(long downloadId) {
+        return downloadId < 0;
+    }
+
+    private long reservePendingDownload() {
+        return -pendingDownloadSequence.incrementAndGet();
     }
 
     private boolean isTrackedDownload(String id, long systemDownloadId) {
@@ -113,11 +121,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         final String notification = call.getString("notification");
-        downloads.put(id, PENDING_DOWNLOAD);
+        final long pendingToken = reservePendingDownload();
+        downloads.put(id, pendingToken);
         runDownloadManagerWork(
             call,
             () -> {
-                if (!isTrackedDownload(id, PENDING_DOWNLOAD)) {
+                if (!isTrackedDownload(id, pendingToken)) {
                     call.reject("Download was cancelled");
                     return;
                 }
@@ -126,7 +135,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 try {
                     downloadId = downloadManager.enqueue(request);
                 } catch (SecurityException e) {
-                    downloads.remove(id, PENDING_DOWNLOAD);
+                    downloads.remove(id, pendingToken);
                     if ("hidden".equals(notification)) {
                         call.reject("Hidden downloads require android.permission.DOWNLOAD_WITHOUT_NOTIFICATION in the app manifest", e);
                     } else {
@@ -134,13 +143,18 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     }
                     return;
                 } catch (RuntimeException e) {
-                    downloads.remove(id, PENDING_DOWNLOAD);
+                    downloads.remove(id, pendingToken);
                     call.reject("Download could not be enqueued", e);
                     return;
                 }
 
-                if (!downloads.replace(id, PENDING_DOWNLOAD, downloadId)) {
-                    downloadManager.remove(downloadId);
+                if (!downloads.replace(id, pendingToken, downloadId)) {
+                    try {
+                        downloadManager.remove(downloadId);
+                    } catch (RuntimeException e) {
+                        call.reject("Download was cancelled", e);
+                        return;
+                    }
                     call.reject("Download was cancelled");
                     return;
                 }
@@ -153,7 +167,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 // Start a periodic progress check
                 startProgressCheck(id, downloadId);
             },
-            () -> downloads.remove(id, PENDING_DOWNLOAD)
+            () -> downloads.remove(id, pendingToken)
         );
     }
 
@@ -163,7 +177,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
     private void checkDownloadStatus(String id) {
         Long trackedDownloadId = downloads.get(id);
-        if (trackedDownloadId == null || trackedDownloadId == PENDING_DOWNLOAD) {
+        if (trackedDownloadId == null || isPendingDownload(trackedDownloadId)) {
             return;
         }
         runProgressQuery(id, false, trackedDownloadId);
@@ -282,15 +296,19 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
-        if (downloadId == PENDING_DOWNLOAD) {
+        if (isPendingDownload(downloadId)) {
             call.resolve(new JSObject().put("removed", false));
             return;
         }
 
         final long systemDownloadId = downloadId;
         runDownloadManagerWork(call, () -> {
-            int removedDownloads = downloadManager.remove(systemDownloadId);
-            call.resolve(new JSObject().put("removed", removedDownloads > 0));
+            try {
+                int removedDownloads = downloadManager.remove(systemDownloadId);
+                call.resolve(new JSObject().put("removed", removedDownloads > 0));
+            } catch (RuntimeException e) {
+                call.reject("Download could not be removed", e);
+            }
         });
     }
 
@@ -303,7 +321,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         Long trackedDownloadId = downloads.get(id);
-        if (trackedDownloadId == null || trackedDownloadId == PENDING_DOWNLOAD) {
+        if (trackedDownloadId == null || isPendingDownload(trackedDownloadId)) {
             call.reject("Download not found");
             return;
         }

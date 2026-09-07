@@ -109,7 +109,7 @@ public class CapacitorDownloaderPluginConcurrencyTest {
 
     @Test
     public void stopCancelsPendingDownloadWithoutCallingDownloadManager() throws Exception {
-        downloads.put("test-id", -1L);
+        downloads.put("test-id", -42L);
 
         PluginCall call = mockPluginCall("test-id");
         plugin.stop(call);

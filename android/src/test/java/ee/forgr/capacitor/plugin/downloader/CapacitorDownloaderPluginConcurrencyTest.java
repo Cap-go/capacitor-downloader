@@ -6,6 +6,7 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
@@ -117,6 +118,29 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         assertFalse(downloads.containsKey("test-id"));
         verify(downloadManager, org.mockito.Mockito.never()).remove(anyLong());
         verify(call, timeout(5000)).resolve(any());
+    }
+
+    @Test
+    public void stopRestoresMappingWhenRemoveFails() throws Exception {
+        downloads.put("test-id", 42L);
+        when(downloadManager.remove(42L)).thenThrow(new RuntimeException("binder failure"));
+
+        PluginCall call = mockPluginCall("test-id");
+        plugin.stop(call);
+
+        verify(call, timeout(5000)).reject(eq("Download could not be removed"), any(RuntimeException.class));
+        assertEquals(42L, downloads.get("test-id").longValue());
+    }
+
+    @Test
+    public void checkStatusRejectsPendingDownloadWithoutQuerying() {
+        downloads.put("test-id", -99L);
+
+        PluginCall call = mockPluginCall("test-id");
+        plugin.checkStatus(call);
+
+        verify(call).reject("Download not found");
+        verify(downloadManager, org.mockito.Mockito.never()).query(any(DownloadManager.Query.class));
     }
 
     @Test

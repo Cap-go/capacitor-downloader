@@ -131,56 +131,102 @@ public class CapacitorDownloaderPlugin extends Plugin {
     }
 
     private void startProgressCheck(final String id, final long downloadId) {
-        handler.post(
-            new Runnable() {
-                @Override
-                public void run() {
-                    if (checkDownloadStatus(id)) {
-                        handler.postDelayed(this, 1000); // Check every second
-                    }
-                }
-            }
-        );
+        runProgressQuery(id, true, downloadId);
     }
 
-    private boolean checkDownloadStatus(String id) {
-        Long downloadId = downloads.get(id);
+    private void checkDownloadStatus(String id) {
+        Long trackedDownloadId = downloads.get(id);
+        if (trackedDownloadId == null) {
+            return;
+        }
+        runProgressQuery(id, false, trackedDownloadId);
+    }
 
-        if (downloadId == null) {
-            return false; // Download was removed, stop polling
+    private void runProgressQuery(final String id, final boolean scheduleNext, final long systemDownloadId) {
+        if (downloads.get(id) == null) {
+            return;
         }
 
-        DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
+        ExecutorService executor = downloadManagerExecutor;
+        if (executor == null) {
+            return;
+        }
+
+        try {
+            executor.execute(() -> {
+                ProgressSnapshot snapshot = queryProgressSnapshot(id, systemDownloadId);
+                handler.post(() -> deliverProgressSnapshot(id, systemDownloadId, scheduleNext, snapshot));
+            });
+        } catch (RejectedExecutionException ignored) {
+            // Plugin is shutting down; stop polling quietly.
+        }
+    }
+
+    private ProgressSnapshot queryProgressSnapshot(String id, long systemDownloadId) {
+        if (!downloads.containsKey(id)) {
+            return null;
+        }
+
+        DownloadManager.Query query = new DownloadManager.Query().setFilterById(systemDownloadId);
         try (Cursor cursor = downloadManager.query(query)) {
-            if (cursor.moveToFirst()) {
-                int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-                long bytesDownloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
-                long bytesTotal = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
-
-                float progress = bytesTotal > 0 ? (float) bytesDownloaded / bytesTotal : 0f;
-
-                JSObject progressData = new JSObject();
-                progressData.put("id", id);
-                progressData.put("progress", progress);
-                notifyListeners("downloadProgress", progressData);
-
-                if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                    JSObject completedData = new JSObject();
-                    completedData.put("id", id);
-                    notifyListeners("downloadCompleted", completedData);
-                    return false; // Stop checking progress
-                } else if (status == DownloadManager.STATUS_FAILED) {
-                    JSObject failedData = new JSObject();
-                    failedData.put("id", id);
-                    failedData.put("error", "Download failed");
-                    notifyListeners("downloadFailed", failedData);
-                    return false; // Stop checking progress
-                }
-            } else {
-                return false; // Download no longer in DownloadManager, stop polling
+            if (!cursor.moveToFirst()) {
+                return ProgressSnapshot.notFound(id);
             }
+
+            int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+            long bytesDownloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
+            long bytesTotal = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+            float progress = bytesTotal > 0 ? (float) bytesDownloaded / bytesTotal : 0f;
+            return new ProgressSnapshot(id, progress, status, true);
         }
-        return true; // Continue checking progress
+    }
+
+    private void deliverProgressSnapshot(String id, long systemDownloadId, boolean scheduleNext, ProgressSnapshot snapshot) {
+        if (snapshot == null || !snapshot.found) {
+            return;
+        }
+
+        JSObject progressData = new JSObject();
+        progressData.put("id", snapshot.id);
+        progressData.put("progress", snapshot.progress);
+        notifyListeners("downloadProgress", progressData);
+
+        boolean shouldContinue = true;
+        if (snapshot.status == DownloadManager.STATUS_SUCCESSFUL) {
+            JSObject completedData = new JSObject();
+            completedData.put("id", snapshot.id);
+            notifyListeners("downloadCompleted", completedData);
+            shouldContinue = false;
+        } else if (snapshot.status == DownloadManager.STATUS_FAILED) {
+            JSObject failedData = new JSObject();
+            failedData.put("id", snapshot.id);
+            failedData.put("error", "Download failed");
+            notifyListeners("downloadFailed", failedData);
+            shouldContinue = false;
+        }
+
+        if (scheduleNext && shouldContinue) {
+            handler.postDelayed(() -> runProgressQuery(id, true, systemDownloadId), 1000);
+        }
+    }
+
+    private static final class ProgressSnapshot {
+
+        private final String id;
+        private final float progress;
+        private final int status;
+        private final boolean found;
+
+        private ProgressSnapshot(String id, float progress, int status, boolean found) {
+            this.id = id;
+            this.progress = progress;
+            this.status = status;
+            this.found = found;
+        }
+
+        private static ProgressSnapshot notFound(String id) {
+            return new ProgressSnapshot(id, 0f, -1, false);
+        }
     }
 
     @PluginMethod
@@ -219,12 +265,18 @@ public class CapacitorDownloaderPlugin extends Plugin {
     @PluginMethod
     public void checkStatus(PluginCall call) {
         String id = call.getString("id");
-        if (id == null || !downloads.containsKey(id)) {
+        if (id == null) {
             call.reject("Download not found");
             return;
         }
 
-        final long downloadId = downloads.get(id);
+        Long trackedDownloadId = downloads.get(id);
+        if (trackedDownloadId == null) {
+            call.reject("Download not found");
+            return;
+        }
+
+        final long downloadId = trackedDownloadId;
         runDownloadManagerWork(call, () -> {
             DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
             try (Cursor cursor = downloadManager.query(query)) {

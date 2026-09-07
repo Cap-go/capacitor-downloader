@@ -152,6 +152,17 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         verify(downloadManager, org.mockito.Mockito.never()).remove(anyLong());
     }
 
+    @Test
+    public void checkStatusRejectsWhenQueryReturnsNullCursor() {
+        downloads.put("test-id", 42L);
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenReturn(null);
+
+        PluginCall call = mockPluginCall("test-id");
+        plugin.checkStatus(call);
+
+        verify(call, timeout(5000)).reject("Download not found");
+    }
+
     private static PluginCall mockPluginCall(String id) {
         PluginCall call = mock(PluginCall.class);
         when(call.getString("id")).thenReturn(id);

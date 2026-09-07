@@ -212,7 +212,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         DownloadManager.Query query = new DownloadManager.Query().setFilterById(systemDownloadId);
-        try (Cursor cursor = downloadManager.query(query)) {
+        Cursor cursor = downloadManager.query(query);
+        if (cursor == null) {
+            return ProgressSnapshot.notFound(id);
+        }
+        try (cursor) {
             if (!cursor.moveToFirst()) {
                 return ProgressSnapshot.notFound(id);
             }
@@ -338,7 +342,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
         final long downloadId = trackedDownloadId;
         runDownloadManagerWork(call, () -> {
             DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
-            try (Cursor cursor = downloadManager.query(query)) {
+            Cursor cursor = downloadManager.query(query);
+            if (cursor == null) {
+                call.reject("Download not found");
+                return;
+            }
+            try (cursor) {
                 if (cursor.moveToFirst()) {
                     JSObject result = getDownloadStatus(cursor);
                     call.resolve(result);

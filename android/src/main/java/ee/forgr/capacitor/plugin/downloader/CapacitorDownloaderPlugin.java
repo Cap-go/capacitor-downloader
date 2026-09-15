@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicLong;
 @CapacitorPlugin(name = "CapacitorDownloader")
 public class CapacitorDownloaderPlugin extends Plugin {
 
-    private final String pluginVersion = "8.3.3";
+    private final String pluginVersion = "8.3.4";
 
     private DownloadManager downloadManager;
     private final Map<String, Long> downloads = new ConcurrentHashMap<>();

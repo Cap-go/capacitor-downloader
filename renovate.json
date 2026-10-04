@@ -88,6 +88,18 @@
         "gradle"
       ],
       "enabled": false
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "pinDigests": false,
+      "matchUpdateTypes": [
+        "digest",
+        "minor",
+        "patch"
+      ],
+      "enabled": false
     }
   ]
 }

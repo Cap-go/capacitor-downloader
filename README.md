@@ -21,7 +21,7 @@ Download large files in the background or foreground from your Capacitor app, wi
 - **Control**: `pause()`, `resume()` and `stop()` for each download ID.
 - **Progress events**: `downloadProgress`, `downloadCompleted` and `downloadFailed` listeners.
 - **Status and files**: `checkStatus()` for a task and `getFileInfo()` for a downloaded file.
-- **Platforms**: iOS, Android and Web. iOS uses a background `URLSession`, Android uses `DownloadManager`. Web supports the basic flow.
+- **Platforms**: iOS and Android. iOS uses a background `URLSession`, Android uses `DownloadManager`. Not available on web.
 
 ## Why Capacitor Downloader?
 

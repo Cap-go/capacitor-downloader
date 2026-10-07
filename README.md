@@ -1,13 +1,27 @@
 # @capgo/capacitor-downloader
-<a href="https://capgo.app/"><img src="https://capgo.app/readme-banner.svg?repo=Cap-go/capacitor-downloader" alt="Capgo - Instant updates for Capacitor" /></a>
+
+Download large files in the background or foreground from your Capacitor app, with pause, resume and progress events. Downloads keep going when users leave the screen.
+
+<a href="https://capgo.app/?ref=plugin_downloader"><img src="https://capgo.app/readme-banner.svg?repo=Cap-go/capacitor-downloader" alt="Capgo - Instant updates for Capacitor" /></a>
 
 <div align="center">
-  <h2><a href="https://capgo.app/?ref=plugin_downloader"> ➡️ Get Instant updates for your App with Capgo</a></h2>
-  <h2><a href="https://capgo.app/consulting/?ref=plugin_downloader"> Missing a feature? We’ll build the plugin for you 💪</a></h2>
+  <p><b>Capgo</b>: open-source live updates for Ionic and Capacitor apps. Ship OTA fixes and features instantly, without waiting for app store review.</p>
+  <h2><a href="https://capgo.app/register/?ref=plugin_downloader">➡️ Get started for free</a></h2>
+  <p>14-day unlimited free trial. No credit card required</p>
+  <p><a href="https://capgo.app/consulting/?ref=plugin_downloader">Missing a feature? We'll build the plugin for you 💪</a></p>
 </div>
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Cap-go/capacitor-downloader/main/assets/github-social-preview.png" alt="@capgo/capacitor-downloader for Capacitor apps" width="300" />
+</p>
 
-Download file in background or foreground
+## Key features
+
+- **Downloads**: `download()` starts a task with optional HTTP headers and a `wifi-only` or cellular network rule.
+- **Control**: `pause()`, `resume()` and `stop()` for each download ID.
+- **Progress events**: `downloadProgress`, `downloadCompleted` and `downloadFailed` listeners.
+- **Status and files**: `checkStatus()` for a task and `getFileInfo()` for a downloaded file.
+- **Platforms**: iOS, Android and Web. iOS uses a background `URLSession`, Android uses `DownloadManager`. Web supports the basic flow.
 
 ## Why Capacitor Downloader?
 

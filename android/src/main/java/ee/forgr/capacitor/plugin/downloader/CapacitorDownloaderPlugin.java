@@ -118,6 +118,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
+        if (httpEngine == AndroidHttpEngineSelector.Engine.DOWNLOAD_MANAGER && resolvedDestination.preferOkHttpInAutoMode) {
+            call.reject("DownloadManager cannot write to app-private destinations. Use androidHttpEngine 'auto' or 'okhttp'.");
+            return;
+        }
+
         if (httpEngine == AndroidHttpEngineSelector.Engine.OKHTTP) {
             downloadWithOkHttp(
                 call,
@@ -233,6 +238,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
         String network,
         String notification
     ) {
+        if (notification == null) {
+            notification = "completed";
+        }
+
         final long pendingToken = reservePendingDownload();
         if (downloads.putIfAbsent(id, pendingToken) != null) {
             call.reject("Download already exists");
@@ -240,6 +249,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
         okHttpDestinationFiles.put(id, destinationFile);
 
+        final String notificationMode = notification;
         runDownloadManagerWork(
             call,
             () -> {
@@ -283,19 +293,18 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             }),
                         (downloadId, success, errorMessage) ->
                             handler.post(() -> {
-                                downloads.remove(downloadId);
                                 okHttpDestinationFiles.remove(downloadId);
                                 if (success) {
                                     JSObject completedData = new JSObject();
                                     completedData.put("id", downloadId);
                                     notifyListeners("downloadCompleted", completedData);
-                                    DownloadCompletionNotifier.notifyIfRequested(getContext(), downloadId, notification, true);
+                                    DownloadCompletionNotifier.notifyIfRequested(getContext(), downloadId, notificationMode, true);
                                 } else {
                                     JSObject failedData = new JSObject();
                                     failedData.put("id", downloadId);
                                     failedData.put("error", errorMessage != null ? errorMessage : "Download failed");
                                     notifyListeners("downloadFailed", failedData);
-                                    DownloadCompletionNotifier.notifyIfRequested(getContext(), downloadId, notification, false);
+                                    DownloadCompletionNotifier.notifyIfRequested(getContext(), downloadId, notificationMode, false);
                                 }
                             })
                     );
@@ -457,6 +466,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (isOkHttpDownload(downloadId)) {
             File destinationFile = okHttpDestinationFiles.remove(id);
             boolean cancelled = okHttpDownloadExecutor.cancel(id, destinationFile);
+            okHttpDownloadExecutor.clearCompleted(id);
             call.resolve(new JSObject().put("removed", cancelled));
             return;
         }
@@ -497,9 +507,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
             JSObject result = new JSObject();
             result.put("id", id);
             if (active == null) {
-                result.put("status", DownloadManager.STATUS_SUCCESSFUL);
-                result.put("bytesDownloaded", 0);
-                result.put("bytesTotal", 0);
+                call.reject("Download not found");
+                return;
             } else {
                 result.put("status", mapOkHttpStateToDownloadManagerStatus(active.state));
                 result.put("bytesDownloaded", active.bytesWritten);

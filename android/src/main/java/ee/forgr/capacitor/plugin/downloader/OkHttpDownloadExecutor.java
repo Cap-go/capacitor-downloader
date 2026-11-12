@@ -78,24 +78,23 @@ public class OkHttpDownloadExecutor {
             throw new IllegalStateException("Download already exists");
         }
 
-        Request.Builder requestBuilder = new Request.Builder().url(url);
-        if (headers != null) {
-            Iterator<String> it = headers.keys();
-            if (it != null) {
-                while (it.hasNext()) {
-                    String key = it.next();
-                    requestBuilder.addHeader(key, headers.getString(key));
+        File tempFile = null;
+        try {
+            Request.Builder requestBuilder = new Request.Builder().url(url);
+            if (headers != null) {
+                Iterator<String> it = headers.keys();
+                if (it != null) {
+                    while (it.hasNext()) {
+                        String key = it.next();
+                        requestBuilder.addHeader(key, headers.getString(key));
+                    }
                 }
             }
-        }
 
-        Request request = requestBuilder.build();
-        Call call = client.newCall(request);
-        active.call = call;
-        active.state = State.RUNNING;
-        File tempFile = null;
-
-        try {
+            Request request = requestBuilder.build();
+            Call call = client.newCall(request);
+            active.call = call;
+            active.state = State.RUNNING;
             File parent = destinationFile.getParentFile();
             if (parent != null && !parent.exists() && !parent.mkdirs()) {
                 throw new IOException("Could not create destination directory");
@@ -178,14 +177,16 @@ public class OkHttpDownloadExecutor {
             }
             if (active.cancelled.get()) {
                 active.state = State.CANCELLED;
+                activeDownloads.remove(id, active);
                 completionListener.onFinished(id, false, "Download was cancelled");
             } else {
                 active.state = State.ERROR;
                 active.errorMessage = e.getMessage() != null ? e.getMessage() : "Download failed";
                 completionListener.onFinished(id, false, active.errorMessage);
             }
-        } finally {
+        } catch (RuntimeException e) {
             activeDownloads.remove(id, active);
+            throw e;
         }
     }
 
@@ -205,6 +206,13 @@ public class OkHttpDownloadExecutor {
         }
         activeDownloads.remove(id, active);
         return true;
+    }
+
+    public void clearCompleted(String id) {
+        ActiveDownload active = activeDownloads.get(id);
+        if (active != null && (active.state == State.DONE || active.state == State.ERROR || active.state == State.CANCELLED)) {
+            activeDownloads.remove(id, active);
+        }
     }
 
     public boolean isWifiSatisfied(String network) {

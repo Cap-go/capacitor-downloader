@@ -15,7 +15,7 @@ import androidx.core.content.ContextCompat;
 public final class DownloadCompletionNotifier {
 
     private static final String CHANNEL_ID = "capgo_capacitor_downloader";
-    private static final int NOTIFICATION_ID = 0x44554c44; // "DOWNL"
+    private static final int NOTIFICATION_ID_BASE = 0x44554c44; // "DOWNL"
 
     private DownloadCompletionNotifier() {}
 
@@ -48,7 +48,8 @@ public final class DownloadCompletionNotifier {
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT);
 
-        notificationManager.notify(NOTIFICATION_ID, builder.build());
+        int notificationId = NOTIFICATION_ID_BASE ^ (downloadId != null ? downloadId.hashCode() : 0);
+        notificationManager.notify(notificationId, builder.build());
     }
 
     private static boolean canPostNotifications(Context context) {

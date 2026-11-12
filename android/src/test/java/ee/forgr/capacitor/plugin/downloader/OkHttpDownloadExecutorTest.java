@@ -69,6 +69,8 @@ public class OkHttpDownloadExecutorTest {
         assertTrue(finished.await(10, TimeUnit.SECONDS));
         assertTrue(success.get());
         assertEquals(payload.length, destination.length());
+        byte[] onDisk = java.nio.file.Files.readAllBytes(destination.toPath());
+        assertEquals(new String(payload, StandardCharsets.UTF_8), new String(onDisk, StandardCharsets.UTF_8));
     }
 
     @Test

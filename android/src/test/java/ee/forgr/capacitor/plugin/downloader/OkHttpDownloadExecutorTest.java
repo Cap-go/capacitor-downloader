@@ -52,6 +52,7 @@ public class OkHttpDownloadExecutorTest {
         AtomicBoolean success = new AtomicBoolean(false);
         AtomicReference<String> error = new AtomicReference<>();
 
+        assertTrue(executor.beginTransfer("task-1"));
         executor.start(
             "task-1",
             server.url("/file").toString(),
@@ -84,6 +85,7 @@ public class OkHttpDownloadExecutorTest {
         CountDownLatch finished = new CountDownLatch(1);
         AtomicBoolean success = new AtomicBoolean(false);
 
+        assertTrue(executor.beginTransfer("task-short"));
         executor.start(
             "task-short",
             server.url("/file").toString(),
@@ -115,6 +117,7 @@ public class OkHttpDownloadExecutorTest {
         CountDownLatch finished = new CountDownLatch(1);
         AtomicBoolean success = new AtomicBoolean(true);
 
+        assertTrue(executor.beginTransfer("task-2"));
         executor.start(
             "task-2",
             server.url("/file").toString(),

@@ -35,12 +35,13 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private ExecutorService downloadManagerExecutor;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private BroadcastReceiver downloadReceiver;
-    private final DownloadCompletedNotificationStore completedNotificationStore = new DownloadCompletedNotificationStore();
+    private DownloadCompletedNotificationStore completedNotificationStore;
 
     @Override
     public void load() {
         downloadManager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
         downloadManagerExecutor = Executors.newCachedThreadPool();
+        completedNotificationStore = new DownloadCompletedNotificationStore(getContext());
         registerDownloadReceiver();
     }
 
@@ -96,38 +97,42 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
+        final String notification = call.getString("notification");
+        final DownloadManager.Request request;
+        try {
+            request = new DownloadManager.Request(Uri.parse(url))
+                .setNotificationVisibility(DownloadNotificationVisibility.resolve(notification))
+                .setAllowedOverMetered(true)
+                .setAllowedOverRoaming(true);
+
+            File destinationFile = new File(getContext().getExternalFilesDir(null), destination);
+            Uri destinationUri = Uri.fromFile(destinationFile);
+            request.setDestinationUri(destinationUri);
+
+            JSObject headers = call.getObject("headers");
+            if (headers != null) {
+                for (Iterator<String> it = headers.keys(); it.hasNext(); ) {
+                    String key = it.next();
+                    request.addRequestHeader(key, headers.getString(key));
+                }
+            }
+
+            String network = call.getString("network");
+            if ("wifi-only".equals(network)) {
+                request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI);
+            } else {
+                request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_MOBILE | DownloadManager.Request.NETWORK_WIFI);
+            }
+        } catch (RuntimeException e) {
+            call.reject("Invalid download request", e);
+            return;
+        }
+
         final long pendingToken = reservePendingDownload();
         if (downloads.putIfAbsent(id, pendingToken) != null) {
             call.reject("Download already exists");
             return;
         }
-
-        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
-            .setNotificationVisibility(DownloadNotificationVisibility.resolve(call.getString("notification")))
-            .setAllowedOverMetered(true)
-            .setAllowedOverRoaming(true);
-
-        // Handle custom destination
-        File destinationFile = new File(getContext().getExternalFilesDir(null), destination);
-        Uri destinationUri = Uri.fromFile(destinationFile);
-        request.setDestinationUri(destinationUri);
-
-        JSObject headers = call.getObject("headers");
-        if (headers != null) {
-            for (Iterator<String> it = headers.keys(); it.hasNext(); ) {
-                String key = it.next();
-                request.addRequestHeader(key, headers.getString(key));
-            }
-        }
-
-        String network = call.getString("network");
-        if ("wifi-only".equals(network)) {
-            request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI);
-        } else {
-            request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_MOBILE | DownloadManager.Request.NETWORK_WIFI);
-        }
-
-        final String notification = call.getString("notification");
         completedNotificationStore.setText(id, call.getString("downloadCompletedNotificationText"));
         runDownloadManagerWork(
             call,
@@ -313,7 +318,6 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
-        completedNotificationStore.remove(id);
         Long downloadId = downloads.remove(id);
         if (downloadId == null) {
             call.reject("Download not found");
@@ -321,6 +325,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         if (isPendingDownload(downloadId)) {
+            completedNotificationStore.remove(id);
             call.resolve(new JSObject().put("removed", false));
             return;
         }
@@ -332,6 +337,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             () -> {
                 try {
                     int removedDownloads = downloadManager.remove(systemDownloadId);
+                    completedNotificationStore.remove(stoppedId);
                     call.resolve(new JSObject().put("removed", removedDownloads > 0));
                 } catch (RuntimeException e) {
                     downloads.putIfAbsent(stoppedId, systemDownloadId);

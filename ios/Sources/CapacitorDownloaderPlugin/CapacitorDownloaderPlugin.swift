@@ -22,6 +22,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     ]
 
     private var tasks: [String: URLSessionDownloadTask] = [:]
+    private var downloadGenerations: [String: UInt64] = [:]
+    private var taskGenerations: [Int: UInt64] = [:]
     private let tasksLock = NSLock()
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.background(withIdentifier: "CapacitorDownloader")
@@ -44,7 +46,42 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private func removeTask(for id: String) {
         tasksLock.lock()
         defer { tasksLock.unlock() }
+        if let task = tasks[id] {
+            taskGenerations.removeValue(forKey: task.taskIdentifier)
+        }
         tasks.removeValue(forKey: id)
+    }
+
+    private func nextGeneration(for id: String) -> UInt64 {
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
+        let generation = (downloadGenerations[id] ?? 0) &+ 1
+        downloadGenerations[id] = generation
+        return generation
+    }
+
+    private func generation(for id: String) -> UInt64? {
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
+        return downloadGenerations[id]
+    }
+
+    private func setTaskGeneration(_ generation: UInt64, for task: URLSessionDownloadTask) {
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
+        taskGenerations[task.taskIdentifier] = generation
+    }
+
+    private func generation(for task: URLSessionTask) -> UInt64? {
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
+        return taskGenerations[task.taskIdentifier]
+    }
+
+    private func clearTaskGeneration(for task: URLSessionTask) {
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
+        taskGenerations.removeValue(forKey: task.taskIdentifier)
     }
 
     private func idForTask(_ task: URLSessionDownloadTask) -> String? {
@@ -86,8 +123,13 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         let destination = call.getString("destination") ?? ""
+        let generation = nextGeneration(for: id)
         DownloadDestinationStore.shared.setDestination(destination, for: id)
-        DownloadCompletedNotificationStore.shared.setText(call.getString("downloadCompletedNotificationText"), for: id)
+        DownloadCompletedNotificationStore.shared.setText(
+            call.getString("downloadCompletedNotificationText"),
+            for: id,
+            generation: generation
+        )
 
         var request = URLRequest(url: url)
         if let headers = call.getObject("headers") as? [String: String] {
@@ -99,6 +141,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         let task = session.downloadTask(with: request)
         task.taskDescription = id
         setTask(task, for: id)
+        setTaskGeneration(generation, for: task)
         task.resume()
 
         call.resolve([
@@ -137,10 +180,13 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
+        let generation = generation(for: id)
         task.cancel()
         removeTask(for: id)
         DownloadDestinationStore.shared.removeDestination(for: id)
-        DownloadCompletedNotificationStore.shared.removeText(for: id)
+        if let generation {
+            DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+        }
         call.resolve()
     }
 
@@ -205,8 +251,12 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         }
 
         let storedDestination = DownloadDestinationStore.shared.takeDestination(for: id)
+        let generation = generation(for: downloadTask)
+
         guard let destinationURL = destinationURL(for: id, storedDestination: storedDestination) else {
-            DownloadCompletedNotificationStore.shared.removeText(for: id)
+            if let generation {
+                DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+            }
             notifyListeners("downloadFailed", data: ["id": id, "error": "Unable to resolve destination"])
             return
         }
@@ -214,7 +264,9 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         if let httpResponse = downloadTask.response as? HTTPURLResponse,
            !DownloadHTTPValidator.isSuccessfulStatusCode(httpResponse.statusCode) {
             try? FileManager.default.removeItem(at: location)
-            DownloadCompletedNotificationStore.shared.removeText(for: id)
+            if let generation {
+                DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+            }
             notifyListeners(
                 "downloadFailed",
                 data: ["id": id, "error": "HTTP \(httpResponse.statusCode)"]
@@ -229,13 +281,18 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             }
             try FileManager.default.moveItem(at: location, to: destinationURL)
             notifyListeners("downloadCompleted", data: ["id": id])
-            if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: id) {
+            if let generation,
+               let completionText = DownloadCompletedNotificationStore.shared.takeText(for: id, generation: generation) {
                 DownloadCompletedNotificationPresenter.presentIfAllowed(downloadId: id, body: completionText)
             }
         } catch {
-            DownloadCompletedNotificationStore.shared.removeText(for: id)
+            if let generation {
+                DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+            }
             notifyListeners("downloadFailed", data: ["id": id, "error": error.localizedDescription])
         }
+
+        clearTaskGeneration(for: downloadTask)
     }
 
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
@@ -244,16 +301,21 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             return
         }
 
+        let generation = generation(for: downloadTask)
         removeTask(for: id)
 
         if error != nil {
             _ = DownloadDestinationStore.shared.takeDestination(for: id)
         }
 
-        if let error = error {
-            DownloadCompletedNotificationStore.shared.removeText(for: id)
+        if let error {
+            if let generation {
+                DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+            }
             notifyListeners("downloadFailed", data: ["id": id, "error": error.localizedDescription])
         }
+
+        clearTaskGeneration(for: downloadTask)
     }
 
     public func urlSession(

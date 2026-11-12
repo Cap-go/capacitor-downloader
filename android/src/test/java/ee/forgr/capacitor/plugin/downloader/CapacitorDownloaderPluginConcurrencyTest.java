@@ -41,6 +41,7 @@ public class CapacitorDownloaderPluginConcurrencyTest {
 
         setField(plugin, "downloadManager", downloadManager);
         setField(plugin, "downloadManagerExecutor", downloadManagerExecutor);
+        setField(plugin, "completedNotificationStore", new DownloadCompletedNotificationStore());
         downloads = getDownloadsMap(plugin);
     }
 
@@ -161,6 +162,22 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         plugin.checkStatus(call);
 
         verify(call, timeout(5000)).reject("Download not found");
+    }
+
+    @Test
+    public void stopPreservesNotificationTextWhenRemoveFails() throws Exception {
+        downloads.put("test-id", 42L);
+
+        DownloadCompletedNotificationStore notificationStore = getNotificationStore(plugin);
+        notificationStore.setText("test-id", "Keep me");
+        when(downloadManager.remove(42L)).thenThrow(new RuntimeException("binder failure"));
+
+        PluginCall call = mockPluginCall("test-id");
+        plugin.stop(call);
+
+        verify(call, timeout(5000)).reject(eq("Download could not be removed"), any(RuntimeException.class));
+        assertEquals("Keep me", notificationStore.takeText("test-id"));
+        assertEquals(Long.valueOf(42L), downloads.get("test-id"));
     }
 
     @Test

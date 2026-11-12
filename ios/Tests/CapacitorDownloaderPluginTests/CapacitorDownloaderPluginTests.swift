@@ -116,26 +116,32 @@ final class DownloadCompletedNotificationStoreTests: XCTestCase {
     }
 
     func testSetAndTakeText() {
-        store.setText("  Finished  ", for: "task-1")
+        store.setText("  Finished  ", for: "task-1", generation: 1)
 
-        XCTAssertEqual(store.takeText(for: "task-1"), "Finished")
-        XCTAssertNil(store.takeText(for: "task-1"))
+        XCTAssertEqual(store.takeText(for: "task-1", generation: 1), "Finished")
+        XCTAssertNil(store.takeText(for: "task-1", generation: 1))
     }
 
     func testRemoveText() {
-        store.setText("Done", for: "task-1")
-        store.removeText(for: "task-1")
-        XCTAssertNil(store.takeText(for: "task-1"))
+        store.setText("Done", for: "task-1", generation: 1)
+        store.removeText(for: "task-1", generation: 1)
+        XCTAssertNil(store.takeText(for: "task-1", generation: 1))
+    }
+
+    func testGenerationMismatchLeavesStoredText() {
+        store.setText("New", for: "task-1", generation: 2)
+        store.removeText(for: "task-1", generation: 1)
+        XCTAssertEqual(store.takeText(for: "task-1", generation: 2), "New")
     }
 
     func testConcurrentUpdatesDoNotDropEntries() {
         let ids = (0..<50).map { "task-\($0)" }
         DispatchQueue.concurrentPerform(iterations: ids.count) { index in
-            store.setText("Body \(index)", for: ids[index])
+            store.setText("Body \(index)", for: ids[index], generation: 1)
         }
 
         for (index, id) in ids.enumerated() {
-            XCTAssertEqual(store.takeText(for: id), "Body \(index)")
+            XCTAssertEqual(store.takeText(for: id, generation: 1), "Body \(index)")
         }
     }
 }

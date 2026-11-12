@@ -4,6 +4,17 @@ import type { CapacitorDownloaderPlugin, DownloadTask, DownloadOptions } from '.
 
 export class CapacitorDownloaderWeb extends WebPlugin implements CapacitorDownloaderPlugin {
   async download(options: DownloadOptions): Promise<DownloadTask> {
+    const hasFiles = Array.isArray(options.files) && options.files.length > 0;
+    if (!hasFiles && (!options.url || !options.destination)) {
+      throw new Error('url and destination are required when files is not provided');
+    }
+    if (hasFiles) {
+      for (const file of options.files ?? []) {
+        if (!file.url || !file.destination) {
+          throw new Error('Each file entry requires url and destination');
+        }
+      }
+    }
     console.log('DOWNLOAD', options);
     throw new Error('Method not implemented.');
   }

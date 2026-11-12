@@ -10,13 +10,16 @@ import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import androidx.core.content.ContextCompat;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -31,6 +34,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
     private DownloadManager downloadManager;
     private final Map<String, Long> downloads = new ConcurrentHashMap<>();
+    private final Map<String, DownloadBatchState> batches = new ConcurrentHashMap<>();
     private final AtomicLong pendingDownloadSequence = new AtomicLong(0);
     private ExecutorService downloadManagerExecutor;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -87,10 +91,21 @@ public class CapacitorDownloaderPlugin extends Plugin {
     @PluginMethod
     public void download(PluginCall call) {
         String id = call.getString("id");
+        if (id == null) {
+            call.reject("Missing required parameters");
+            return;
+        }
+
+        JSArray files = call.getArray("files");
+        if (files != null && files.length() > 0) {
+            downloadBatch(call, id, files);
+            return;
+        }
+
         String url = call.getString("url");
         String destination = call.getString("destination");
 
-        if (id == null || url == null || destination == null) {
+        if (url == null || destination == null) {
             call.reject("Missing required parameters");
             return;
         }
@@ -174,6 +189,256 @@ public class CapacitorDownloaderPlugin extends Plugin {
         );
     }
 
+    private void downloadBatch(PluginCall call, String batchId, JSArray files) {
+        if (batches.putIfAbsent(batchId, new DownloadBatchState(batchId, files.length())) != null || downloads.containsKey(batchId)) {
+            call.reject("Download already exists");
+            batches.remove(batchId);
+            return;
+        }
+
+        final List<BatchFileRequest> fileRequests = new ArrayList<>();
+        for (int index = 0; index < files.length(); index++) {
+            JSObject fileObject = files.getJSObject(index);
+            if (fileObject == null) {
+                rollbackBatch(batchId);
+                call.reject("Invalid file entry");
+                return;
+            }
+            String url = fileObject.getString("url");
+            String destination = fileObject.getString("destination");
+            if (url == null || destination == null) {
+                rollbackBatch(batchId);
+                call.reject("Each file entry requires url and destination");
+                return;
+            }
+            fileRequests.add(new BatchFileRequest(index, url, destination));
+        }
+
+        final JSObject headers = call.getObject("headers");
+        final String network = call.getString("network");
+        final String notification = call.getString("notification");
+
+        runDownloadManagerWork(
+            call,
+            () -> {
+                List<Long> enqueuedIds = new ArrayList<>();
+                try {
+                    for (BatchFileRequest fileRequest : fileRequests) {
+                        if (isBatchCancelled(batchId) || !batches.containsKey(batchId)) {
+                            removeSystemDownloads(enqueuedIds);
+                            call.reject("Download was cancelled");
+                            rollbackBatch(batchId);
+                            return;
+                        }
+
+                        String childId = DownloadBatchState.fileTaskId(batchId, fileRequest.index);
+                        if (downloads.putIfAbsent(childId, reservePendingDownload()) != null) {
+                            removeSystemDownloads(enqueuedIds);
+                            rollbackBatch(batchId);
+                            call.reject("Download already exists");
+                            return;
+                        }
+
+                        DownloadManager.Request request = buildDownloadRequest(
+                            fileRequest.url,
+                            fileRequest.destination,
+                            headers,
+                            network,
+                            notification
+                        );
+
+                        long downloadId;
+                        try {
+                            downloadId = downloadManager.enqueue(request);
+                        } catch (SecurityException e) {
+                            downloads.remove(childId);
+                            removeSystemDownloads(enqueuedIds);
+                            rollbackBatch(batchId);
+                            if ("hidden".equals(notification)) {
+                                call.reject(
+                                    "Hidden downloads require android.permission.DOWNLOAD_WITHOUT_NOTIFICATION in the app manifest",
+                                    e
+                                );
+                            } else {
+                                call.reject("Download could not be enqueued due to missing permission", e);
+                            }
+                            return;
+                        } catch (RuntimeException e) {
+                            downloads.remove(childId);
+                            removeSystemDownloads(enqueuedIds);
+                            rollbackBatch(batchId);
+                            call.reject("Download could not be enqueued", e);
+                            return;
+                        }
+
+                        if (!downloads.replace(childId, downloads.get(childId), downloadId)) {
+                            try {
+                                downloadManager.remove(downloadId);
+                            } catch (RuntimeException ignored) {
+                                // Best effort cleanup.
+                            }
+                            removeSystemDownloads(enqueuedIds);
+                            rollbackBatch(batchId);
+                            call.reject("Download was cancelled");
+                            return;
+                        }
+
+                        enqueuedIds.add(downloadId);
+                        startProgressCheck(childId, downloadId);
+                    }
+
+                    JSObject result = new JSObject();
+                    result.put("id", batchId);
+                    result.put("state", "RUNNING");
+                    result.put("progress", 0);
+                    call.resolve(result);
+                } catch (RuntimeException e) {
+                    removeSystemDownloads(enqueuedIds);
+                    rollbackBatch(batchId);
+                    call.reject("Download could not be enqueued", e);
+                }
+            },
+            () -> rollbackBatch(batchId)
+        );
+    }
+
+    private static final class BatchFileRequest {
+
+        final int index;
+        final String url;
+        final String destination;
+
+        BatchFileRequest(int index, String url, String destination) {
+            this.index = index;
+            this.url = url;
+            this.destination = destination;
+        }
+    }
+
+    private DownloadManager.Request buildDownloadRequest(
+        String url,
+        String destination,
+        JSObject headers,
+        String network,
+        String notification
+    ) {
+        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
+            .setNotificationVisibility(DownloadNotificationVisibility.resolve(notification))
+            .setAllowedOverMetered(true)
+            .setAllowedOverRoaming(true);
+
+        File destinationFile = new File(getContext().getExternalFilesDir(null), destination);
+        request.setDestinationUri(Uri.fromFile(destinationFile));
+
+        if (headers != null) {
+            for (Iterator<String> it = headers.keys(); it.hasNext(); ) {
+                String key = it.next();
+                request.addRequestHeader(key, headers.getString(key));
+            }
+        }
+
+        if ("wifi-only".equals(network)) {
+            request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI);
+        } else {
+            request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_MOBILE | DownloadManager.Request.NETWORK_WIFI);
+        }
+
+        return request;
+    }
+
+    private boolean isBatchCancelled(String batchId) {
+        DownloadBatchState batch = batches.get(batchId);
+        return batch != null && batch.cancelled.get();
+    }
+
+    private void rollbackBatch(String batchId) {
+        DownloadBatchState batch = batches.remove(batchId);
+        if (batch != null) {
+            for (int index = 0; index < batch.fileCount; index++) {
+                downloads.remove(DownloadBatchState.fileTaskId(batchId, index));
+            }
+        }
+        downloads.remove(batchId);
+    }
+
+    private void removeSystemDownloads(List<Long> downloadIds) {
+        for (Long downloadId : downloadIds) {
+            if (downloadId == null) {
+                continue;
+            }
+            try {
+                downloadManager.remove(downloadId);
+            } catch (RuntimeException ignored) {
+                // Best effort cleanup.
+            }
+        }
+    }
+
+    private void failBatch(String batchId, String error, Integer fileIndex) {
+        DownloadBatchState batch = batches.remove(batchId);
+        if (batch == null || batch.failed.getAndSet(true)) {
+            return;
+        }
+
+        List<Long> childDownloadIds = new ArrayList<>();
+        for (int index = 0; index < batch.fileCount; index++) {
+            String childId = DownloadBatchState.fileTaskId(batchId, index);
+            Long childDownloadId = downloads.remove(childId);
+            if (childDownloadId != null && !isPendingDownload(childDownloadId)) {
+                childDownloadIds.add(childDownloadId);
+            }
+        }
+        removeSystemDownloads(childDownloadIds);
+
+        JSObject failedData = new JSObject();
+        failedData.put("id", batchId);
+        failedData.put("error", error);
+        if (fileIndex != null) {
+            failedData.put("fileIndex", fileIndex);
+        }
+        notifyListeners("downloadFailed", failedData);
+    }
+
+    private void notifyBatchProgress(String batchId, int fileIndex, float fileProgress, long bytesWritten, long bytesTotal) {
+        DownloadBatchState batch = batches.get(batchId);
+        if (batch == null || batch.failed.get() || batch.cancelled.get()) {
+            return;
+        }
+
+        batch.updateFileProgress(fileIndex, fileProgress);
+        float overall = batch.overallProgress();
+
+        JSObject progressData = new JSObject();
+        progressData.put("id", batchId);
+        progressData.put("progress", overall);
+        progressData.put("fileIndex", fileIndex);
+        progressData.put("fileProgress", fileProgress);
+        progressData.put("bytesWritten", bytesWritten);
+        progressData.put("bytesTotal", bytesTotal);
+        notifyListeners("downloadProgress", progressData);
+    }
+
+    private void completeBatchFile(String batchId, int fileIndex) {
+        DownloadBatchState batch = batches.get(batchId);
+        if (batch == null || batch.failed.get() || batch.cancelled.get()) {
+            return;
+        }
+
+        boolean allDone = batch.markFileCompleted(fileIndex);
+        notifyBatchProgress(batchId, fileIndex, 1f, 0, 0);
+
+        if (allDone) {
+            batches.remove(batchId);
+            for (int index = 0; index < batch.fileCount; index++) {
+                downloads.remove(DownloadBatchState.fileTaskId(batchId, index));
+            }
+
+            JSObject completedData = new JSObject();
+            completedData.put("id", batchId);
+            notifyListeners("downloadCompleted", completedData);
+        }
+    }
+
     private void startProgressCheck(final String id, final long downloadId) {
         runProgressQuery(id, true, downloadId);
     }
@@ -225,7 +490,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             long bytesDownloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
             long bytesTotal = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
             float progress = bytesTotal > 0 ? (float) bytesDownloaded / bytesTotal : 0f;
-            return new ProgressSnapshot(id, progress, status, true);
+            return new ProgressSnapshot(id, progress, status, true, bytesDownloaded, bytesTotal);
         }
     }
 
@@ -234,23 +499,45 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
-        JSObject progressData = new JSObject();
-        progressData.put("id", snapshot.id);
-        progressData.put("progress", snapshot.progress);
-        notifyListeners("downloadProgress", progressData);
-
+        DownloadBatchState.BatchIdParts batchParts = DownloadBatchState.parseFileTaskId(snapshot.id);
         boolean shouldContinue = true;
-        if (snapshot.status == DownloadManager.STATUS_SUCCESSFUL) {
-            JSObject completedData = new JSObject();
-            completedData.put("id", snapshot.id);
-            notifyListeners("downloadCompleted", completedData);
-            shouldContinue = false;
-        } else if (snapshot.status == DownloadManager.STATUS_FAILED) {
-            JSObject failedData = new JSObject();
-            failedData.put("id", snapshot.id);
-            failedData.put("error", "Download failed");
-            notifyListeners("downloadFailed", failedData);
-            shouldContinue = false;
+
+        if (batchParts != null) {
+            if (snapshot.status == DownloadManager.STATUS_SUCCESSFUL) {
+                completeBatchFile(batchParts.batchId, batchParts.fileIndex);
+                shouldContinue = false;
+            } else if (snapshot.status == DownloadManager.STATUS_FAILED) {
+                failBatch(batchParts.batchId, "Download failed", batchParts.fileIndex);
+                shouldContinue = false;
+            } else {
+                notifyBatchProgress(
+                    batchParts.batchId,
+                    batchParts.fileIndex,
+                    snapshot.progress,
+                    snapshot.bytesDownloaded,
+                    snapshot.bytesTotal
+                );
+            }
+        } else {
+            JSObject progressData = new JSObject();
+            progressData.put("id", snapshot.id);
+            progressData.put("progress", snapshot.progress);
+            progressData.put("bytesWritten", snapshot.bytesDownloaded);
+            progressData.put("bytesTotal", snapshot.bytesTotal);
+            notifyListeners("downloadProgress", progressData);
+
+            if (snapshot.status == DownloadManager.STATUS_SUCCESSFUL) {
+                JSObject completedData = new JSObject();
+                completedData.put("id", snapshot.id);
+                notifyListeners("downloadCompleted", completedData);
+                shouldContinue = false;
+            } else if (snapshot.status == DownloadManager.STATUS_FAILED) {
+                JSObject failedData = new JSObject();
+                failedData.put("id", snapshot.id);
+                failedData.put("error", "Download failed");
+                notifyListeners("downloadFailed", failedData);
+                shouldContinue = false;
+            }
         }
 
         if (scheduleNext && shouldContinue) {
@@ -264,16 +551,20 @@ public class CapacitorDownloaderPlugin extends Plugin {
         private final float progress;
         private final int status;
         private final boolean found;
+        private final long bytesDownloaded;
+        private final long bytesTotal;
 
-        private ProgressSnapshot(String id, float progress, int status, boolean found) {
+        private ProgressSnapshot(String id, float progress, int status, boolean found, long bytesDownloaded, long bytesTotal) {
             this.id = id;
             this.progress = progress;
             this.status = status;
             this.found = found;
+            this.bytesDownloaded = bytesDownloaded;
+            this.bytesTotal = bytesTotal;
         }
 
         private static ProgressSnapshot notFound(String id) {
-            return new ProgressSnapshot(id, 0f, -1, false);
+            return new ProgressSnapshot(id, 0f, -1, false, 0, 0);
         }
     }
 
@@ -294,6 +585,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
         String id = call.getString("id");
         if (id == null) {
             call.reject("Download not found");
+            return;
+        }
+
+        if (batches.containsKey(id)) {
+            stopBatch(call, id);
             return;
         }
 
@@ -325,11 +621,48 @@ public class CapacitorDownloaderPlugin extends Plugin {
         );
     }
 
+    private void stopBatch(PluginCall call, String batchId) {
+        DownloadBatchState batch = batches.remove(batchId);
+        if (batch == null) {
+            call.reject("Download not found");
+            return;
+        }
+        batch.cancelled.set(true);
+
+        List<Long> childDownloadIds = new ArrayList<>();
+        for (int index = 0; index < batch.fileCount; index++) {
+            String childId = DownloadBatchState.fileTaskId(batchId, index);
+            Long childDownloadId = downloads.remove(childId);
+            if (childDownloadId != null && !isPendingDownload(childDownloadId)) {
+                childDownloadIds.add(childDownloadId);
+            }
+        }
+
+        runDownloadManagerWork(
+            call,
+            () -> {
+                removeSystemDownloads(childDownloadIds);
+                call.resolve(new JSObject().put("removed", !childDownloadIds.isEmpty()));
+            },
+            () -> batches.putIfAbsent(batchId, batch)
+        );
+    }
+
     @PluginMethod
     public void checkStatus(PluginCall call) {
         String id = call.getString("id");
         if (id == null) {
             call.reject("Download not found");
+            return;
+        }
+
+        DownloadBatchState batch = batches.get(id);
+        if (batch != null) {
+            JSObject result = new JSObject();
+            result.put("id", id);
+            result.put("state", batch.failed.get() ? "ERROR" : "RUNNING");
+            result.put("progress", batch.overallProgress());
+            call.resolve(result);
             return;
         }
 

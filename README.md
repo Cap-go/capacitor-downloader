@@ -35,6 +35,30 @@ We build, improve and fix our plugins with heavy use of AI, so issues usually ge
 - **Progress events**: `downloadProgress`, `downloadCompleted` and `downloadFailed` listeners.
 - **Status and files**: `checkStatus()` for a task and `getFileInfo()` for a downloaded file.
 - **Platforms**: iOS and Android. iOS uses a background `URLSession`, Android uses `DownloadManager`. Not available on web.
+- **Batch downloads**: pass `files` on `download()` to let native code own a multi-file batch (overall plus per-file progress, one completion when all succeed).
+
+## Multi-file batch downloads
+
+For several large assets, start one batch instead of many independent downloads. The top-level `id` is the batch id. Each entry in `files` needs `url` and `destination`. Shared options such as `headers`, `network`, and `notification` apply to every file in the batch.
+
+```typescript
+import { CapacitorDownloader } from '@capgo/capacitor-downloader';
+
+await CapacitorDownloader.addListener('downloadProgress', (event) => {
+  console.log(event.id, event.progress, event.fileIndex, event.fileProgress);
+});
+
+await CapacitorDownloader.download({
+  id: 'offline-pack',
+  files: [
+    { url: 'https://example.com/a.zip', destination: 'pack/a.zip' },
+    { url: 'https://example.com/b.zip', destination: 'pack/b.zip' },
+  ],
+  notification: 'hidden',
+});
+```
+
+`downloadProgress` includes `progress` (overall, 0 to 1) plus `fileIndex` and `fileProgress` for the file that moved. `downloadCompleted` fires once when every file succeeds. If any file fails, the plugin emits `downloadFailed` for the batch id (with `fileIndex` when known) and cancels the rest. Call `stop({ id })` with the batch id to cancel the whole batch.
 
 ## Why Capacitor Downloader?
 
@@ -214,16 +238,16 @@ Get information about a downloaded file.
 ### addListener('downloadProgress', ...)
 
 ```typescript
-addListener(eventName: 'downloadProgress', listenerFunc: (progress: { id: string; progress: number; bytesWritten?: number | undefined; bytesTotal?: number | undefined; }) => void) => Promise<PluginListenerHandle>
+addListener(eventName: 'downloadProgress', listenerFunc: (progress: { id: string; progress: number; bytesWritten?: number | undefined; bytesTotal?: number | undefined; fileIndex?: number | undefined; fileProgress?: number | undefined; }) => void) => Promise<PluginListenerHandle>
 ```
 
 Listen for download progress updates.
 Fired periodically as download progresses.
 
-| Param              | Type                                                                                                              | Description                           |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| **`eventName`**    | <code>'downloadProgress'</code>                                                                                   | - Must be 'downloadProgress'          |
-| **`listenerFunc`** | <code>(progress: { id: string; progress: number; bytesWritten?: number; bytesTotal?: number; }) =&gt; void</code> | - Callback receiving progress updates |
+| Param              | Type                                                                                                                                                         | Description                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
+| **`eventName`**    | <code>'downloadProgress'</code>                                                                                                                              | - Must be 'downloadProgress'          |
+| **`listenerFunc`** | <code>(progress: { id: string; progress: number; bytesWritten?: number; bytesTotal?: number; fileIndex?: number; fileProgress?: number; }) =&gt; void</code> | - Callback receiving progress updates |
 
 **Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
 
@@ -252,16 +276,16 @@ Fired when a download finishes successfully.
 ### addListener('downloadFailed', ...)
 
 ```typescript
-addListener(eventName: 'downloadFailed', listenerFunc: (error: { id: string; error: string; }) => void) => Promise<PluginListenerHandle>
+addListener(eventName: 'downloadFailed', listenerFunc: (error: { id: string; error: string; fileIndex?: number | undefined; }) => void) => Promise<PluginListenerHandle>
 ```
 
 Listen for download failures.
 Fired when a download encounters an error.
 
-| Param              | Type                                                            | Description                            |
-| ------------------ | --------------------------------------------------------------- | -------------------------------------- |
-| **`eventName`**    | <code>'downloadFailed'</code>                                   | - Must be 'downloadFailed'             |
-| **`listenerFunc`** | <code>(error: { id: string; error: string; }) =&gt; void</code> | - Callback receiving error information |
+| Param              | Type                                                                                | Description                            |
+| ------------------ | ----------------------------------------------------------------------------------- | -------------------------------------- |
+| **`eventName`**    | <code>'downloadFailed'</code>                                                       | - Must be 'downloadFailed'             |
+| **`listenerFunc`** | <code>(error: { id: string; error: string; fileIndex?: number; }) =&gt; void</code> | - Callback receiving error information |
 
 **Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
 
@@ -313,13 +337,24 @@ Configuration options for starting a download.
 
 | Prop               | Type                                               | Description                                                                                                                                                                                                                                                                                                                     | Since |
 | ------------------ | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| **`id`**           | <code>string</code>                                | Unique identifier for this download task                                                                                                                                                                                                                                                                                        |       |
-| **`url`**          | <code>string</code>                                | URL of the file to download                                                                                                                                                                                                                                                                                                     |       |
-| **`destination`**  | <code>string</code>                                | Local file path where the download will be saved                                                                                                                                                                                                                                                                                |       |
+| **`id`**           | <code>string</code>                                | Unique identifier for this download task (or the whole batch when `files` is set)                                                                                                                                                                                                                                               |       |
+| **`url`**          | <code>string</code>                                | URL of the file to download (required when `files` is omitted)                                                                                                                                                                                                                                                                  |       |
+| **`destination`**  | <code>string</code>                                | Local file path where the download will be saved (required when `files` is omitted)                                                                                                                                                                                                                                             |       |
+| **`files`**        | <code>DownloadFileSpec[]</code>                    | Download multiple files as one native-owned batch. The batch shares the top-level `id`. Progress events include per-file and overall progress. `downloadCompleted` fires once when every file succeeds. Any failure cancels the batch.                                                                                          | 8.4.0 |
 | **`headers`**      | <code>{ [key: string]: string; }</code>            | Optional HTTP headers to include in the request                                                                                                                                                                                                                                                                                 |       |
 | **`network`**      | <code>'cellular' \| 'wifi-only'</code>             | Network type requirement for download                                                                                                                                                                                                                                                                                           |       |
 | **`priority`**     | <code>'high' \| 'normal' \| 'low'</code>           | Download priority level                                                                                                                                                                                                                                                                                                         |       |
 | **`notification`** | <code>'completed' \| 'progress' \| 'hidden'</code> | Android DownloadManager notification visibility. - `'completed'` (default): show while downloading and keep the notification after completion. - `'progress'`: show while downloading, remove the notification when finished. - `'hidden'`: no system notification; use plugin progress events instead. Ignored on iOS and Web. | 8.2.0 |
+
+
+#### DownloadFileSpec
+
+One file entry inside a multi-file download batch.
+
+| Prop              | Type                | Description                                      |
+| ----------------- | ------------------- | ------------------------------------------------ |
+| **`url`**         | <code>string</code> | URL of the file to download                      |
+| **`destination`** | <code>string</code> | Local file path where the download will be saved |
 
 
 #### PluginListenerHandle

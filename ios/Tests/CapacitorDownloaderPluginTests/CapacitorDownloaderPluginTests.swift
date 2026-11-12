@@ -87,6 +87,20 @@ final class DownloadDestinationStoreTests: XCTestCase {
     }
 }
 
+final class DownloadBatchProgressTests: XCTestCase {
+    func testOverallProgressAveragesFiles() {
+        let overall = DownloadBatchProgress.overallProgress(fileProgress: [1, 0.5, 0], fileCount: 3)
+        XCTAssertEqual(overall, 0.5, accuracy: 0.0001)
+    }
+
+    func testBatchCoordinatorParsesTaskId() {
+        let coordinator = DownloadBatchCoordinator()
+        let parts = coordinator.parseBatchId(from: coordinator.fileTaskId(batchId: "bundle", fileIndex: 2))
+        XCTAssertEqual(parts?.batchId, "bundle")
+        XCTAssertEqual(parts?.fileIndex, 2)
+    }
+}
+
 final class DownloadHTTPValidatorTests: XCTestCase {
     func testSuccessfulStatusCodes() {
         XCTAssertTrue(DownloadHTTPValidator.isSuccessfulStatusCode(200))

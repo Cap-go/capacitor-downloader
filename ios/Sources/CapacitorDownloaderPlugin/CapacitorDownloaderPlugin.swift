@@ -87,6 +87,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
         let destination = call.getString("destination") ?? ""
         DownloadDestinationStore.shared.setDestination(destination, for: id)
+        DownloadCompletedNotificationStore.shared.setText(call.getString("downloadCompletedNotificationText"), for: id)
 
         var request = URLRequest(url: url)
         if let headers = call.getObject("headers") as? [String: String] {
@@ -139,6 +140,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         task.cancel()
         removeTask(for: id)
         DownloadDestinationStore.shared.removeDestination(for: id)
+        DownloadCompletedNotificationStore.shared.removeText(for: id)
         call.resolve()
     }
 
@@ -204,6 +206,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
         let storedDestination = DownloadDestinationStore.shared.takeDestination(for: id)
         guard let destinationURL = destinationURL(for: id, storedDestination: storedDestination) else {
+            DownloadCompletedNotificationStore.shared.removeText(for: id)
             notifyListeners("downloadFailed", data: ["id": id, "error": "Unable to resolve destination"])
             return
         }
@@ -211,6 +214,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         if let httpResponse = downloadTask.response as? HTTPURLResponse,
            !DownloadHTTPValidator.isSuccessfulStatusCode(httpResponse.statusCode) {
             try? FileManager.default.removeItem(at: location)
+            DownloadCompletedNotificationStore.shared.removeText(for: id)
             notifyListeners(
                 "downloadFailed",
                 data: ["id": id, "error": "HTTP \(httpResponse.statusCode)"]
@@ -225,7 +229,11 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             }
             try FileManager.default.moveItem(at: location, to: destinationURL)
             notifyListeners("downloadCompleted", data: ["id": id])
+            if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: id) {
+                DownloadCompletedNotificationPresenter.presentIfAllowed(downloadId: id, body: completionText)
+            }
         } catch {
+            DownloadCompletedNotificationStore.shared.removeText(for: id)
             notifyListeners("downloadFailed", data: ["id": id, "error": error.localizedDescription])
         }
     }
@@ -243,6 +251,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         }
 
         if let error = error {
+            DownloadCompletedNotificationStore.shared.removeText(for: id)
             notifyListeners("downloadFailed", data: ["id": id, "error": error.localizedDescription])
         }
     }

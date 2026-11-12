@@ -40,6 +40,19 @@ export interface DownloadOptions {
    * @since 8.2.0
    */
   notification?: 'completed' | 'progress' | 'hidden';
+  /**
+   * Optional localized text for a system notification when the download finishes.
+   *
+   * When set, iOS and Android may show a local notification after a successful download
+   * if the user granted notification permission. If permission is denied, the download
+   * still completes and no notification is shown. Tapping the notification reopens the app.
+   *
+   * Omitted or empty means no completion notification from the plugin (use
+   * `downloadCompleted` events while the app is open).
+   *
+   * @since 8.4.0
+   */
+  downloadCompletedNotificationText?: string;
 }
 
 /**
@@ -59,6 +72,7 @@ export interface CapacitorDownloaderPlugin {
    *   url: 'https://example.com/file.pdf',
    *   destination: 'downloads/file.pdf',
    *   notification: 'hidden', // Android: no system notification; use downloadProgress events
+   *   downloadCompletedNotificationText: 'Your file is ready', // opt-in completion alert
    * });
    * ```
    */

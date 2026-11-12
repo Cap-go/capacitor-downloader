@@ -87,6 +87,48 @@ final class DownloadDestinationStoreTests: XCTestCase {
     }
 }
 
+final class DownloadCompletedNotificationTextTests: XCTestCase {
+    func testNormalizeRejectsBlank() {
+        XCTAssertNil(DownloadCompletedNotificationText.normalize(nil))
+        XCTAssertNil(DownloadCompletedNotificationText.normalize(""))
+        XCTAssertNil(DownloadCompletedNotificationText.normalize("  "))
+    }
+
+    func testNormalizeTrims() {
+        XCTAssertEqual(DownloadCompletedNotificationText.normalize("  Ready  "), "Ready")
+    }
+}
+
+final class DownloadCompletedNotificationStoreTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var store: DownloadCompletedNotificationStore!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: "CapacitorDownloaderNotificationTests")!
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderNotificationTests")
+        store = DownloadCompletedNotificationStore(defaults: defaults)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderNotificationTests")
+        super.tearDown()
+    }
+
+    func testSetAndTakeText() {
+        store.setText("  Finished  ", for: "task-1")
+
+        XCTAssertEqual(store.takeText(for: "task-1"), "Finished")
+        XCTAssertNil(store.takeText(for: "task-1"))
+    }
+
+    func testRemoveText() {
+        store.setText("Done", for: "task-1")
+        store.removeText(for: "task-1")
+        XCTAssertNil(store.takeText(for: "task-1"))
+    }
+}
+
 final class DownloadHTTPValidatorTests: XCTestCase {
     func testSuccessfulStatusCodes() {
         XCTAssertTrue(DownloadHTTPValidator.isSuccessfulStatusCode(200))

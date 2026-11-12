@@ -35,6 +35,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private ExecutorService downloadManagerExecutor;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private BroadcastReceiver downloadReceiver;
+    private final DownloadCompletedNotificationStore completedNotificationStore = new DownloadCompletedNotificationStore();
 
     @Override
     public void load() {
@@ -121,8 +122,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         final String notification = call.getString("notification");
+        completedNotificationStore.setText(id, call.getString("downloadCompletedNotificationText"));
         final long pendingToken = reservePendingDownload();
         if (downloads.putIfAbsent(id, pendingToken) != null) {
+            completedNotificationStore.remove(id);
             call.reject("Download already exists");
             return;
         }
@@ -130,6 +133,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             call,
             () -> {
                 if (!isTrackedDownload(id, pendingToken)) {
+                    completedNotificationStore.remove(id);
                     call.reject("Download was cancelled");
                     return;
                 }
@@ -139,6 +143,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     downloadId = downloadManager.enqueue(request);
                 } catch (SecurityException e) {
                     downloads.remove(id, pendingToken);
+                    completedNotificationStore.remove(id);
                     if ("hidden".equals(notification)) {
                         call.reject("Hidden downloads require android.permission.DOWNLOAD_WITHOUT_NOTIFICATION in the app manifest", e);
                     } else {
@@ -147,6 +152,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     return;
                 } catch (RuntimeException e) {
                     downloads.remove(id, pendingToken);
+                    completedNotificationStore.remove(id);
                     call.reject("Download could not be enqueued", e);
                     return;
                 }
@@ -155,9 +161,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     try {
                         downloadManager.remove(downloadId);
                     } catch (RuntimeException e) {
+                        completedNotificationStore.remove(id);
                         call.reject("Download was cancelled", e);
                         return;
                     }
+                    completedNotificationStore.remove(id);
                     call.reject("Download was cancelled");
                     return;
                 }
@@ -170,7 +178,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 // Start a periodic progress check
                 startProgressCheck(id, downloadId);
             },
-            () -> downloads.remove(id, pendingToken)
+            () -> {
+                downloads.remove(id, pendingToken);
+                completedNotificationStore.remove(id);
+            }
         );
     }
 
@@ -244,12 +255,17 @@ public class CapacitorDownloaderPlugin extends Plugin {
             JSObject completedData = new JSObject();
             completedData.put("id", snapshot.id);
             notifyListeners("downloadCompleted", completedData);
+            String completionText = completedNotificationStore.takeText(snapshot.id);
+            if (completionText != null) {
+                DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), snapshot.id, completionText);
+            }
             shouldContinue = false;
         } else if (snapshot.status == DownloadManager.STATUS_FAILED) {
             JSObject failedData = new JSObject();
             failedData.put("id", snapshot.id);
             failedData.put("error", "Download failed");
             notifyListeners("downloadFailed", failedData);
+            completedNotificationStore.remove(snapshot.id);
             shouldContinue = false;
         }
 
@@ -297,6 +313,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
+        completedNotificationStore.remove(id);
         Long downloadId = downloads.remove(id);
         if (downloadId == null) {
             call.reject("Download not found");

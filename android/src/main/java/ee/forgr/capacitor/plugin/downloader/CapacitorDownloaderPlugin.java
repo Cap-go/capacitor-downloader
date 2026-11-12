@@ -411,8 +411,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (batch == null) {
             return;
         }
-        DownloadBatchState removed = batches.remove(batch.batchId, batch);
-        if (removed != batch) {
+        if (!batches.remove(batch.batchId, batch)) {
             return;
         }
         for (String childId : batch.ownedChildIds) {

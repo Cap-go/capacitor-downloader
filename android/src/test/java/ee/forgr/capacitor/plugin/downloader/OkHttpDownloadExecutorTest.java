@@ -1,0 +1,73 @@
+package ee.forgr.capacitor.plugin.downloader;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
+import android.content.Context;
+import com.getcapacitor.JSObject;
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import okhttp3.mockwebserver.MockResponse;
+import okhttp3.mockwebserver.MockWebServer;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.Test;
+import org.mockito.Mockito;
+
+public class OkHttpDownloadExecutorTest {
+
+    private MockWebServer server;
+    private OkHttpDownloadExecutor executor;
+    private File tempDir;
+
+    @Before
+    public void setUp() throws Exception {
+        server = new MockWebServer();
+        server.start();
+        Context context = Mockito.mock(Context.class);
+        Mockito.when(context.getApplicationContext()).thenReturn(context);
+        executor = new OkHttpDownloadExecutor(context);
+        tempDir = new File(System.getProperty("java.io.tmpdir"), "okhttp-download-test");
+        tempDir.mkdirs();
+    }
+
+    @After
+    public void tearDown() throws Exception {
+        server.shutdown();
+    }
+
+    @Test
+    public void downloadsBytesToDestination() throws Exception {
+        byte[] payload = "offline-package".getBytes(StandardCharsets.UTF_8);
+        server.enqueue(
+            new MockResponse().setBody(new okio.Buffer().write(payload)).addHeader("Content-Length", String.valueOf(payload.length))
+        );
+
+        File destination = new File(tempDir, "pkg.bin");
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicBoolean success = new AtomicBoolean(false);
+        AtomicReference<String> error = new AtomicReference<>();
+
+        executor.start(
+            "task-1",
+            server.url("/file").toString(),
+            destination,
+            new JSObject(),
+            "cellular",
+            (id, progress) -> {},
+            (id, ok, errorMessage) -> {
+                success.set(ok);
+                error.set(errorMessage);
+                finished.countDown();
+            }
+        );
+
+        assertTrue(finished.await(10, TimeUnit.SECONDS));
+        assertTrue(success.get());
+        assertEquals(payload.length, destination.length());
+    }
+}

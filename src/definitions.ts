@@ -20,7 +20,12 @@ export interface DownloadOptions {
   id: string;
   /** URL of the file to download */
   url: string;
-  /** Local file path where the download will be saved */
+  /**
+   * Local file path where the download will be saved.
+   *
+   * On Android, relative paths support optional roots: `cache/...`, `files/...`, `public-downloads/...`, or a path
+   * under app external files (default). See README for details.
+   */
   destination: string;
   /** Optional HTTP headers to include in the request */
   headers?: { [key: string]: string };
@@ -35,11 +40,25 @@ export interface DownloadOptions {
    * - `'progress'`: show while downloading, remove the notification when finished.
    * - `'hidden'`: no system notification; use plugin progress events instead.
    *
-   * Ignored on iOS and Web.
+   * On the OkHttp Android path, notifications are not shown during the transfer. With `'completed'`, a single
+   * completion notification may be posted when the file finishes. Ignored on iOS and Web.
    *
    * @since 8.2.0
    */
   notification?: 'completed' | 'progress' | 'hidden';
+  /**
+   * Android HTTP stack used for the download.
+   *
+   * - `'auto'` (default): OkHttp for app-private destinations (`cache/...`, `files/...`, or an absolute path under
+   *   cache/data/files); DownloadManager for legacy relative paths under app external storage and `public-downloads/...`.
+   * - `'okhttp'`: always use OkHttp (required for sensitive files in cache or internal storage).
+   * - `'downloadManager'`: always use the system DownloadManager.
+   *
+   * Ignored on iOS and Web.
+   *
+   * @since 8.4.0
+   */
+  androidHttpEngine?: 'auto' | 'okhttp' | 'downloadManager';
 }
 
 /**
@@ -57,8 +76,9 @@ export interface CapacitorDownloaderPlugin {
    * const task = await Downloader.download({
    *   id: 'my-download',
    *   url: 'https://example.com/file.pdf',
-   *   destination: 'downloads/file.pdf',
-   *   notification: 'hidden', // Android: no system notification; use downloadProgress events
+   *   destination: 'files/offline/package.zip',
+   *   androidHttpEngine: 'auto',
+   *   notification: 'hidden', // Android OkHttp: no notification during download; use downloadProgress events
    * });
    * ```
    */

@@ -335,7 +335,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                 }
                             })
                     );
-                } catch (IllegalStateException | RuntimeException e) {
+                } catch (RuntimeException e) {
                     okHttpDownloadExecutor.abandonTransfer(id);
                     downloads.remove(id);
                     okHttpDestinationFiles.remove(id);

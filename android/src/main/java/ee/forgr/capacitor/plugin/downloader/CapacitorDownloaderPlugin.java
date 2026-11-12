@@ -26,6 +26,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
+import org.json.JSONException;
+import org.json.JSONObject;
 
 @CapacitorPlugin(name = "CapacitorDownloader")
 public class CapacitorDownloaderPlugin extends Plugin {
@@ -197,21 +199,22 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         final List<BatchFileRequest> fileRequests = new ArrayList<>();
-        for (int index = 0; index < files.length(); index++) {
-            JSObject fileObject = files.getJSObject(index);
-            if (fileObject == null) {
-                rollbackBatch(batchId);
-                call.reject("Invalid file entry");
-                return;
+        try {
+            for (int index = 0; index < files.length(); index++) {
+                JSONObject fileObject = files.getJSONObject(index);
+                String url = fileObject.optString("url", null);
+                String destination = fileObject.optString("destination", null);
+                if (url == null || destination == null) {
+                    rollbackBatch(batchId);
+                    call.reject("Each file entry requires url and destination");
+                    return;
+                }
+                fileRequests.add(new BatchFileRequest(index, url, destination));
             }
-            String url = fileObject.getString("url");
-            String destination = fileObject.getString("destination");
-            if (url == null || destination == null) {
-                rollbackBatch(batchId);
-                call.reject("Each file entry requires url and destination");
-                return;
-            }
-            fileRequests.add(new BatchFileRequest(index, url, destination));
+        } catch (JSONException e) {
+            rollbackBatch(batchId);
+            call.reject("Invalid file entry", e);
+            return;
         }
 
         final JSObject headers = call.getObject("headers");

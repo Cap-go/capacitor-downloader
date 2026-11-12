@@ -24,11 +24,14 @@ final class DownloadCompletedNotificationStore {
         defaults.set(map, forKey: Self.userDefaultsKey)
     }
 
-    func takeText(for id: String, generation: UInt64) -> String? {
+    func takeText(for id: String, generation: UInt64?) -> String? {
         lock.lock()
         defer { lock.unlock() }
         var map = entriesMapUnlocked()
-        guard let entry = map[id], Self.generation(from: entry) == generation else {
+        guard let entry = map[id] else {
+            return nil
+        }
+        if let generation, Self.generation(from: entry) != generation {
             return nil
         }
         map.removeValue(forKey: id)
@@ -36,11 +39,14 @@ final class DownloadCompletedNotificationStore {
         return Self.text(from: entry)
     }
 
-    func removeText(for id: String, generation: UInt64) {
+    func removeText(for id: String, generation: UInt64?) {
         lock.lock()
         defer { lock.unlock() }
         var map = entriesMapUnlocked()
-        guard let entry = map[id], Self.generation(from: entry) == generation else {
+        guard let entry = map[id] else {
+            return
+        }
+        if let generation, Self.generation(from: entry) != generation {
             return
         }
         map.removeValue(forKey: id)

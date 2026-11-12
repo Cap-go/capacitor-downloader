@@ -43,13 +43,13 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         return tasks[id]
     }
 
-    private func removeTask(for id: String) {
+    private func removeTask(for id: String, completing task: URLSessionDownloadTask) {
         tasksLock.lock()
         defer { tasksLock.unlock() }
-        if let task = tasks[id] {
-            taskGenerations.removeValue(forKey: task.taskIdentifier)
+        if tasks[id] === task {
+            tasks.removeValue(forKey: id)
         }
-        tasks.removeValue(forKey: id)
+        taskGenerations.removeValue(forKey: task.taskIdentifier)
     }
 
     private func nextGeneration(for id: String) -> UInt64 {
@@ -182,7 +182,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
         let generation = generation(for: id)
         task.cancel()
-        removeTask(for: id)
+        removeTask(for: id, completing: task)
         DownloadDestinationStore.shared.removeDestination(for: id)
         if let generation {
             DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
@@ -302,7 +302,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         }
 
         let generation = generation(for: downloadTask)
-        removeTask(for: id)
+        removeTask(for: id, completing: downloadTask)
 
         if error != nil {
             _ = DownloadDestinationStore.shared.takeDestination(for: id)

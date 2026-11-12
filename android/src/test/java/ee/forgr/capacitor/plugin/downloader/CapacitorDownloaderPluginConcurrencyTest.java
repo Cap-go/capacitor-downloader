@@ -169,14 +169,14 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         downloads.put("test-id", 42L);
 
         DownloadCompletedNotificationStore notificationStore = getNotificationStore(plugin);
-        notificationStore.setText("test-id", "Keep me");
+        notificationStore.setText("test-id", "Keep me", 1L);
         when(downloadManager.remove(42L)).thenThrow(new RuntimeException("binder failure"));
 
         PluginCall call = mockPluginCall("test-id");
         plugin.stop(call);
 
         verify(call, timeout(5000)).reject(eq("Download could not be removed"), any(RuntimeException.class));
-        assertEquals("Keep me", notificationStore.takeText("test-id"));
+        assertEquals("Keep me", notificationStore.takeText("test-id", 1L));
         assertEquals(Long.valueOf(42L), downloads.get("test-id"));
     }
 
@@ -185,7 +185,7 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         downloads.put("dup-id", 99L);
 
         DownloadCompletedNotificationStore notificationStore = getNotificationStore(plugin);
-        notificationStore.setText("dup-id", "Original");
+        notificationStore.setText("dup-id", "Original", 1L);
 
         PluginCall call = mock(PluginCall.class);
         when(call.getString("id")).thenReturn("dup-id");
@@ -196,7 +196,7 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         plugin.download(call);
 
         verify(call).reject("Download already exists");
-        assertEquals("Original", notificationStore.takeText("dup-id"));
+        assertEquals("Original", notificationStore.takeText("dup-id", 1L));
         assertEquals(Long.valueOf(99L), downloads.get("dup-id"));
     }
 

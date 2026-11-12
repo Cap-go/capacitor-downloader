@@ -134,6 +134,11 @@ final class DownloadCompletedNotificationStoreTests: XCTestCase {
         XCTAssertEqual(store.takeText(for: "task-1", generation: 2), "New")
     }
 
+    func testTakeTextWithoutTaskGenerationUsesStoredEntry() {
+        store.setText("Ready", for: "task-1", generation: 3)
+        XCTAssertEqual(store.takeText(for: "task-1", generation: nil), "Ready")
+    }
+
     func testConcurrentUpdatesDoNotDropEntries() {
         let ids = (0..<50).map { "task-\($0)" }
         DispatchQueue.concurrentPerform(iterations: ids.count) { index in

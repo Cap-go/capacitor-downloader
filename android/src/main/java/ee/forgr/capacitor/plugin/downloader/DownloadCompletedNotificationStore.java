@@ -15,83 +15,114 @@ final class DownloadCompletedNotificationStore {
     private static final String MAP_KEY = "texts";
 
     private final SharedPreferences prefs;
-    private final ConcurrentHashMap<String, String> inMemoryTexts;
+    private final ConcurrentHashMap<String, Entry> inMemoryEntries;
     private final Object lock = new Object();
 
     DownloadCompletedNotificationStore(Context context) {
         prefs = context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        inMemoryTexts = null;
+        inMemoryEntries = null;
     }
 
     DownloadCompletedNotificationStore() {
         prefs = null;
-        inMemoryTexts = new ConcurrentHashMap<>();
+        inMemoryEntries = new ConcurrentHashMap<>();
     }
 
-    void setText(String downloadId, String text) {
+    void setText(String downloadId, String text, long generation) {
         if (downloadId == null) {
             return;
         }
         String normalized = DownloadCompletedNotificationText.normalize(text);
         synchronized (lock) {
-            Map<String, String> texts = loadTextsLocked();
+            Map<String, Entry> entries = loadEntriesLocked();
             if (normalized == null) {
-                texts.remove(downloadId);
+                entries.remove(downloadId);
             } else {
-                texts.put(downloadId, normalized);
+                entries.put(downloadId, new Entry(normalized, generation));
             }
-            saveTextsLocked(texts);
+            saveEntriesLocked(entries);
         }
     }
 
-    String takeText(String downloadId) {
+    String takeText(String downloadId, long generation) {
         if (downloadId == null) {
             return null;
         }
         synchronized (lock) {
-            Map<String, String> texts = loadTextsLocked();
-            String value = texts.remove(downloadId);
-            saveTextsLocked(texts);
-            return value;
+            Map<String, Entry> entries = loadEntriesLocked();
+            Entry entry = entries.get(downloadId);
+            if (entry == null || entry.generation != generation) {
+                return null;
+            }
+            entries.remove(downloadId);
+            saveEntriesLocked(entries);
+            return entry.text;
         }
     }
 
-    void remove(String downloadId) {
+    void remove(String downloadId, long generation) {
         if (downloadId == null) {
             return;
         }
         synchronized (lock) {
-            Map<String, String> texts = loadTextsLocked();
-            texts.remove(downloadId);
-            saveTextsLocked(texts);
+            Map<String, Entry> entries = loadEntriesLocked();
+            Entry entry = entries.get(downloadId);
+            if (entry == null || entry.generation != generation) {
+                return;
+            }
+            entries.remove(downloadId);
+            saveEntriesLocked(entries);
         }
     }
 
-    private Map<String, String> loadTextsLocked() {
-        if (inMemoryTexts != null) {
-            return new HashMap<>(inMemoryTexts);
+    private Map<String, Entry> loadEntriesLocked() {
+        if (inMemoryEntries != null) {
+            return new HashMap<>(inMemoryEntries);
         }
         String json = prefs.getString(MAP_KEY, "{}");
-        Map<String, String> texts = new HashMap<>();
+        Map<String, Entry> entries = new HashMap<>();
         try {
             JSONObject object = new JSONObject(json);
             Iterator<String> keys = object.keys();
             while (keys.hasNext()) {
                 String key = keys.next();
-                texts.put(key, object.getString(key));
+                JSONObject entryObject = object.getJSONObject(key);
+                entries.put(key, new Entry(entryObject.getString("text"), entryObject.getLong("generation")));
             }
         } catch (JSONException ignored) {
             return new HashMap<>();
         }
-        return texts;
+        return entries;
     }
 
-    private void saveTextsLocked(Map<String, String> texts) {
-        if (inMemoryTexts != null) {
-            inMemoryTexts.clear();
-            inMemoryTexts.putAll(texts);
+    private void saveEntriesLocked(Map<String, Entry> entries) {
+        if (inMemoryEntries != null) {
+            inMemoryEntries.clear();
+            inMemoryEntries.putAll(entries);
             return;
         }
-        prefs.edit().putString(MAP_KEY, new JSONObject(texts).toString()).apply();
+        JSONObject object = new JSONObject();
+        for (Map.Entry<String, Entry> entry : entries.entrySet()) {
+            try {
+                JSONObject entryObject = new JSONObject();
+                entryObject.put("text", entry.getValue().text);
+                entryObject.put("generation", entry.getValue().generation);
+                object.put(entry.getKey(), entryObject);
+            } catch (JSONException ignored) {
+                // Skip malformed serialization for a single key.
+            }
+        }
+        prefs.edit().putString(MAP_KEY, object.toString()).apply();
+    }
+
+    private static final class Entry {
+
+        private final String text;
+        private final long generation;
+
+        private Entry(String text, long generation) {
+            this.text = text;
+            this.generation = generation;
+        }
     }
 }

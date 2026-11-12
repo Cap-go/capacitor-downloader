@@ -17,19 +17,26 @@ public class DownloadCompletedNotificationStoreTest {
 
     @Test
     public void setTakeAndRemove() {
-        store.setText("job-1", "  Done  ");
-        assertEquals("Done", store.takeText("job-1"));
-        assertNull(store.takeText("job-1"));
+        store.setText("job-1", "  Done  ", 1L);
+        assertEquals("Done", store.takeText("job-1", 1L));
+        assertNull(store.takeText("job-1", 1L));
 
-        store.setText("job-2", "Hello");
-        store.remove("job-2");
-        assertNull(store.takeText("job-2"));
+        store.setText("job-2", "Hello", 1L);
+        store.remove("job-2", 1L);
+        assertNull(store.takeText("job-2", 1L));
     }
 
     @Test
     public void blankTextClearsEntry() {
-        store.setText("job-1", "Hello");
-        store.setText("job-1", "   ");
-        assertNull(store.takeText("job-1"));
+        store.setText("job-1", "Hello", 1L);
+        store.setText("job-1", "   ", 2L);
+        assertNull(store.takeText("job-1", 1L));
+    }
+
+    @Test
+    public void generationMismatchPreservesEntry() {
+        store.setText("job-1", "New", 2L);
+        store.remove("job-1", 1L);
+        assertEquals("New", store.takeText("job-1", 2L));
     }
 }

@@ -97,6 +97,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
+        if (downloads.containsKey(id)) {
+            call.reject("Download already exists");
+            return;
+        }
+
         final String notification = call.getString("notification");
         final DownloadManager.Request request;
         try {

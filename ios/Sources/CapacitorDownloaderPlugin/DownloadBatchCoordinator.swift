@@ -244,16 +244,16 @@ final class DownloadBatchCoordinator {
         )
     }
 
-    func beginFailure(batchId: String) -> ActiveBatch? {
+    func beginFailure(batchId: String) -> Bool {
         batchesLock.lock()
         defer { batchesLock.unlock() }
         guard var batch = batches[batchId], !batch.failed, !batch.cancelled else {
-            return nil
+            return false
         }
         batch.failed = true
         batches[batchId] = batch
         persistBatchesLocked()
-        return batch
+        return true
     }
 
     enum BatchCompletionState {

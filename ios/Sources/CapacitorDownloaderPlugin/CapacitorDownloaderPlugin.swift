@@ -278,7 +278,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func failBatch(batchId: String, fileIndex: Int, error: String) {
-        guard batchCoordinator.beginFailure(batchId: batchId) != nil else {
+        guard batchCoordinator.beginFailure(batchId: batchId) else {
             return
         }
         cancelBatchTasks(batchId: batchId)

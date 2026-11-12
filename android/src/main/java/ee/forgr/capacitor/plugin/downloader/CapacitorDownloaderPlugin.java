@@ -96,6 +96,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
+        final long pendingToken = reservePendingDownload();
+        if (downloads.putIfAbsent(id, pendingToken) != null) {
+            call.reject("Download already exists");
+            return;
+        }
+
         DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url))
             .setNotificationVisibility(DownloadNotificationVisibility.resolve(call.getString("notification")))
             .setAllowedOverMetered(true)
@@ -123,12 +129,6 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         final String notification = call.getString("notification");
         completedNotificationStore.setText(id, call.getString("downloadCompletedNotificationText"));
-        final long pendingToken = reservePendingDownload();
-        if (downloads.putIfAbsent(id, pendingToken) != null) {
-            completedNotificationStore.remove(id);
-            call.reject("Download already exists");
-            return;
-        }
         runDownloadManagerWork(
             call,
             () -> {

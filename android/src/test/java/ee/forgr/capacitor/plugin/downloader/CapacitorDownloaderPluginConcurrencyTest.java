@@ -164,6 +164,26 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     @Test
+    public void duplicateDownloadRejectsWithoutChangingNotificationText() throws Exception {
+        downloads.put("dup-id", 99L);
+
+        DownloadCompletedNotificationStore notificationStore = getNotificationStore(plugin);
+        notificationStore.setText("dup-id", "Original");
+
+        PluginCall call = mock(PluginCall.class);
+        when(call.getString("id")).thenReturn("dup-id");
+        when(call.getString("url")).thenReturn("https://example.com/file");
+        when(call.getString("destination")).thenReturn("file.bin");
+        when(call.getString("downloadCompletedNotificationText")).thenReturn("Replacement");
+
+        plugin.download(call);
+
+        verify(call).reject("Download already exists");
+        assertEquals("Original", notificationStore.takeText("dup-id"));
+        assertEquals(Long.valueOf(99L), downloads.get("dup-id"));
+    }
+
+    @Test
     public void checkStatusRejectsWhenQueryThrows() throws Exception {
         downloads.put("test-id", 42L);
         DownloadManager throwingManager = mock(DownloadManager.class, (invocation) -> {
@@ -197,5 +217,11 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         Field field = target.getClass().getDeclaredField(fieldName);
         field.setAccessible(true);
         field.set(target, value);
+    }
+
+    private static DownloadCompletedNotificationStore getNotificationStore(CapacitorDownloaderPlugin plugin) throws Exception {
+        Field field = CapacitorDownloaderPlugin.class.getDeclaredField("completedNotificationStore");
+        field.setAccessible(true);
+        return (DownloadCompletedNotificationStore) field.get(plugin);
     }
 }

@@ -127,6 +127,17 @@ final class DownloadCompletedNotificationStoreTests: XCTestCase {
         store.removeText(for: "task-1")
         XCTAssertNil(store.takeText(for: "task-1"))
     }
+
+    func testConcurrentUpdatesDoNotDropEntries() {
+        let ids = (0..<50).map { "task-\($0)" }
+        DispatchQueue.concurrentPerform(iterations: ids.count) { index in
+            store.setText("Body \(index)", for: ids[index])
+        }
+
+        for (index, id) in ids.enumerated() {
+            XCTAssertEqual(store.takeText(for: id), "Body \(index)")
+        }
+    }
 }
 
 final class DownloadHTTPValidatorTests: XCTestCase {

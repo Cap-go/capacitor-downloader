@@ -70,4 +70,39 @@ public class OkHttpDownloadExecutorTest {
         assertTrue(success.get());
         assertEquals(payload.length, destination.length());
     }
+
+    @Test
+    public void preservesExistingDestinationWhenConnectionFails() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(503));
+
+        File destination = new File(tempDir, "existing-pack.bin");
+        byte[] existing = "keep-me".getBytes(StandardCharsets.UTF_8);
+        try (java.io.FileOutputStream fos = new java.io.FileOutputStream(destination)) {
+            fos.write(existing);
+        }
+
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicBoolean success = new AtomicBoolean(true);
+
+        executor.start(
+            "task-2",
+            server.url("/file").toString(),
+            destination,
+            new JSObject(),
+            "cellular",
+            (id, progress) -> {},
+            (id, ok, errorMessage) -> {
+                success.set(ok);
+                finished.countDown();
+            }
+        );
+
+        assertTrue(finished.await(10, TimeUnit.SECONDS));
+        assertEquals(false, success.get());
+        assertEquals(existing.length, destination.length());
+        try (java.io.FileInputStream fis = new java.io.FileInputStream(destination)) {
+            byte[] restored = fis.readAllBytes();
+            assertEquals(new String(existing, StandardCharsets.UTF_8), new String(restored, StandardCharsets.UTF_8));
+        }
+    }
 }

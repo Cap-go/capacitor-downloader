@@ -23,24 +23,11 @@ export interface DownloadFileSpec {
 }
 
 /**
- * Configuration options for starting a download.
+ * Shared download options used by single and batch downloads.
  */
-export interface DownloadOptions {
+export interface DownloadCommonOptions {
   /** Unique identifier for this download task (or the whole batch when `files` is set) */
   id: string;
-  /** URL of the file to download (required when `files` is omitted) */
-  url?: string;
-  /** Local file path where the download will be saved (required when `files` is omitted) */
-  destination?: string;
-  /**
-   * Download multiple files as one native-owned batch.
-   *
-   * The batch shares the top-level `id`. Progress events include per-file and overall progress.
-   * `downloadCompleted` fires once when every file succeeds. Any failure cancels the batch.
-   *
-   * @since 8.4.0
-   */
-  files?: DownloadFileSpec[];
   /** Optional HTTP headers to include in the request */
   headers?: { [key: string]: string };
   /** Network type requirement for download */
@@ -60,6 +47,37 @@ export interface DownloadOptions {
    */
   notification?: 'completed' | 'progress' | 'hidden';
 }
+
+/**
+ * Configuration options for a single-file download.
+ */
+export interface DownloadSingleOptions extends DownloadCommonOptions {
+  /** URL of the file to download */
+  url: string;
+  /** Local file path where the download will be saved */
+  destination: string;
+  files?: never;
+}
+
+/**
+ * Configuration options for a multi-file batch download.
+ */
+export interface DownloadBatchOptions extends DownloadCommonOptions {
+  /**
+   * Download multiple files as one native-owned batch.
+   *
+   * The batch shares the top-level `id`. Progress events include per-file and overall progress.
+   * `downloadCompleted` fires once when every file succeeds. Any failure cancels the batch.
+   *
+   * @since 8.4.0
+   */
+  files: DownloadFileSpec[];
+  url?: never;
+  destination?: never;
+}
+
+/** Options accepted by {@link CapacitorDownloaderPlugin.download}. */
+export type DownloadOptions = DownloadSingleOptions | DownloadBatchOptions;
 
 /**
  * Capacitor plugin for downloading files with background support.

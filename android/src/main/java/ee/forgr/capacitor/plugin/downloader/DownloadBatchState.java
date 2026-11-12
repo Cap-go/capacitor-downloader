@@ -1,6 +1,8 @@
 package ee.forgr.capacitor.plugin.downloader;
 
 import java.util.Arrays;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 final class DownloadBatchState {
@@ -37,6 +39,8 @@ final class DownloadBatchState {
     final String batchId;
     final int fileCount;
     final float[] fileProgress;
+    final boolean[] fileCompleted;
+    final Set<String> ownedChildIds = ConcurrentHashMap.newKeySet();
     final AtomicBoolean failed = new AtomicBoolean(false);
     final AtomicBoolean cancelled = new AtomicBoolean(false);
     int completedCount;
@@ -45,8 +49,13 @@ final class DownloadBatchState {
         this.batchId = batchId;
         this.fileCount = fileCount;
         this.fileProgress = new float[fileCount];
+        this.fileCompleted = new boolean[fileCount];
         Arrays.fill(this.fileProgress, 0f);
         this.completedCount = 0;
+    }
+
+    void trackChildId(String childId) {
+        ownedChildIds.add(childId);
     }
 
     float overallProgress() {
@@ -57,6 +66,10 @@ final class DownloadBatchState {
         if (fileIndex < 0 || fileIndex >= fileCount) {
             return false;
         }
+        if (fileCompleted[fileIndex]) {
+            return completedCount >= fileCount;
+        }
+        fileCompleted[fileIndex] = true;
         fileProgress[fileIndex] = 1f;
         completedCount++;
         return completedCount >= fileCount;
@@ -64,6 +77,9 @@ final class DownloadBatchState {
 
     synchronized void updateFileProgress(int fileIndex, float progress) {
         if (fileIndex < 0 || fileIndex >= fileCount) {
+            return;
+        }
+        if (fileCompleted[fileIndex]) {
             return;
         }
         fileProgress[fileIndex] = Math.max(0f, Math.min(1f, progress));

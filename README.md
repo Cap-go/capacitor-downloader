@@ -127,6 +127,7 @@ npx cap sync
 * [`removeAllListeners()`](#removealllisteners)
 * [`getPluginVersion()`](#getpluginversion)
 * [Interfaces](#interfaces)
+* [Type Aliases](#type-aliases)
 
 </docgen-index>
 
@@ -331,20 +332,26 @@ Represents the current state and progress of a download task.
 | **`state`**    | <code>'PENDING' \| 'RUNNING' \| 'PAUSED' \| 'DONE' \| 'ERROR'</code> | Current state of the download           |
 
 
-#### DownloadOptions
+#### DownloadSingleOptions
 
-Configuration options for starting a download.
+Configuration options for a single-file download.
 
-| Prop               | Type                                               | Description                                                                                                                                                                                                                                                                                                                     | Since |
-| ------------------ | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
-| **`id`**           | <code>string</code>                                | Unique identifier for this download task (or the whole batch when `files` is set)                                                                                                                                                                                                                                               |       |
-| **`url`**          | <code>string</code>                                | URL of the file to download (required when `files` is omitted)                                                                                                                                                                                                                                                                  |       |
-| **`destination`**  | <code>string</code>                                | Local file path where the download will be saved (required when `files` is omitted)                                                                                                                                                                                                                                             |       |
-| **`files`**        | <code>DownloadFileSpec[]</code>                    | Download multiple files as one native-owned batch. The batch shares the top-level `id`. Progress events include per-file and overall progress. `downloadCompleted` fires once when every file succeeds. Any failure cancels the batch.                                                                                          | 8.4.0 |
-| **`headers`**      | <code>{ [key: string]: string; }</code>            | Optional HTTP headers to include in the request                                                                                                                                                                                                                                                                                 |       |
-| **`network`**      | <code>'cellular' \| 'wifi-only'</code>             | Network type requirement for download                                                                                                                                                                                                                                                                                           |       |
-| **`priority`**     | <code>'high' \| 'normal' \| 'low'</code>           | Download priority level                                                                                                                                                                                                                                                                                                         |       |
-| **`notification`** | <code>'completed' \| 'progress' \| 'hidden'</code> | Android DownloadManager notification visibility. - `'completed'` (default): show while downloading and keep the notification after completion. - `'progress'`: show while downloading, remove the notification when finished. - `'hidden'`: no system notification; use plugin progress events instead. Ignored on iOS and Web. | 8.2.0 |
+| Prop              | Type                | Description                                      |
+| ----------------- | ------------------- | ------------------------------------------------ |
+| **`url`**         | <code>string</code> | URL of the file to download                      |
+| **`destination`** | <code>string</code> | Local file path where the download will be saved |
+| **`files`**       |                     |                                                  |
+
+
+#### DownloadBatchOptions
+
+Configuration options for a multi-file batch download.
+
+| Prop              | Type                            | Description                                                                                                                                                                                                                            | Since |
+| ----------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| **`files`**       | <code>DownloadFileSpec[]</code> | Download multiple files as one native-owned batch. The batch shares the top-level `id`. Progress events include per-file and overall progress. `downloadCompleted` fires once when every file succeeds. Any failure cancels the batch. | 8.4.0 |
+| **`url`**         |                                 |                                                                                                                                                                                                                                        |       |
+| **`destination`** |                                 |                                                                                                                                                                                                                                        |       |
 
 
 #### DownloadFileSpec
@@ -362,6 +369,16 @@ One file entry inside a multi-file download batch.
 | Prop         | Type                                      |
 | ------------ | ----------------------------------------- |
 | **`remove`** | <code>() =&gt; Promise&lt;void&gt;</code> |
+
+
+### Type Aliases
+
+
+#### DownloadOptions
+
+Options accepted by {@link CapacitorDownloaderPlugin.download}.
+
+<code><a href="#downloadsingleoptions">DownloadSingleOptions</a> | <a href="#downloadbatchoptions">DownloadBatchOptions</a></code>
 
 </docgen-api>
 

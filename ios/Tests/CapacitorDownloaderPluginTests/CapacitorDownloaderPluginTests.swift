@@ -93,11 +93,18 @@ final class DownloadBatchProgressTests: XCTestCase {
         XCTAssertEqual(overall, 0.5, accuracy: 0.0001)
     }
 
-    func testBatchCoordinatorParsesTaskId() {
+    func testBatchCoordinatorParsesRegisteredTaskId() {
         let coordinator = DownloadBatchCoordinator()
-        let parts = coordinator.parseBatchId(from: coordinator.fileTaskId(batchId: "bundle", fileIndex: 2))
+        guard let generation = coordinator.startBatch(batchId: "bundle", fileCount: 3, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+        let taskId = coordinator.fileTaskId(batchId: "bundle", generation: generation, fileIndex: 2)
+        coordinator.registerChildTask(batchId: "bundle", taskId: taskId, fileIndex: 2, destination: "downloads/a.zip")
+        let parts = coordinator.childParts(for: taskId)
         XCTAssertEqual(parts?.batchId, "bundle")
         XCTAssertEqual(parts?.fileIndex, 2)
+        XCTAssertNil(coordinator.childParts(for: "report#0"))
     }
 }
 

@@ -45,7 +45,8 @@ export interface DownloadOptions {
    * - `'hidden'`: no system notification; use plugin progress events instead.
    *
    * On the OkHttp Android path, notifications are not shown during the transfer. With `'completed'`, a single
-   * completion notification may be posted when the file finishes. Ignored on iOS and Web.
+   * completion notification may be posted when the file finishes (Android 13+ requires runtime
+   * `POST_NOTIFICATIONS` in the host app). Ignored on iOS and Web.
    *
    * @since 8.2.0
    */

@@ -59,7 +59,7 @@ public class OkHttpDownloadExecutorTest {
             new JSObject(),
             "cellular",
             (id, progress) -> {},
-            (id, ok, errorMessage) -> {
+            (id, ok, cancelled, errorMessage) -> {
                 success.set(ok);
                 error.set(errorMessage);
                 finished.countDown();
@@ -71,6 +71,35 @@ public class OkHttpDownloadExecutorTest {
         assertEquals(payload.length, destination.length());
         byte[] onDisk = java.nio.file.Files.readAllBytes(destination.toPath());
         assertEquals(new String(payload, StandardCharsets.UTF_8), new String(onDisk, StandardCharsets.UTF_8));
+    }
+
+    @Test
+    public void downloadsShortDestinationFileName() throws Exception {
+        byte[] payload = "x".getBytes(StandardCharsets.UTF_8);
+        server.enqueue(
+            new MockResponse().setBody(new okio.Buffer().write(payload)).addHeader("Content-Length", String.valueOf(payload.length))
+        );
+
+        File destination = new File(tempDir, "a");
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicBoolean success = new AtomicBoolean(false);
+
+        executor.start(
+            "task-short",
+            server.url("/file").toString(),
+            destination,
+            new JSObject(),
+            "cellular",
+            (id, progress) -> {},
+            (id, ok, cancelled, errorMessage) -> {
+                success.set(ok);
+                finished.countDown();
+            }
+        );
+
+        assertTrue(finished.await(10, TimeUnit.SECONDS));
+        assertTrue(success.get());
+        assertEquals(1, destination.length());
     }
 
     @Test
@@ -93,7 +122,7 @@ public class OkHttpDownloadExecutorTest {
             new JSObject(),
             "cellular",
             (id, progress) -> {},
-            (id, ok, errorMessage) -> {
+            (id, ok, cancelled, errorMessage) -> {
                 success.set(ok);
                 finished.countDown();
             }

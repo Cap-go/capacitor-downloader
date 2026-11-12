@@ -58,4 +58,17 @@ public class AndroidDownloadDestinationTest {
         File target = new File(filesDir, "nested/item.bin");
         assertTrue(AndroidDownloadDestination.preferOkHttpInAutoMode(context, target));
     }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void rejectsPathTraversalUnderFilesPrefix() {
+        AndroidDownloadDestination.resolve(context, "files/../cache/escape.bin");
+    }
+
+    @Test
+    public void prefersOkHttpWhenExternalFilesDirUnavailable() {
+        Mockito.when(context.getExternalFilesDir(null)).thenReturn(null);
+        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(context, "offline/pack.zip");
+        assertTrue(resolved.preferOkHttpInAutoMode);
+        assertEquals(new File(filesDir, "offline/pack.zip").getPath(), resolved.file.getPath());
+    }
 }

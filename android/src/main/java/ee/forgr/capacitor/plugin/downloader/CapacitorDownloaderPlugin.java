@@ -91,6 +91,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
         return trackedDownloadId != null && trackedDownloadId.longValue() == systemDownloadId;
     }
 
+    private boolean isCurrentOkHttpDownload(String id) {
+        Long trackedDownloadId = downloads.get(id);
+        return trackedDownloadId != null && isOkHttpDownload(trackedDownloadId);
+    }
+
     @PluginMethod
     public void download(PluginCall call) {
         String id = call.getString("id");
@@ -120,6 +125,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         if (httpEngine == AndroidHttpEngineSelector.Engine.DOWNLOAD_MANAGER && resolvedDestination.preferOkHttpInAutoMode) {
             call.reject("DownloadManager cannot write to app-private destinations. Use androidHttpEngine 'auto' or 'okhttp'.");
+            return;
+        }
+
+        if (httpEngine == AndroidHttpEngineSelector.Engine.OKHTTP && destination.trim().startsWith("public-downloads/")) {
+            call.reject("OkHttp cannot write to public-downloads/ paths. Use androidHttpEngine 'auto' or 'downloadManager'.");
             return;
         }
 
@@ -266,7 +276,15 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     return;
                 }
 
+                if (!okHttpDownloadExecutor.beginTransfer(id)) {
+                    downloads.remove(id, pendingToken);
+                    okHttpDestinationFiles.remove(id);
+                    call.reject("Download already exists");
+                    return;
+                }
+
                 if (!downloads.replace(id, pendingToken, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID)) {
+                    okHttpDownloadExecutor.abandonTransfer(id);
                     okHttpDestinationFiles.remove(id);
                     call.reject("Download was cancelled");
                     return;
@@ -286,20 +304,29 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         network,
                         (downloadId, progress) ->
                             handler.post(() -> {
+                                if (!isCurrentOkHttpDownload(downloadId)) {
+                                    return;
+                                }
                                 JSObject progressData = new JSObject();
                                 progressData.put("id", downloadId);
                                 progressData.put("progress", progress);
                                 notifyListeners("downloadProgress", progressData);
                             }),
-                        (downloadId, success, errorMessage) ->
+                        (downloadId, success, cancelled, errorMessage) ->
                             handler.post(() -> {
-                                okHttpDestinationFiles.remove(downloadId);
+                                if (!isCurrentOkHttpDownload(downloadId)) {
+                                    return;
+                                }
+                                if (cancelled) {
+                                    return;
+                                }
                                 if (success) {
                                     JSObject completedData = new JSObject();
                                     completedData.put("id", downloadId);
                                     notifyListeners("downloadCompleted", completedData);
                                     DownloadCompletionNotifier.notifyIfRequested(getContext(), downloadId, notificationMode, true);
                                 } else {
+                                    okHttpDestinationFiles.remove(downloadId);
                                     JSObject failedData = new JSObject();
                                     failedData.put("id", downloadId);
                                     failedData.put("error", errorMessage != null ? errorMessage : "Download failed");
@@ -308,7 +335,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                 }
                             })
                     );
-                } catch (IllegalStateException e) {
+                } catch (IllegalStateException | RuntimeException e) {
+                    okHttpDownloadExecutor.abandonTransfer(id);
                     downloads.remove(id);
                     okHttpDestinationFiles.remove(id);
                     JSObject failedData = new JSObject();

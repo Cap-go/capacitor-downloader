@@ -12,6 +12,7 @@ import java.io.InputStream;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import okhttp3.Call;
 import okhttp3.OkHttpClient;
@@ -22,6 +23,7 @@ import okhttp3.ResponseBody;
 public class OkHttpDownloadExecutor {
 
     public static final long TRACKED_DOWNLOAD_ID = -2L;
+    private static final int MAX_CONCURRENT_TRANSFERS = 4;
 
     public enum State {
         PENDING,
@@ -41,6 +43,7 @@ public class OkHttpDownloadExecutor {
         public volatile String errorMessage;
         public volatile Call call;
         public volatile File tempFile;
+        public volatile File committedDestination;
         public final AtomicBoolean cancelled = new AtomicBoolean(false);
 
         ActiveDownload(String id) {
@@ -48,16 +51,35 @@ public class OkHttpDownloadExecutor {
         }
     }
 
-    private final OkHttpClient client = new OkHttpClient.Builder().build();
+    private final OkHttpClient defaultClient;
     private final Map<String, ActiveDownload> activeDownloads = new ConcurrentHashMap<>();
+    private final Semaphore transferSlots = new Semaphore(MAX_CONCURRENT_TRANSFERS);
     private final Context context;
 
     public OkHttpDownloadExecutor(Context context) {
         this.context = context.getApplicationContext();
+        this.defaultClient = new OkHttpClient.Builder().build();
     }
 
     public ActiveDownload getActive(String id) {
         return activeDownloads.get(id);
+    }
+
+    /**
+     * Reserve an in-memory slot before the transfer id is published to JS. Prevents a race where
+     * {@code stop()} runs between marker publication and worker registration.
+     */
+    public boolean beginTransfer(String id) {
+        ActiveDownload active = new ActiveDownload(id);
+        active.state = State.PENDING;
+        return activeDownloads.putIfAbsent(id, active) == null;
+    }
+
+    public void abandonTransfer(String id) {
+        ActiveDownload active = activeDownloads.remove(id);
+        if (active != null && active.call != null) {
+            active.call.cancel();
+        }
     }
 
     public void start(
@@ -69,130 +91,218 @@ public class OkHttpDownloadExecutor {
         ProgressReporter reporter,
         CompletionListener completionListener
     ) {
+        ActiveDownload active = activeDownloads.get(id);
+        if (active == null) {
+            throw new IllegalStateException("Download not registered");
+        }
+
         if ("wifi-only".equals(network) && !isOnWifi()) {
+            activeDownloads.remove(id, active);
             throw new IllegalStateException("Wi-Fi required for this download");
         }
 
-        ActiveDownload active = new ActiveDownload(id);
-        if (activeDownloads.putIfAbsent(id, active) != null) {
-            throw new IllegalStateException("Download already exists");
-        }
-
-        File tempFile = null;
+        boolean acquired = false;
         try {
-            Request.Builder requestBuilder = new Request.Builder().url(url);
-            if (headers != null) {
-                Iterator<String> it = headers.keys();
-                if (it != null) {
-                    while (it.hasNext()) {
-                        String key = it.next();
-                        requestBuilder.addHeader(key, headers.getString(key));
+            transferSlots.acquire();
+            acquired = true;
+
+            OkHttpClient client = buildClientForNetwork(network);
+
+            File tempFile = null;
+            try {
+                Request.Builder requestBuilder = new Request.Builder().url(url);
+                if (headers != null) {
+                    Iterator<String> it = headers.keys();
+                    if (it != null) {
+                        while (it.hasNext()) {
+                            String key = it.next();
+                            requestBuilder.addHeader(key, headers.getString(key));
+                        }
                     }
                 }
-            }
 
-            Request request = requestBuilder.build();
-            Call call = client.newCall(request);
-            active.call = call;
-            active.state = State.RUNNING;
-            File parent = destinationFile.getParentFile();
-            if (parent != null && !parent.exists() && !parent.mkdirs()) {
-                throw new IOException("Could not create destination directory");
-            }
+                Request request = requestBuilder.build();
+                Call call = client.newCall(request);
+                active.call = call;
+                active.state = State.RUNNING;
 
-            tempFile = File.createTempFile(
-                destinationFile.getName() + "-",
-                ".capgo-download",
-                parent != null ? parent : destinationFile.getParentFile()
-            );
-            active.tempFile = tempFile;
+                File parent = destinationFile.getParentFile();
+                if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                    throw new IOException("Could not create destination directory");
+                }
 
-            try (Response response = call.execute()) {
+                tempFile = createTempDownloadFile(destinationFile, parent);
+                active.tempFile = tempFile;
+
+                try (Response response = call.execute()) {
+                    if (active.cancelled.get()) {
+                        finishCancelled(active, tempFile, id, completionListener);
+                        return;
+                    }
+
+                    int code = response.code();
+                    if (code == 206) {
+                        active.state = State.ERROR;
+                        active.errorMessage = "Partial content (HTTP 206) is not supported";
+                        tempFile.delete();
+                        completionListener.onFinished(id, false, false, active.errorMessage);
+                        return;
+                    }
+
+                    if (!response.isSuccessful()) {
+                        active.state = State.ERROR;
+                        active.errorMessage = "HTTP " + code;
+                        tempFile.delete();
+                        completionListener.onFinished(id, false, false, active.errorMessage);
+                        return;
+                    }
+
+                    ResponseBody body = response.body();
+                    if (body == null) {
+                        active.state = State.ERROR;
+                        active.errorMessage = "Empty response body";
+                        tempFile.delete();
+                        completionListener.onFinished(id, false, false, active.errorMessage);
+                        return;
+                    }
+
+                    long total = body.contentLength();
+                    active.bytesTotal = total > 0 ? total : 0L;
+
+                    try (InputStream input = body.byteStream(); FileOutputStream output = new FileOutputStream(tempFile)) {
+                        byte[] buffer = new byte[8192];
+                        long written = 0L;
+                        int read;
+                        while ((read = input.read(buffer)) != -1) {
+                            if (active.cancelled.get() || ("wifi-only".equals(network) && !isOnWifi())) {
+                                finishCancelled(active, tempFile, id, completionListener);
+                                return;
+                            }
+                            output.write(buffer, 0, read);
+                            written += read;
+                            active.bytesWritten = written;
+                            if (total > 0) {
+                                active.progress = (float) written / (float) total;
+                            }
+                            reporter.reportProgress(id, active.progress);
+                        }
+                    }
+
+                    if (!commitTempToDestination(active, tempFile, destinationFile)) {
+                        finishCancelled(active, tempFile, id, completionListener);
+                        return;
+                    }
+                    tempFile = null;
+
+                    active.committedDestination = destinationFile;
+                    active.bytesWritten = destinationFile.length();
+                    active.progress = 1f;
+                    active.state = State.DONE;
+                    reporter.reportProgress(id, 1f);
+                    completionListener.onFinished(id, true, false, null);
+                }
+            } catch (IOException e) {
+                if (tempFile != null && tempFile.exists()) {
+                    tempFile.delete();
+                }
                 if (active.cancelled.get()) {
                     active.state = State.CANCELLED;
-                    tempFile.delete();
-                    completionListener.onFinished(id, false, "Download was cancelled");
-                    return;
-                }
-
-                if (!response.isSuccessful()) {
+                    completionListener.onFinished(id, false, true, null);
+                } else {
                     active.state = State.ERROR;
-                    active.errorMessage = "HTTP " + response.code();
-                    tempFile.delete();
-                    completionListener.onFinished(id, false, active.errorMessage);
-                    return;
+                    active.errorMessage = e.getMessage() != null ? e.getMessage() : "Download failed";
+                    completionListener.onFinished(id, false, false, active.errorMessage);
                 }
-
-                ResponseBody body = response.body();
-                if (body == null) {
-                    active.state = State.ERROR;
-                    active.errorMessage = "Empty response body";
-                    tempFile.delete();
-                    completionListener.onFinished(id, false, active.errorMessage);
-                    return;
-                }
-
-                long total = body.contentLength();
-                active.bytesTotal = total > 0 ? total : 0L;
-
-                try (InputStream input = body.byteStream(); FileOutputStream output = new FileOutputStream(tempFile)) {
-                    byte[] buffer = new byte[8192];
-                    long written = 0L;
-                    int read;
-                    while ((read = input.read(buffer)) != -1) {
-                        if (active.cancelled.get()) {
-                            active.state = State.CANCELLED;
-                            tempFile.delete();
-                            completionListener.onFinished(id, false, "Download was cancelled");
-                            return;
-                        }
-                        output.write(buffer, 0, read);
-                        written += read;
-                        active.bytesWritten = written;
-                        if (total > 0) {
-                            active.progress = (float) written / (float) total;
-                        }
-                        reporter.reportProgress(id, active.progress);
-                    }
-                }
-
-                if (destinationFile.exists() && !destinationFile.delete()) {
-                    throw new IOException("Could not replace existing destination file");
-                }
-                if (!tempFile.renameTo(destinationFile)) {
-                    throw new IOException("Could not move downloaded file into place");
-                }
-                tempFile = null;
-                active.tempFile = null;
-
-                active.bytesWritten = destinationFile.length();
-                active.progress = 1f;
-                active.state = State.DONE;
-                reporter.reportProgress(id, 1f);
-                completionListener.onFinished(id, true, null);
+            } catch (RuntimeException e) {
+                activeDownloads.remove(id, active);
+                throw e;
             }
-        } catch (IOException e) {
-            if (tempFile != null && tempFile.exists()) {
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            active.state = State.ERROR;
+            active.errorMessage = "Download interrupted";
+            completionListener.onFinished(id, false, false, active.errorMessage);
+        } finally {
+            if (acquired) {
+                transferSlots.release();
+            }
+        }
+    }
+
+    private boolean commitTempToDestination(ActiveDownload active, File tempFile, File destinationFile) throws IOException {
+        synchronized (active) {
+            if (active.cancelled.get()) {
                 tempFile.delete();
+                active.state = State.CANCELLED;
+                return false;
+            }
+            active.tempFile = null;
+            if (destinationFile.exists() && !destinationFile.delete()) {
+                throw new IOException("Could not replace existing destination file");
             }
             if (active.cancelled.get()) {
+                tempFile.delete();
                 active.state = State.CANCELLED;
-                activeDownloads.remove(id, active);
-                completionListener.onFinished(id, false, "Download was cancelled");
-            } else {
-                active.state = State.ERROR;
-                active.errorMessage = e.getMessage() != null ? e.getMessage() : "Download failed";
-                completionListener.onFinished(id, false, active.errorMessage);
+                return false;
             }
-        } catch (RuntimeException e) {
-            activeDownloads.remove(id, active);
-            throw e;
+            if (!tempFile.renameTo(destinationFile)) {
+                throw new IOException("Could not move downloaded file into place");
+            }
+            return true;
         }
+    }
+
+    private void finishCancelled(ActiveDownload active, File tempFile, String id, CompletionListener completionListener) {
+        active.state = State.CANCELLED;
+        if (tempFile != null && tempFile.exists()) {
+            tempFile.delete();
+        }
+        completionListener.onFinished(id, false, true, null);
+    }
+
+    private static File createTempDownloadFile(File destinationFile, File parent) throws IOException {
+        String baseName = destinationFile.getName();
+        if (baseName.isEmpty()) {
+            baseName = "download";
+        }
+        String prefix = baseName.length() >= 3 ? baseName : "dl" + baseName;
+        if (prefix.length() < 3) {
+            prefix = "cap";
+        }
+        return File.createTempFile(prefix + "-", ".capgo-download", parent != null ? parent : destinationFile.getParentFile());
+    }
+
+    private OkHttpClient buildClientForNetwork(String network) {
+        if (!"wifi-only".equals(network)) {
+            return defaultClient;
+        }
+        Network wifi = findWifiNetwork();
+        if (wifi == null) {
+            throw new IllegalStateException("Wi-Fi required for this download");
+        }
+        return defaultClient.newBuilder().socketFactory(wifi.getSocketFactory()).build();
+    }
+
+    private Network findWifiNetwork() {
+        ConnectivityManager connectivityManager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (connectivityManager == null) {
+            return null;
+        }
+        for (Network network : connectivityManager.getAllNetworks()) {
+            NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(network);
+            if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                return network;
+            }
+        }
+        return null;
     }
 
     public boolean cancel(String id, File destinationFile) {
         ActiveDownload active = activeDownloads.get(id);
         if (active == null) {
+            if (destinationFile != null && destinationFile.exists()) {
+                return destinationFile.delete();
+            }
             return false;
         }
         active.cancelled.set(true);
@@ -200,9 +310,17 @@ public class OkHttpDownloadExecutor {
         if (call != null) {
             call.cancel();
         }
-        File temp = active.tempFile;
-        if (temp != null && temp.exists()) {
-            temp.delete();
+        synchronized (active) {
+            File temp = active.tempFile;
+            if (temp != null && temp.exists()) {
+                temp.delete();
+            }
+            File committed = active.committedDestination;
+            if (committed != null && committed.exists()) {
+                committed.delete();
+            } else if (destinationFile != null && destinationFile.exists() && active.state == State.DONE) {
+                destinationFile.delete();
+            }
         }
         activeDownloads.remove(id, active);
         return true;
@@ -237,6 +355,6 @@ public class OkHttpDownloadExecutor {
     }
 
     public interface CompletionListener {
-        void onFinished(String id, boolean success, String errorMessage);
+        void onFinished(String id, boolean success, boolean cancelled, String errorMessage);
     }
 }

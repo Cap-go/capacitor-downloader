@@ -56,7 +56,9 @@ export interface DownloadOptions {
    *
    * - `'auto'` (default): OkHttp for app-private destinations (`cache/...`, `files/...`, or an absolute path under
    *   cache/data/files); DownloadManager for legacy relative paths under app external storage and `public-downloads/...`.
-   * - `'okhttp'`: always use OkHttp (required for sensitive files in cache or internal storage).
+   * - `'okhttp'`: always use OkHttp (required for sensitive files in cache or internal storage). Not for
+   *   `public-downloads/...` paths. Transfers run in the app process and do not continue after the process is killed
+   *   (unlike DownloadManager on those paths).
    * - `'downloadManager'`: always use the system DownloadManager.
    *
    * Ignored on iOS and Web.

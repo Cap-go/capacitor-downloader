@@ -23,8 +23,12 @@ export interface DownloadOptions {
   /**
    * Local file path where the download will be saved.
    *
-   * On Android, relative paths support optional roots: `cache/...`, `files/...`, `public-downloads/...`, or a path
-   * under app external files (default). See README for details.
+   * On Android, relative paths support optional roots:
+   * - `cache/...` saves under app cache (OkHttp with `androidHttpEngine: 'auto'`).
+   * - `files/...` saves under app-private internal storage (OkHttp with `auto`).
+   * - `public-downloads/...` saves to the public Downloads folder (DownloadManager).
+   * - Any other relative path saves under app external files (DownloadManager with `auto`).
+   * Absolute paths and `file://` URIs are supported; `auto` picks OkHttp when the path is under cache, data, or files dirs.
    */
   destination: string;
   /** Optional HTTP headers to include in the request */

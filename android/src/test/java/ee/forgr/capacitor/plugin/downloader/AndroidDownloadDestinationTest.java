@@ -64,6 +64,11 @@ public class AndroidDownloadDestinationTest {
         AndroidDownloadDestination.resolve(context, "files/../cache/escape.bin");
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void rejectsDestinationAtStorageRoot() {
+        AndroidDownloadDestination.resolve(context, "files/");
+    }
+
     @Test
     public void prefersOkHttpWhenExternalFilesDirUnavailable() {
         Mockito.when(context.getExternalFilesDir(null)).thenReturn(null);

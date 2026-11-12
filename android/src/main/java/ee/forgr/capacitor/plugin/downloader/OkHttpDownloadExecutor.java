@@ -173,6 +173,7 @@ public class OkHttpDownloadExecutor {
                         byte[] buffer = new byte[8192];
                         long written = 0L;
                         int read;
+                        int lastReportedPercent = -1;
                         while ((read = input.read(buffer)) != -1) {
                             if (active.cancelled.get() || ("wifi-only".equals(network) && !isOnWifi())) {
                                 finishCancelled(active, tempFile, id, completionListener);
@@ -184,7 +185,11 @@ public class OkHttpDownloadExecutor {
                             if (total > 0) {
                                 active.progress = (float) written / (float) total;
                             }
-                            reporter.reportProgress(id, active.progress);
+                            int percent = (int) (active.progress * 100f);
+                            if (percent != lastReportedPercent) {
+                                lastReportedPercent = percent;
+                                reporter.reportProgress(id, active.progress);
+                            }
                         }
                     }
 
@@ -194,10 +199,6 @@ public class OkHttpDownloadExecutor {
                     }
                     tempFile = null;
 
-                    active.committedDestination = destinationFile;
-                    active.bytesWritten = destinationFile.length();
-                    active.progress = 1f;
-                    active.state = State.DONE;
                     reporter.reportProgress(id, 1f);
                     completionListener.onFinished(id, true, false, null);
                 }
@@ -248,6 +249,15 @@ public class OkHttpDownloadExecutor {
             if (!tempFile.renameTo(destinationFile)) {
                 throw new IOException("Could not move downloaded file into place");
             }
+            if (active.cancelled.get()) {
+                destinationFile.delete();
+                active.state = State.CANCELLED;
+                return false;
+            }
+            active.committedDestination = destinationFile;
+            active.bytesWritten = destinationFile.length();
+            active.progress = 1f;
+            active.state = State.DONE;
             return true;
         }
     }

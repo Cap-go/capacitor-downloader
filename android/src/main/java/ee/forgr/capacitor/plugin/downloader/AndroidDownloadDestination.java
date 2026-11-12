@@ -71,8 +71,8 @@ public final class AndroidDownloadDestination {
         try {
             String canonical = file.getCanonicalPath();
             String baseCanonical = base.getCanonicalPath();
-            if (!canonical.equals(baseCanonical) && !canonical.startsWith(baseCanonical + File.separator)) {
-                throw new IllegalArgumentException("Destination escapes app storage: " + relative);
+            if (!canonical.startsWith(baseCanonical + File.separator)) {
+                throw new IllegalArgumentException("Destination must name a file under app storage: " + relative);
             }
         } catch (IOException e) {
             throw new IllegalArgumentException("Invalid destination path", e);

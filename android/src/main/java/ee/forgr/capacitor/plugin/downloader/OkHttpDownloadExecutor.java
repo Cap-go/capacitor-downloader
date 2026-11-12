@@ -40,6 +40,7 @@ public class OkHttpDownloadExecutor {
         public volatile long bytesTotal;
         public volatile String errorMessage;
         public volatile Call call;
+        public volatile File tempFile;
         public final AtomicBoolean cancelled = new AtomicBoolean(false);
 
         ActiveDownload(String id) {
@@ -92,6 +93,7 @@ public class OkHttpDownloadExecutor {
         Call call = client.newCall(request);
         active.call = call;
         active.state = State.RUNNING;
+        File tempFile = null;
 
         try {
             File parent = destinationFile.getParentFile();
@@ -99,9 +101,17 @@ public class OkHttpDownloadExecutor {
                 throw new IOException("Could not create destination directory");
             }
 
+            tempFile = File.createTempFile(
+                destinationFile.getName() + "-",
+                ".capgo-download",
+                parent != null ? parent : destinationFile.getParentFile()
+            );
+            active.tempFile = tempFile;
+
             try (Response response = call.execute()) {
                 if (active.cancelled.get()) {
                     active.state = State.CANCELLED;
+                    tempFile.delete();
                     completionListener.onFinished(id, false, "Download was cancelled");
                     return;
                 }
@@ -109,6 +119,7 @@ public class OkHttpDownloadExecutor {
                 if (!response.isSuccessful()) {
                     active.state = State.ERROR;
                     active.errorMessage = "HTTP " + response.code();
+                    tempFile.delete();
                     completionListener.onFinished(id, false, active.errorMessage);
                     return;
                 }
@@ -117,6 +128,7 @@ public class OkHttpDownloadExecutor {
                 if (body == null) {
                     active.state = State.ERROR;
                     active.errorMessage = "Empty response body";
+                    tempFile.delete();
                     completionListener.onFinished(id, false, active.errorMessage);
                     return;
                 }
@@ -124,14 +136,14 @@ public class OkHttpDownloadExecutor {
                 long total = body.contentLength();
                 active.bytesTotal = total > 0 ? total : 0L;
 
-                try (InputStream input = body.byteStream(); FileOutputStream output = new FileOutputStream(destinationFile)) {
+                try (InputStream input = body.byteStream(); FileOutputStream output = new FileOutputStream(tempFile)) {
                     byte[] buffer = new byte[8192];
                     long written = 0L;
                     int read;
                     while ((read = input.read(buffer)) != -1) {
                         if (active.cancelled.get()) {
                             active.state = State.CANCELLED;
-                            destinationFile.delete();
+                            tempFile.delete();
                             completionListener.onFinished(id, false, "Download was cancelled");
                             return;
                         }
@@ -145,6 +157,15 @@ public class OkHttpDownloadExecutor {
                     }
                 }
 
+                if (destinationFile.exists() && !destinationFile.delete()) {
+                    throw new IOException("Could not replace existing destination file");
+                }
+                if (!tempFile.renameTo(destinationFile)) {
+                    throw new IOException("Could not move downloaded file into place");
+                }
+                tempFile = null;
+                active.tempFile = null;
+
                 active.bytesWritten = destinationFile.length();
                 active.progress = 1f;
                 active.state = State.DONE;
@@ -152,14 +173,15 @@ public class OkHttpDownloadExecutor {
                 completionListener.onFinished(id, true, null);
             }
         } catch (IOException e) {
+            if (tempFile != null && tempFile.exists()) {
+                tempFile.delete();
+            }
             if (active.cancelled.get()) {
                 active.state = State.CANCELLED;
-                destinationFile.delete();
                 completionListener.onFinished(id, false, "Download was cancelled");
             } else {
                 active.state = State.ERROR;
                 active.errorMessage = e.getMessage() != null ? e.getMessage() : "Download failed";
-                destinationFile.delete();
                 completionListener.onFinished(id, false, active.errorMessage);
             }
         } finally {
@@ -177,8 +199,9 @@ public class OkHttpDownloadExecutor {
         if (call != null) {
             call.cancel();
         }
-        if (destinationFile != null && destinationFile.exists()) {
-            destinationFile.delete();
+        File temp = active.tempFile;
+        if (temp != null && temp.exists()) {
+            temp.delete();
         }
         activeDownloads.remove(id, active);
         return true;

@@ -75,11 +75,15 @@ public class CapacitorDownloaderPlugin extends Plugin {
     }
 
     private static boolean isPendingDownload(long downloadId) {
-        return downloadId < 0;
+        return downloadId < 0 && downloadId != OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID;
     }
 
     private long reservePendingDownload() {
-        return -pendingDownloadSequence.incrementAndGet();
+        long token;
+        do {
+            token = -pendingDownloadSequence.incrementAndGet();
+        } while (token == OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID);
+        return token;
     }
 
     private boolean isTrackedDownload(String id, long systemDownloadId) {

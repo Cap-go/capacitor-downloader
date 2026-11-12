@@ -37,6 +37,39 @@ We build, improve and fix our plugins with heavy use of AI, so issues usually ge
 - **Platforms**: iOS and Android. iOS uses a background `URLSession`. Android uses `DownloadManager` by default or **OkHttp** for app-private destinations (cache/data) and secure offline packages. Not available on web.
 - **Android private storage**: save under `cache/...` or `files/...` with `androidHttpEngine: 'auto'` (default) or `'okhttp'`; use `notification: 'hidden'` for quiet downloads with plugin events only.
 
+## Android OkHttp engine (8.4.0+)
+
+**New:** opt-in **OkHttp** on Android for downloads into app-private storage (offline packs, encrypted assets, cache). `DownloadManager` remains the default for legacy app external paths and `public-downloads/...`.
+
+```typescript
+await CapacitorDownloader.download({
+  id: 'offline-pack',
+  url: 'https://cdn.example.com/pack.zip',
+  destination: 'files/offline/pack.zip',
+  androidHttpEngine: 'auto', // OkHttp for files/... and cache/...
+  notification: 'hidden', // no system notification during transfer; listen to downloadProgress
+});
+```
+
+| `androidHttpEngine` | Behavior |
+| ------------------- | -------- |
+| `'auto'` (default) | OkHttp for `cache/...`, `files/...`, and paths under internal cache/data/files; DownloadManager for external app storage and `public-downloads/...` |
+| `'okhttp'` | Always OkHttp (use for sensitive internal files) |
+| `'downloadManager'` | Always system DownloadManager |
+
+**Android `destination` prefixes**
+
+| Prefix | Storage | Default engine (`auto`) |
+| ------ | ------- | ------------------------- |
+| `cache/...` | App cache dir | OkHttp |
+| `files/...` | App-private files dir | OkHttp |
+| `public-downloads/...` | Public Downloads folder | DownloadManager |
+| Other relative paths | App external files dir | DownloadManager |
+
+**Notifications on OkHttp:** no notification during the transfer. Use `notification: 'hidden'` with `downloadProgress` events, or `'completed'` to post one notification when the file finishes. DownloadManager paths still honor `completed`, `progress`, and `hidden` as before.
+
+Full guide: https://capgo.app/docs/plugins/downloader/getting-started/#android-okhttp-engine
+
 ## Why Capacitor Downloader?
 
 A reliable **native file downloader** built for Capacitor apps that continues downloads even when your app is backgrounded or closed:
@@ -316,12 +349,12 @@ Configuration options for starting a download.
 | ----------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
 | **`id`**                | <code>string</code>                                  | Unique identifier for this download task                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |       |
 | **`url`**               | <code>string</code>                                  | URL of the file to download                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |       |
-| **`destination`**       | <code>string</code>                                  | Local file path where the download will be saved. On Android, relative paths support optional roots: `cache/...`, `files/...`, `public-downloads/...`, or a path under app external files (default). See README for details.                                                                                                                                                                                                                                                                                                                                                |       |
+| **`destination`**       | <code>string</code>                                  | Local file path where the download will be saved. On Android, relative paths support optional roots: - `cache/...` saves under app cache (OkHttp with `androidHttpEngine: 'auto'`). - `files/...` saves under app-private internal storage (OkHttp with `auto`). - `public-downloads/...` saves to the public Downloads folder (DownloadManager). - Any other relative path saves under app external files (DownloadManager with `auto`). Absolute paths and `file://` URIs are supported; `auto` picks OkHttp when the path is under cache, data, or files dirs.          |       |
 | **`headers`**           | <code>{ [key: string]: string; }</code>              | Optional HTTP headers to include in the request                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |       |
 | **`network`**           | <code>'cellular' \| 'wifi-only'</code>               | Network type requirement for download                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |       |
 | **`priority`**          | <code>'high' \| 'normal' \| 'low'</code>             | Download priority level                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |       |
 | **`notification`**      | <code>'completed' \| 'progress' \| 'hidden'</code>   | Android DownloadManager notification visibility. - `'completed'` (default): show while downloading and keep the notification after completion. - `'progress'`: show while downloading, remove the notification when finished. - `'hidden'`: no system notification; use plugin progress events instead. On the OkHttp Android path, notifications are not shown during the transfer. With `'completed'`, a single completion notification may be posted when the file finishes (Android 13+ requires runtime `POST_NOTIFICATIONS` in the host app). Ignored on iOS and Web. | 8.2.0 |
-| **`androidHttpEngine`** | <code>'auto' \| 'okhttp' \| 'downloadManager'</code> | Android HTTP stack used for the download. - `'auto'` (default): OkHttp for app-private destinations (`cache/...`, `files/...`, or an absolute path under cache/data/files); DownloadManager for legacy relative paths under app external storage and `public-downloads/...`. - `'okhttp'`: always use OkHttp (required for sensitive files in cache or internal storage). - `'downloadManager'`: always use the system DownloadManager. Ignored on iOS and Web.                                                                                                             | 8.4.0 |
+| **`androidHttpEngine`** | <code>'auto' \| 'okhttp' \| 'downloadManager'</code> | Android HTTP stack used for the download. - `'auto'` (default): OkHttp for app-private destinations (`cache/...`, `files/...`, or an absolute path under cache/data/files); DownloadManager for legacy relative paths under app external storage and `public-downloads/...`. - `'okhttp'`: always use OkHttp (required for sensitive files in cache or internal storage). - `'downloadManager'`: always use the system DownloadManager. Ignored on iOS and Web.                                                                                                         | 8.4.0 |
 
 
 #### PluginListenerHandle

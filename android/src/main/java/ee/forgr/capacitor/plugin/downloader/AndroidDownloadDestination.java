@@ -9,7 +9,8 @@ import java.io.IOException;
  *
  * <p>With legacy resolution (default when {@code androidHttpEngine} is omitted), relative paths match
  * released plugin behavior: all paths are under app external files, including {@code cache/...} and
- * {@code files/...} as literal subpaths.
+ * {@code files/...} as literal subpaths. {@code file://} and absolute paths use the same {@code File}
+ * parent resolution as main: {@code new File(getExternalFilesDir(null), child)}.
  *
  * <p>With extended resolution ({@code androidHttpEngine: 'auto'} or {@code 'okhttp'}), relative prefixes:
  * <ul>
@@ -29,6 +30,11 @@ public final class AndroidDownloadDestination {
         }
 
         String trimmed = destination.trim();
+
+        if (!extendedRoots) {
+            return resolveLegacyMain(context, trimmed);
+        }
+
         if (trimmed.startsWith("file://")) {
             File file = new File(android.net.Uri.parse(trimmed).getPath());
             return new ResolvedDestination(file, preferOkHttpInAutoMode(context, file));
@@ -37,17 +43,6 @@ public final class AndroidDownloadDestination {
         if (trimmed.startsWith("/")) {
             File file = new File(trimmed);
             return new ResolvedDestination(file, preferOkHttpInAutoMode(context, file));
-        }
-
-        if (!extendedRoots) {
-            File base = context.getExternalFilesDir(null);
-            boolean usedInternalFallback = base == null;
-            if (usedInternalFallback) {
-                base = context.getFilesDir();
-            }
-            File file = childUnder(base, trimmed);
-            boolean preferOkHttp = usedInternalFallback;
-            return new ResolvedDestination(file, preferOkHttp);
         }
 
         if (trimmed.startsWith("cache/")) {
@@ -75,6 +70,24 @@ public final class AndroidDownloadDestination {
         }
         File file = childUnder(base, trimmed);
         boolean preferOkHttp = usedInternalFallback || preferOkHttpInAutoMode(context, file);
+        return new ResolvedDestination(file, preferOkHttp);
+    }
+
+    private static ResolvedDestination resolveLegacyMain(Context context, String trimmed) {
+        File base = context.getExternalFilesDir(null);
+        boolean usedInternalFallback = base == null;
+        if (usedInternalFallback) {
+            base = context.getFilesDir();
+        }
+        String child = trimmed;
+        if (trimmed.startsWith("file://")) {
+            child = android.net.Uri.parse(trimmed).getPath();
+            if (child == null || child.isEmpty()) {
+                throw new IllegalArgumentException("Invalid destination path");
+            }
+        }
+        File file = new File(base, child);
+        boolean preferOkHttp = usedInternalFallback;
         return new ResolvedDestination(file, preferOkHttp);
     }
 

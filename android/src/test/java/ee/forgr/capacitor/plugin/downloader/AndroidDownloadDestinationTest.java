@@ -44,6 +44,22 @@ public class AndroidDownloadDestinationTest {
     }
 
     @Test
+    public void legacyAbsolutePathMatchesMainFileParentResolution() {
+        String absolute = externalFilesDir.getAbsolutePath() + "/absolute-pack.zip";
+        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(context, absolute, false);
+        assertFalse(resolved.preferOkHttpInAutoMode);
+        assertEquals(new File(externalFilesDir, absolute).getPath(), resolved.file.getPath());
+    }
+
+    @Test
+    public void legacyFileUriMatchesMainFileParentResolution() {
+        String absolute = externalFilesDir.getAbsolutePath() + "/uri-pack.zip";
+        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(context, "file://" + absolute, false);
+        assertFalse(resolved.preferOkHttpInAutoMode);
+        assertEquals(new File(externalFilesDir, absolute).getPath(), resolved.file.getPath());
+    }
+
+    @Test
     public void legacyFilesPathMatchesMainUnderExternalFiles() {
         AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(
             context,

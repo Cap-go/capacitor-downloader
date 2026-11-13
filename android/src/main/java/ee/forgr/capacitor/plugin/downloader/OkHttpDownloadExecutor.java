@@ -59,7 +59,7 @@ public class OkHttpDownloadExecutor {
 
     public OkHttpDownloadExecutor(Context context) {
         this.context = context.getApplicationContext();
-        this.defaultClient = new OkHttpClient.Builder().build();
+        this.defaultClient = new OkHttpClient.Builder().followRedirects(true).followSslRedirects(false).build();
     }
 
     public ActiveDownload getActive(String id) {
@@ -97,7 +97,8 @@ public class OkHttpDownloadExecutor {
             throw new IllegalStateException("Download not registered");
         }
 
-        if ("wifi-only".equals(network) && !isOnWifi()) {
+        Network wifiNetwork = resolveWifiNetworkForTransfer(network);
+        if ("wifi-only".equals(network) && (wifiNetwork == null || !isWifiNetworkUsable(wifiNetwork))) {
             activeDownloads.remove(id, active);
             throw new IllegalStateException("Wi-Fi required for this download");
         }
@@ -114,12 +115,10 @@ public class OkHttpDownloadExecutor {
                 }
             }
 
-            Network boundWifi = null;
-            OkHttpClient client = buildClientForNetwork(network);
-            if ("wifi-only".equals(network)) {
-                boundWifi = findWifiNetwork();
-                active.boundWifiNetwork = boundWifi;
+            if (wifiNetwork != null) {
+                active.boundWifiNetwork = wifiNetwork;
             }
+            OkHttpClient client = buildClientForNetwork(network, wifiNetwork);
 
             File tempFile = null;
             try {
@@ -212,13 +211,6 @@ public class OkHttpDownloadExecutor {
                         while ((read = input.read(buffer)) != -1) {
                             if (active.cancelled.get()) {
                                 finishCancelled(active, tempFile, id, completionListener);
-                                return;
-                            }
-                            if ("wifi-only".equals(network) && boundWifi != null && !isWifiNetworkUsable(boundWifi)) {
-                                tempFile.delete();
-                                active.state = State.ERROR;
-                                active.errorMessage = "Wi-Fi connection lost";
-                                completionListener.onFinished(id, false, false, active.errorMessage);
                                 return;
                             }
                             output.write(buffer, 0, read);
@@ -330,15 +322,21 @@ public class OkHttpDownloadExecutor {
         return File.createTempFile(prefix + "-", ".capgo-download", parent != null ? parent : destinationFile.getParentFile());
     }
 
-    private OkHttpClient buildClientForNetwork(String network) {
+    private OkHttpClient buildClientForNetwork(String network, Network wifiNetwork) {
         if (!"wifi-only".equals(network)) {
             return defaultClient;
         }
-        Network wifi = findWifiNetwork();
-        if (wifi == null) {
+        if (wifiNetwork == null) {
             throw new IllegalStateException("Wi-Fi required for this download");
         }
-        return defaultClient.newBuilder().socketFactory(wifi.getSocketFactory()).build();
+        return defaultClient.newBuilder().socketFactory(wifiNetwork.getSocketFactory()).build();
+    }
+
+    Network resolveWifiNetworkForTransfer(String network) {
+        if (!"wifi-only".equals(network)) {
+            return null;
+        }
+        return findWifiNetwork();
     }
 
     private Network findWifiNetwork() {
@@ -392,11 +390,10 @@ public class OkHttpDownloadExecutor {
     }
 
     public boolean isWifiSatisfied(String network) {
-        return !"wifi-only".equals(network) || isOnWifi();
-    }
-
-    private boolean isOnWifi() {
-        Network wifi = findWifiNetwork();
+        if (!"wifi-only".equals(network)) {
+            return true;
+        }
+        Network wifi = resolveWifiNetworkForTransfer(network);
         return wifi != null && isWifiNetworkUsable(wifi);
     }
 

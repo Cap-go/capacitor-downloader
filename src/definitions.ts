@@ -62,7 +62,7 @@ export interface DownloadOptions {
    * - `'auto'`: OkHttp for app-private destinations (`cache/...`, `files/...`, or an absolute path under
    *   cache/data/files when extended roots apply); DownloadManager for legacy relative paths under app external storage
    *   and `public-downloads/...`.
-   * - `'okhttp'`: always use OkHttp for extended-root destinations. Not for `public-downloads/...` paths. Transfers run
+   * - `'okhttp'`: always use OkHttp for extended-root destinations. Rejects `public-downloads/...` paths. Transfers run
    *   in the app process and do not continue after the process is killed (unlike DownloadManager on those paths).
    * - `'downloadManager'`: always use the system DownloadManager with legacy destination resolution.
    *

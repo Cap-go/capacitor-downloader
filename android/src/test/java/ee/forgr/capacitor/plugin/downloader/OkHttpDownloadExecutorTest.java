@@ -3,6 +3,7 @@ package ee.forgr.capacitor.plugin.downloader;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -168,7 +169,12 @@ public class OkHttpDownloadExecutorTest {
         assertFalse(success.get());
         RecordedRequest first = server.takeRequest();
         assertTrue(first.getPath().endsWith("/start"));
-        assertNull(server.takeRequest(250, TimeUnit.MILLISECONDS));
+        try {
+            server.takeRequest(250, TimeUnit.MILLISECONDS);
+            fail("redirect should not be followed");
+        } catch (InterruptedException expected) {
+            Thread.currentThread().interrupt();
+        }
         assertFalse(destination.exists());
     }
 

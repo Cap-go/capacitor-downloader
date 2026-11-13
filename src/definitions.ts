@@ -23,7 +23,9 @@ export interface DownloadOptions {
   /**
    * Local file path where the download will be saved.
    *
-   * On Android, relative paths support optional roots:
+   * On Android, relative paths support optional roots. Only destinations that use the `cache/` or `files/` prefix
+   * (or an absolute path under internal storage) select app-private roots; any other relative path keeps the legacy
+   * resolution under app external files:
    * - `cache/...` saves under app cache (OkHttp with `androidHttpEngine: 'auto'`).
    * - `files/...` saves under app-private internal storage (OkHttp with `auto`).
    * - `public-downloads/...` saves to the public Downloads folder (DownloadManager).
@@ -59,13 +61,28 @@ export interface DownloadOptions {
    * - `'okhttp'`: always use OkHttp (required for sensitive files in cache or internal storage). Not for
    *   `public-downloads/...` paths. Transfers run in the app process and do not continue after the process is killed
    *   (unlike DownloadManager on those paths).
-   * - `'downloadManager'`: always use the system DownloadManager.
+   * - `'downloadManager'`: always use the system DownloadManager. Cannot write to app-private destinations such as
+   *   `cache/...`, `files/...`, or absolute paths under internal cache, data, or files dirs. Use a legacy relative path
+   *   under app external files or `public-downloads/...` when you need DownloadManager.
    *
    * Ignored on iOS and Web.
    *
    * @since 8.4.0
    */
   androidHttpEngine?: 'auto' | 'okhttp' | 'downloadManager';
+  /**
+   * Optional localized text for a system notification when the download finishes.
+   *
+   * When set, iOS and Android may show a local notification after a successful download
+   * if the user granted notification permission. If permission is denied, the download
+   * still completes and no notification is shown. Tapping the notification reopens the app.
+   *
+   * Omitted or empty means no completion notification from the plugin (use
+   * `downloadCompleted` events while the app is open).
+   *
+   * @since 8.4.0
+   */
+  downloadCompletedNotificationText?: string;
 }
 
 /**
@@ -86,6 +103,7 @@ export interface CapacitorDownloaderPlugin {
    *   destination: 'files/offline/package.zip',
    *   androidHttpEngine: 'auto',
    *   notification: 'hidden', // Android OkHttp: no notification during download; use downloadProgress events
+   *   downloadCompletedNotificationText: 'Your file is ready', // opt-in completion alert
    * });
    * ```
    */

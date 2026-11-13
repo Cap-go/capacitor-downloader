@@ -106,10 +106,24 @@ public class OkHttpDownloadExecutor {
             transferSlots.acquire();
             acquired = true;
 
+            synchronized (active) {
+                if (active.cancelled.get()) {
+                    finishCancelled(active, null, id, completionListener);
+                    return;
+                }
+            }
+
             OkHttpClient client = buildClientForNetwork(network);
 
             File tempFile = null;
             try {
+                synchronized (active) {
+                    if (active.cancelled.get()) {
+                        finishCancelled(active, null, id, completionListener);
+                        return;
+                    }
+                }
+
                 Request.Builder requestBuilder = new Request.Builder().url(url);
                 if (headers != null) {
                     Iterator<String> it = headers.keys();
@@ -123,7 +137,14 @@ public class OkHttpDownloadExecutor {
 
                 Request request = requestBuilder.build();
                 Call call = client.newCall(request);
-                active.call = call;
+                synchronized (active) {
+                    if (active.cancelled.get()) {
+                        call.cancel();
+                        finishCancelled(active, null, id, completionListener);
+                        return;
+                    }
+                    active.call = call;
+                }
                 active.state = State.RUNNING;
 
                 File parent = destinationFile.getParentFile();
@@ -175,8 +196,15 @@ public class OkHttpDownloadExecutor {
                         int read;
                         int lastReportedPercent = -1;
                         while ((read = input.read(buffer)) != -1) {
-                            if (active.cancelled.get() || ("wifi-only".equals(network) && !isOnWifi())) {
+                            if (active.cancelled.get()) {
                                 finishCancelled(active, tempFile, id, completionListener);
+                                return;
+                            }
+                            if ("wifi-only".equals(network) && !isOnWifi()) {
+                                tempFile.delete();
+                                active.state = State.ERROR;
+                                active.errorMessage = "Wi-Fi connection lost";
+                                completionListener.onFinished(id, false, false, active.errorMessage);
                                 return;
                             }
                             output.write(buffer, 0, read);
@@ -264,8 +292,14 @@ public class OkHttpDownloadExecutor {
 
     private void finishCancelled(ActiveDownload active, File tempFile, String id, CompletionListener completionListener) {
         active.state = State.CANCELLED;
-        if (tempFile != null && tempFile.exists()) {
-            tempFile.delete();
+        File toDelete = tempFile;
+        if (toDelete == null) {
+            synchronized (active) {
+                toDelete = active.tempFile;
+            }
+        }
+        if (toDelete != null && toDelete.exists()) {
+            toDelete.delete();
         }
         completionListener.onFinished(id, false, true, null);
     }

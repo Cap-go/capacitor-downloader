@@ -168,9 +168,7 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     public void stopPreservesNotificationTextWhenRemoveFails() throws Exception {
         downloads.put("test-id", 42L);
 
-        @SuppressWarnings("unchecked")
-        Map<String, Long> downloadGenerations = getField(plugin, "downloadGenerations");
-        downloadGenerations.put("test-id", 1L);
+        getDownloadGenerationsMap(plugin).put("test-id", 1L);
 
         DownloadCompletedNotificationStore notificationStore = getNotificationStore(plugin);
         notificationStore.setText("test-id", "Keep me", 1L);
@@ -225,6 +223,13 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         PluginCall call = mock(PluginCall.class);
         when(call.getString("id")).thenReturn(id);
         return call;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Long> getDownloadGenerationsMap(CapacitorDownloaderPlugin plugin) throws Exception {
+        Field field = CapacitorDownloaderPlugin.class.getDeclaredField("downloadGenerations");
+        field.setAccessible(true);
+        return (Map<String, Long>) field.get(plugin);
     }
 
     @SuppressWarnings("unchecked")

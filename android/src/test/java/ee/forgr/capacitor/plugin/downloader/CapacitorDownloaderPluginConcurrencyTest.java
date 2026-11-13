@@ -41,6 +41,7 @@ public class CapacitorDownloaderPluginConcurrencyTest {
 
         setField(plugin, "downloadManager", downloadManager);
         setField(plugin, "downloadManagerExecutor", downloadManagerExecutor);
+        setField(plugin, "completedNotificationStore", new DownloadCompletedNotificationStore());
         downloads = getDownloadsMap(plugin);
     }
 
@@ -164,6 +165,44 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     @Test
+    public void stopPreservesNotificationTextWhenRemoveFails() throws Exception {
+        downloads.put("test-id", 42L);
+
+        getDownloadGenerationsMap(plugin).put("test-id", 1L);
+
+        DownloadCompletedNotificationStore notificationStore = getNotificationStore(plugin);
+        notificationStore.setText("test-id", "Keep me", 1L);
+        when(downloadManager.remove(42L)).thenThrow(new RuntimeException("binder failure"));
+
+        PluginCall call = mockPluginCall("test-id");
+        plugin.stop(call);
+
+        verify(call, timeout(5000)).reject(eq("Download could not be removed"), any(RuntimeException.class));
+        assertEquals("Keep me", notificationStore.takeText("test-id", 1L));
+        assertEquals(Long.valueOf(42L), downloads.get("test-id"));
+    }
+
+    @Test
+    public void duplicateDownloadRejectsWithoutChangingNotificationText() throws Exception {
+        downloads.put("dup-id", 99L);
+
+        DownloadCompletedNotificationStore notificationStore = getNotificationStore(plugin);
+        notificationStore.setText("dup-id", "Original", 1L);
+
+        PluginCall call = mock(PluginCall.class);
+        when(call.getString("id")).thenReturn("dup-id");
+        when(call.getString("url")).thenReturn("https://example.com/file");
+        when(call.getString("destination")).thenReturn("file.bin");
+        when(call.getString("downloadCompletedNotificationText")).thenReturn("Replacement");
+
+        plugin.download(call);
+
+        verify(call).reject("Download already exists");
+        assertEquals("Original", notificationStore.takeText("dup-id", 1L));
+        assertEquals(Long.valueOf(99L), downloads.get("dup-id"));
+    }
+
+    @Test
     public void checkStatusRejectsWhenQueryThrows() throws Exception {
         downloads.put("test-id", 42L);
         DownloadManager throwingManager = mock(DownloadManager.class, (invocation) -> {
@@ -187,6 +226,13 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     @SuppressWarnings("unchecked")
+    private static Map<String, Long> getDownloadGenerationsMap(CapacitorDownloaderPlugin plugin) throws Exception {
+        Field field = CapacitorDownloaderPlugin.class.getDeclaredField("downloadGenerations");
+        field.setAccessible(true);
+        return (Map<String, Long>) field.get(plugin);
+    }
+
+    @SuppressWarnings("unchecked")
     private static Map<String, Long> getDownloadsMap(CapacitorDownloaderPlugin plugin) throws Exception {
         Field downloadsField = CapacitorDownloaderPlugin.class.getDeclaredField("downloads");
         downloadsField.setAccessible(true);
@@ -197,5 +243,11 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         Field field = target.getClass().getDeclaredField(fieldName);
         field.setAccessible(true);
         field.set(target, value);
+    }
+
+    private static DownloadCompletedNotificationStore getNotificationStore(CapacitorDownloaderPlugin plugin) throws Exception {
+        Field field = CapacitorDownloaderPlugin.class.getDeclaredField("completedNotificationStore");
+        field.setAccessible(true);
+        return (DownloadCompletedNotificationStore) field.get(plugin);
     }
 }

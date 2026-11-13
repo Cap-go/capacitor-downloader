@@ -87,6 +87,127 @@ final class DownloadDestinationStoreTests: XCTestCase {
     }
 }
 
+final class DownloadCompletedNotificationTextTests: XCTestCase {
+    func testNormalizeRejectsBlank() {
+        XCTAssertNil(DownloadCompletedNotificationText.normalize(nil))
+        XCTAssertNil(DownloadCompletedNotificationText.normalize(""))
+        XCTAssertNil(DownloadCompletedNotificationText.normalize("  "))
+    }
+
+    func testNormalizeTrims() {
+        XCTAssertEqual(DownloadCompletedNotificationText.normalize("  Ready  "), "Ready")
+    }
+}
+
+final class DownloadCompletedNotificationStoreTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var store: DownloadCompletedNotificationStore!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: "CapacitorDownloaderNotificationTests")!
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderNotificationTests")
+        store = DownloadCompletedNotificationStore(defaults: defaults)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderNotificationTests")
+        super.tearDown()
+    }
+
+    func testSetAndTakeText() {
+        store.setText("  Finished  ", for: "task-1", generation: 1)
+
+        XCTAssertEqual(store.takeText(for: "task-1", generation: 1), "Finished")
+        XCTAssertNil(store.takeText(for: "task-1", generation: 1))
+    }
+
+    func testRemoveText() {
+        store.setText("Done", for: "task-1", generation: 1)
+        store.removeText(for: "task-1", generation: 1)
+        XCTAssertNil(store.takeText(for: "task-1", generation: 1))
+    }
+
+    func testGenerationMismatchLeavesStoredText() {
+        store.setText("New", for: "task-1", generation: 2)
+        store.removeText(for: "task-1", generation: 1)
+        XCTAssertEqual(store.takeText(for: "task-1", generation: 2), "New")
+    }
+
+    func testTakeTextWithoutTaskGenerationUsesStoredEntry() {
+        store.setText("Ready", for: "task-1", generation: 3)
+        XCTAssertEqual(store.takeText(for: "task-1", generation: nil), "Ready")
+    }
+
+    func testConcurrentUpdatesDoNotDropEntries() {
+        let ids = (0..<50).map { "task-\($0)" }
+        DispatchQueue.concurrentPerform(iterations: ids.count) { index in
+            store.setText("Body \(index)", for: ids[index], generation: 1)
+        }
+
+        for (index, id) in ids.enumerated() {
+            XCTAssertEqual(store.takeText(for: id, generation: 1), "Body \(index)")
+        }
+    }
+}
+
+final class DownloadIdGenerationStoreTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var store: DownloadIdGenerationStore!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: "CapacitorDownloaderIdGenerationTests")!
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderIdGenerationTests")
+        store = DownloadIdGenerationStore(defaults: defaults)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderIdGenerationTests")
+        super.tearDown()
+    }
+
+    func testPersistedGenerationSurvivesRelaunch() {
+        store.setGeneration(3, forDownloadId: "episode-12")
+        let restored = DownloadIdGenerationStore(defaults: defaults)
+        XCTAssertEqual(restored.allGenerations()["episode-12"], 3)
+        let next = (restored.allGenerations()["episode-12"] ?? 0) &+ 1
+        XCTAssertEqual(next, 4)
+    }
+
+    func testNextGenerationAfterRelaunchDoesNotReuseStoredValue() {
+        store.setGeneration(1, forDownloadId: "shared-id")
+        let relaunched = DownloadIdGenerationStore(defaults: defaults)
+        let generations = relaunched.allGenerations()
+        let next = (generations["shared-id"] ?? 0) &+ 1
+        XCTAssertEqual(next, 2)
+    }
+}
+
+final class DownloadTaskGenerationStoreTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var store: DownloadTaskGenerationStore!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: "CapacitorDownloaderTaskGenerationTests")!
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderTaskGenerationTests")
+        store = DownloadTaskGenerationStore(defaults: defaults)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderTaskGenerationTests")
+        super.tearDown()
+    }
+
+    func testPersistAndRestoreGeneration() {
+        store.setGeneration(7, forTaskIdentifier: 42)
+        XCTAssertEqual(store.allGenerations()[42], 7)
+        store.removeGeneration(forTaskIdentifier: 42)
+        XCTAssertNil(store.allGenerations()[42])
+    }
+}
+
 final class DownloadHTTPValidatorTests: XCTestCase {
     func testSuccessfulStatusCodes() {
         XCTAssertTrue(DownloadHTTPValidator.isSuccessfulStatusCode(200))

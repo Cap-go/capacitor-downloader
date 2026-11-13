@@ -269,8 +269,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         for taskId in taskIds {
             if let task = getTask(for: taskId) {
                 task.cancel()
+                removeTask(for: taskId, completing: task)
             }
-            removeTask(for: taskId)
             DownloadDestinationStore.shared.removeDestination(for: taskId)
         }
     }
@@ -452,7 +452,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
         if let batchParts = batchCoordinator.childParts(for: id), batchCoordinator.isBatch(batchId: batchParts.batchId) == false {
             try? FileManager.default.removeItem(at: location)
-            removeTask(for: id)
+            removeTask(for: id, completing: downloadTask)
             _ = DownloadDestinationStore.shared.takeDestination(for: id)
             return
         }
@@ -494,7 +494,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             if let batchParts = batchCoordinator.childParts(for: id) {
                 guard batchCoordinator.isBatch(batchId: batchParts.batchId) else {
                     try? FileManager.default.removeItem(at: location)
-                    removeTask(for: id)
+                    removeTask(for: id, completing: downloadTask)
                     return
                 }
             }
@@ -502,7 +502,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             try FileManager.default.moveItem(at: location, to: destinationURL)
 
             if let batchParts = batchCoordinator.childParts(for: id) {
-                removeTask(for: id)
+                removeTask(for: id, completing: downloadTask)
                 if let storedDestination {
                     batchCoordinator.recordMovedDestination(
                         batchId: batchParts.batchId,

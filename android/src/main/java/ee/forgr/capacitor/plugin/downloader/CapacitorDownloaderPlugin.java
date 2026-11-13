@@ -128,6 +128,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
+        if (downloads.containsKey(id)) {
+            call.reject("Download already exists");
+            return;
+        }
+
         final AndroidDownloadDestination.ResolvedDestination resolvedDestination;
         try {
             resolvedDestination = AndroidDownloadDestination.resolve(getContext(), destination);

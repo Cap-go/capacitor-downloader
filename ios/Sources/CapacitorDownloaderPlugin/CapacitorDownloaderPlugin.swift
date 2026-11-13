@@ -31,6 +31,12 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }()
 
+    public override func load() {
+        tasksLock.lock()
+        taskGenerations = DownloadTaskGenerationStore.shared.allGenerations()
+        tasksLock.unlock()
+    }
+
     private func setTask(_ task: URLSessionDownloadTask, for id: String) {
         tasksLock.lock()
         defer { tasksLock.unlock() }
@@ -70,6 +76,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         tasksLock.lock()
         defer { tasksLock.unlock() }
         taskGenerations[task.taskIdentifier] = generation
+        DownloadTaskGenerationStore.shared.setGeneration(generation, forTaskIdentifier: task.taskIdentifier)
     }
 
     private func generation(for task: URLSessionTask) -> UInt64? {
@@ -82,6 +89,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         tasksLock.lock()
         defer { tasksLock.unlock() }
         taskGenerations.removeValue(forKey: task.taskIdentifier)
+        DownloadTaskGenerationStore.shared.removeGeneration(forTaskIdentifier: task.taskIdentifier)
     }
 
     private func idForTask(_ task: URLSessionDownloadTask) -> String? {
@@ -281,8 +289,10 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             }
             try FileManager.default.moveItem(at: location, to: destinationURL)
             notifyListeners("downloadCompleted", data: ["id": id])
-            if let generation,
-               let completionText = DownloadCompletedNotificationStore.shared.takeText(for: id, generation: generation) {
+            if let completionText = DownloadCompletedNotificationStore.shared.takeText(
+                for: id,
+                generation: generation(for: downloadTask)
+            ) {
                 DownloadCompletedNotificationPresenter.presentIfAllowed(downloadId: id, body: completionText)
             }
         } catch {

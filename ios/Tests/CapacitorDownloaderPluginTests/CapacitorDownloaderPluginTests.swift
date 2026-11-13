@@ -151,6 +151,30 @@ final class DownloadCompletedNotificationStoreTests: XCTestCase {
     }
 }
 
+final class DownloadTaskGenerationStoreTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var store: DownloadTaskGenerationStore!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: "CapacitorDownloaderTaskGenerationTests")!
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderTaskGenerationTests")
+        store = DownloadTaskGenerationStore(defaults: defaults)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderTaskGenerationTests")
+        super.tearDown()
+    }
+
+    func testPersistAndRestoreGeneration() {
+        store.setGeneration(7, forTaskIdentifier: 42)
+        XCTAssertEqual(store.allGenerations()[42], 7)
+        store.removeGeneration(forTaskIdentifier: 42)
+        XCTAssertNil(store.allGenerations()[42])
+    }
+}
+
 final class DownloadHTTPValidatorTests: XCTestCase {
     func testSuccessfulStatusCodes() {
         XCTAssertTrue(DownloadHTTPValidator.isSuccessfulStatusCode(200))

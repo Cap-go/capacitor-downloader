@@ -301,7 +301,9 @@ public class OkHttpDownloadExecutorTest {
     @Test(timeout = 10_000)
     public void startRejectsStaleReservationWithoutHittingNetwork() throws Exception {
         server.enqueue(
-            new MockResponse().setBody(new okio.Buffer().write("must-not-fetch".getBytes(StandardCharsets.UTF_8))).addHeader("Content-Length", "14")
+            new MockResponse()
+                .setBody(new okio.Buffer().write("must-not-fetch".getBytes(StandardCharsets.UTF_8)))
+                .addHeader("Content-Length", "14")
         );
         OkHttpDownloadExecutor.ActiveDownload stale = executor.beginTransfer("reuse-id");
         assertNotNull(stale);

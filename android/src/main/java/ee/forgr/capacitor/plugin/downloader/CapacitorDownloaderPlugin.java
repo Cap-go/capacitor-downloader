@@ -345,7 +345,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     return;
                 }
 
-                if (!okHttpDownloadExecutor.beginTransfer(id)) {
+                OkHttpDownloadExecutor.ActiveDownload okHttpReservation = okHttpDownloadExecutor.beginTransfer(id);
+                if (okHttpReservation == null) {
                     downloads.remove(id, pendingToken);
                     okHttpDestinationFiles.remove(id);
                     completedNotificationStore.remove(id, storedGeneration);
@@ -368,7 +369,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
                 try {
                     okHttpDownloadExecutor.start(
-                        id,
+                        okHttpReservation,
                         url,
                         destinationFile,
                         headers,

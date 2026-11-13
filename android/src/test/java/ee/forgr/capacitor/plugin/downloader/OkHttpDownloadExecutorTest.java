@@ -23,6 +23,7 @@ import javax.net.SocketFactory;
 import okhttp3.OkHttpClient;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
 import okhttp3.tls.HandshakeCertificates;
 import okhttp3.tls.HeldCertificate;
 import org.junit.After;
@@ -165,7 +166,9 @@ public class OkHttpDownloadExecutorTest {
 
         assertTrue(finished.await(10, TimeUnit.SECONDS));
         assertFalse(success.get());
-        assertEquals(1, server.getRequestCount());
+        RecordedRequest first = server.takeRequest();
+        assertTrue(first.getPath().endsWith("/start"));
+        assertNull(server.takeRequest(250, TimeUnit.MILLISECONDS));
         assertFalse(destination.exists());
     }
 

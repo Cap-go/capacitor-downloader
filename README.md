@@ -18,12 +18,12 @@ Download large files in the background or foreground from your Capacitor app, wi
 
 ## Built and maintained with AI
 
-We build, improve and fix our plugins with heavy use of AI, so issues usually get fixed in under a day and pull requests get feedback the same day. A human still reviews and merges 50+ pull requests daily.
+We build, improve and fix our plugins with heavy use of AI, so issues usually get fixed in under a day and pull requests get feedback the same day. A human still reviews, tests and merges 50+ pull requests daily.
 
 - Most plugin issues get a fix pull request the same day, often within a couple of hours, and are usually resolved in one to two days.
 - Every pull request goes through our AI review system, usually within minutes.
-- Our AI pre-checks tests, code review, conventions and security, then a human validates and merges.
-- A human, Martin, reviews and merges 50+ pull requests every day.
+- Our AI pre-checks tests, code review, conventions and security, then a human reviews, tests and merges.
+- A human, Martin, reviews, tests and merges 50+ pull requests every day.
 - In the last 90 days, 95% of plugin issues were resolved.
 
 [Learn more about how we build with AI](https://capgo.app/docs/plugins/ai-engineering/)
@@ -59,6 +59,25 @@ await CapacitorDownloader.download({
 ```
 
 `downloadProgress` includes `progress` (overall, 0 to 1) plus `fileIndex` and `fileProgress` for the file that moved. `downloadCompleted` fires once when every file succeeds. If any file fails, the plugin emits `downloadFailed` for the batch id (with `fileIndex` when known) and cancels the rest. Call `stop({ id })` with the batch id to cancel the whole batch.
+
+## Download completed notifications
+
+Long downloads often finish while your user is in another app. Set `downloadCompletedNotificationText` on `download()` to show an opt-in, caller-localized system notification when the file is ready. Tapping it returns to your app.
+
+- **Opt in**: omit the option (or pass empty text) to rely on `downloadCompleted` events only.
+- **Permissions**: request notification permission in your app. If the user denies it, downloads still complete and the plugin skips the alert.
+- **Android**: the plugin manifest already merges `POST_NOTIFICATIONS`; on Android 13+ your app only needs to request it at runtime. Works alongside the DownloadManager `notification` visibility option. While your app is in the foreground, Android still posts the completion alert when the download succeeds.
+- **iOS**: request authorization with `UNUserNotificationCenter` before the download finishes. While your app is in the foreground, iOS shows a delivered notification only if your app's `UNUserNotificationCenter` delegate presents it, so without a notifications plugin it is usually silent; use `downloadCompleted` events in that case.
+
+```typescript
+await Downloader.download({
+  id: 'episode-12',
+  url: audioUrl,
+  destination: 'podcasts/episode-12.mp3',
+  notification: 'hidden',
+  downloadCompletedNotificationText: t('downloads.episodeReady'),
+});
+```
 
 ## Why Capacitor Downloader?
 

@@ -13,6 +13,7 @@ import { join } from "node:path";
 
 const SCHEME = "CapgoCapacitorDownloader";
 const MAX_ATTEMPTS = 3;
+const XCODEBUILD_OUTPUT_MAX_BYTES = 64 * 1024 * 1024;
 
 function parseIosRuntimeVersion(runtimeKey) {
   const match = runtimeKey.match(/iOS-(\d+)-(\d+)/);
@@ -102,6 +103,7 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
   const result = spawnSync("xcodebuild", xcodebuildArgs, {
     stdio: attempt === MAX_ATTEMPTS ? "inherit" : "pipe",
     encoding: "utf8",
+    maxBuffer: XCODEBUILD_OUTPUT_MAX_BYTES,
   });
 
   if (result.error) {

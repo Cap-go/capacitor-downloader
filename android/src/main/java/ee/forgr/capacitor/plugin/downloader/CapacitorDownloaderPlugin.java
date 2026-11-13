@@ -232,6 +232,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
+        final Long capturedGeneration = generationFor(id);
+
         ExecutorService executor = downloadManagerExecutor;
         if (executor == null) {
             return;
@@ -240,7 +242,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         try {
             executor.execute(() -> {
                 ProgressSnapshot snapshot = queryProgressSnapshot(id, systemDownloadId);
-                handler.post(() -> deliverProgressSnapshot(id, systemDownloadId, scheduleNext, snapshot));
+                handler.post(() -> deliverProgressSnapshot(id, systemDownloadId, scheduleNext, snapshot, capturedGeneration));
             });
         } catch (RejectedExecutionException ignored) {
             // Plugin is shutting down; stop polling quietly.
@@ -270,7 +272,13 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
     }
 
-    private void deliverProgressSnapshot(String id, long systemDownloadId, boolean scheduleNext, ProgressSnapshot snapshot) {
+    private void deliverProgressSnapshot(
+        String id,
+        long systemDownloadId,
+        boolean scheduleNext,
+        ProgressSnapshot snapshot,
+        Long capturedGeneration
+    ) {
         if (snapshot == null || !snapshot.found || !isTrackedDownload(id, systemDownloadId)) {
             return;
         }
@@ -285,8 +293,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
             JSObject completedData = new JSObject();
             completedData.put("id", snapshot.id);
             notifyListeners("downloadCompleted", completedData);
-            Long generation = generationFor(snapshot.id);
-            String completionText = generation != null ? completedNotificationStore.takeText(snapshot.id, generation) : null;
+            String completionText =
+                capturedGeneration != null ? completedNotificationStore.takeText(snapshot.id, capturedGeneration) : null;
             if (completionText != null) {
                 DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), snapshot.id, completionText);
             }
@@ -296,9 +304,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
             failedData.put("id", snapshot.id);
             failedData.put("error", "Download failed");
             notifyListeners("downloadFailed", failedData);
-            Long generation = generationFor(snapshot.id);
-            if (generation != null) {
-                completedNotificationStore.remove(snapshot.id, generation);
+            if (capturedGeneration != null) {
+                completedNotificationStore.remove(snapshot.id, capturedGeneration);
             }
             shouldContinue = false;
         }

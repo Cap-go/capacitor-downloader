@@ -168,6 +168,10 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     public void stopPreservesNotificationTextWhenRemoveFails() throws Exception {
         downloads.put("test-id", 42L);
 
+        @SuppressWarnings("unchecked")
+        Map<String, Long> downloadGenerations = getField(plugin, "downloadGenerations");
+        downloadGenerations.put("test-id", 1L);
+
         DownloadCompletedNotificationStore notificationStore = getNotificationStore(plugin);
         notificationStore.setText("test-id", "Keep me", 1L);
         when(downloadManager.remove(42L)).thenThrow(new RuntimeException("binder failure"));

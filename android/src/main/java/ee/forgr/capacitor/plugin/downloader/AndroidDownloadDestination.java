@@ -79,14 +79,7 @@ public final class AndroidDownloadDestination {
         if (usedInternalFallback) {
             base = context.getFilesDir();
         }
-        String child = trimmed;
-        if (trimmed.startsWith("file://")) {
-            child = android.net.Uri.parse(trimmed).getPath();
-            if (child == null || child.isEmpty()) {
-                throw new IllegalArgumentException("Invalid destination path");
-            }
-        }
-        File file = new File(base, child);
+        File file = new File(base, trimmed);
         boolean preferOkHttp = usedInternalFallback;
         return new ResolvedDestination(file, preferOkHttp);
     }

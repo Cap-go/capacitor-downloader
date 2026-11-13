@@ -54,9 +54,10 @@ public class AndroidDownloadDestinationTest {
     @Test
     public void legacyFileUriMatchesMainFileParentResolution() {
         String absolute = externalFilesDir.getAbsolutePath() + "/uri-pack.zip";
-        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(context, "file://" + absolute, false);
+        String fileUri = "file://" + absolute;
+        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(context, fileUri, false);
         assertFalse(resolved.preferOkHttpInAutoMode);
-        assertEquals(new File(externalFilesDir, absolute).getPath(), resolved.file.getPath());
+        assertEquals(new File(externalFilesDir, fileUri).getPath(), resolved.file.getPath());
     }
 
     @Test

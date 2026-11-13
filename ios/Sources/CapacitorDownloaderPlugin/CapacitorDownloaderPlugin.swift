@@ -33,6 +33,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
     public override func load() {
         tasksLock.lock()
+        downloadGenerations = DownloadIdGenerationStore.shared.allGenerations()
         taskGenerations = DownloadTaskGenerationStore.shared.allGenerations()
         tasksLock.unlock()
     }
@@ -63,6 +64,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         defer { tasksLock.unlock() }
         let generation = (downloadGenerations[id] ?? 0) &+ 1
         downloadGenerations[id] = generation
+        DownloadIdGenerationStore.shared.setGeneration(generation, forDownloadId: id)
         return generation
     }
 

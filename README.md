@@ -42,8 +42,8 @@ Long downloads often finish while your user is in another app. Set `downloadComp
 
 - **Opt in**: omit the option (or pass empty text) to rely on `downloadCompleted` events only.
 - **Permissions**: request notification permission in your app. If the user denies it, downloads still complete and the plugin skips the alert.
-- **Android**: declare and request `POST_NOTIFICATIONS` on Android 13+. Works alongside the DownloadManager `notification` visibility option.
-- **iOS**: request authorization with `UNUserNotificationCenter` before the download finishes.
+- **Android**: the plugin manifest already merges `POST_NOTIFICATIONS`; on Android 13+ your app only needs to request it at runtime. Works alongside the DownloadManager `notification` visibility option. While your app is in the foreground, Android still posts the completion alert when the download succeeds.
+- **iOS**: request authorization with `UNUserNotificationCenter` before the download finishes. While your app is in the foreground, iOS shows a delivered notification only if your app's `UNUserNotificationCenter` delegate presents it, so without a notifications plugin it is usually silent; use `downloadCompleted` events in that case.
 
 ```typescript
 await Downloader.download({

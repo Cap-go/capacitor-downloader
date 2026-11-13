@@ -6,14 +6,13 @@
  * resolve a destination UDID at runtime instead of hardcoding a device name.
  */
 
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
 const SCHEME = "CapgoCapacitorDownloader";
 const MAX_ATTEMPTS = 3;
-const XCODEBUILD_OUTPUT_MAX_BYTES = 64 * 1024 * 1024;
 
 function parseIosRuntimeVersion(runtimeKey) {
   const match = runtimeKey.match(/iOS-(\d+)-(\d+)/);
@@ -78,6 +77,30 @@ function isChecksumMismatch(output) {
   return output.includes("checksum of downloaded artifact");
 }
 
+function runXcodebuild(args) {
+  return new Promise((resolve, reject) => {
+    const outputChunks = [];
+    const child = spawn("xcodebuild", args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    child.stdout.on("data", (chunk) => {
+      outputChunks.push(chunk);
+      process.stdout.write(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      outputChunks.push(chunk);
+      process.stderr.write(chunk);
+    });
+
+    child.on("error", reject);
+    child.on("close", (status) => {
+      const output = Buffer.concat(outputChunks).toString("utf8");
+      resolve({ status: status ?? 1, output });
+    });
+  });
+}
+
 const simulator = pickIphoneSimulator();
 if (!simulator) {
   console.error(
@@ -100,36 +123,25 @@ const xcodebuildArgs = [
 ];
 
 for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-  const result = spawnSync("xcodebuild", xcodebuildArgs, {
-    stdio: attempt === MAX_ATTEMPTS ? "inherit" : "pipe",
-    encoding: "utf8",
-    maxBuffer: XCODEBUILD_OUTPUT_MAX_BYTES,
-  });
-
-  if (result.error) {
-    console.error(result.error.message);
+  let result;
+  try {
+    result = await runXcodebuild(xcodebuildArgs);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
   }
 
-  if ((result.status ?? 1) === 0) {
+  if (result.status === 0) {
     process.exit(0);
   }
 
-  const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-  if (attempt < MAX_ATTEMPTS && isChecksumMismatch(output)) {
+  if (attempt < MAX_ATTEMPTS && isChecksumMismatch(result.output)) {
     console.error(
       `xcodebuild failed with capacitor-swift-pm checksum mismatch (attempt ${attempt}/${MAX_ATTEMPTS}). Retrying after cache reset.`,
     );
-    if (output.trim()) {
-      console.error(output.trim());
-    }
     clearSwiftPackageManagerCaches();
     continue;
   }
 
-  if (output.trim()) {
-    process.stdout.write(result.stdout ?? "");
-    process.stderr.write(result.stderr ?? "");
-  }
-  process.exit(result.status ?? 1);
+  process.exit(result.status);
 }

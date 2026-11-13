@@ -53,7 +53,7 @@ final class DownloadCompletedNotificationPresenter {
         CharSequence appLabel = context.getApplicationInfo().loadLabel(context.getPackageManager());
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(resolveSmallIcon(context))
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle(appLabel)
             .setContentText(body)
             .setStyle(new NotificationCompat.BigTextStyle().bigText(body))
@@ -83,11 +83,6 @@ final class DownloadCompletedNotificationPresenter {
         NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Download completed", NotificationManager.IMPORTANCE_DEFAULT);
         channel.setDescription("Shown when a Capacitor Downloader task finishes");
         manager.createNotificationChannel(channel);
-    }
-
-    private static int resolveSmallIcon(Context context) {
-        int icon = context.getApplicationInfo().icon;
-        return icon != 0 ? icon : android.R.drawable.stat_sys_download_done;
     }
 
     static int notificationIdFor(String downloadId) {

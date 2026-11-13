@@ -21,6 +21,7 @@ final class DownloadCompletedNotificationStore {
     DownloadCompletedNotificationStore(Context context) {
         prefs = context.getApplicationContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         inMemoryEntries = null;
+        clearPersistedTexts();
     }
 
     DownloadCompletedNotificationStore() {
@@ -57,6 +58,15 @@ final class DownloadCompletedNotificationStore {
             entries.remove(downloadId);
             saveEntriesLocked(entries);
             return entry.text;
+        }
+    }
+
+    void clearPersistedTexts() {
+        if (prefs == null) {
+            return;
+        }
+        synchronized (lock) {
+            prefs.edit().remove(MAP_KEY).apply();
         }
     }
 

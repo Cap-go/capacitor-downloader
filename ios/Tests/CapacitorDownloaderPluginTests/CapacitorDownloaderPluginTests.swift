@@ -151,6 +151,39 @@ final class DownloadCompletedNotificationStoreTests: XCTestCase {
     }
 }
 
+final class DownloadIdGenerationStoreTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var store: DownloadIdGenerationStore!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: "CapacitorDownloaderIdGenerationTests")!
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderIdGenerationTests")
+        store = DownloadIdGenerationStore(defaults: defaults)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderIdGenerationTests")
+        super.tearDown()
+    }
+
+    func testPersistedGenerationSurvivesRelaunch() {
+        store.setGeneration(3, forDownloadId: "episode-12")
+        let restored = DownloadIdGenerationStore(defaults: defaults)
+        XCTAssertEqual(restored.allGenerations()["episode-12"], 3)
+        let next = (restored.allGenerations()["episode-12"] ?? 0) &+ 1
+        XCTAssertEqual(next, 4)
+    }
+
+    func testNextGenerationAfterRelaunchDoesNotReuseStoredValue() {
+        store.setGeneration(1, forDownloadId: "shared-id")
+        let relaunched = DownloadIdGenerationStore(defaults: defaults)
+        let generations = relaunched.allGenerations()
+        let next = (generations["shared-id"] ?? 0) &+ 1
+        XCTAssertEqual(next, 2)
+    }
+}
+
 final class DownloadTaskGenerationStoreTests: XCTestCase {
     private var defaults: UserDefaults!
     private var store: DownloadTaskGenerationStore!

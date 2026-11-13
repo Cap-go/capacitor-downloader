@@ -15,6 +15,7 @@ import static org.mockito.Mockito.when;
 import android.app.DownloadManager;
 import com.getcapacitor.PluginCall;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -200,6 +201,17 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         verify(call).reject("Download already exists");
         assertEquals("Original", notificationStore.takeText("dup-id", 1L));
         assertEquals(Long.valueOf(99L), downloads.get("dup-id"));
+    }
+
+    @Test
+    public void okHttpGenerationHelperRejectsStaleGeneration() throws Exception {
+        getDownloadGenerationsMap(plugin).put("reuse-id", 2L);
+
+        Method method = CapacitorDownloaderPlugin.class.getDeclaredMethod("isCurrentOkHttpGeneration", String.class, long.class);
+        method.setAccessible(true);
+
+        assertFalse((boolean) method.invoke(plugin, "reuse-id", 1L));
+        assertTrue((boolean) method.invoke(plugin, "reuse-id", 2L));
     }
 
     @Test

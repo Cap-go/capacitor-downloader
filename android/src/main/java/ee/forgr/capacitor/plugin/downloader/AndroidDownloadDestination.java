@@ -7,19 +7,23 @@ import java.io.IOException;
 /**
  * Resolves download destinations under app storage roots.
  *
- * <p>Relative prefixes:
+ * <p>With legacy resolution (default when {@code androidHttpEngine} is omitted), relative paths match
+ * released plugin behavior: all paths are under app external files, including {@code cache/...} and
+ * {@code files/...} as literal subpaths.
+ *
+ * <p>With extended resolution ({@code androidHttpEngine: 'auto'} or {@code 'okhttp'}), relative prefixes:
  * <ul>
  *   <li>{@code cache/...} -> {@link Context#getCacheDir()}</li>
  *   <li>{@code files/...} -> {@link Context#getFilesDir()} (app-private data)</li>
- *   <li>{@code external/...} or default relative path -> {@link Context#getFilesDir()} or app external files</li>
  *   <li>{@code public-downloads/...} -> public Downloads directory (DownloadManager only)</li>
+ *   <li>other relative paths -> app external files</li>
  * </ul>
  */
 public final class AndroidDownloadDestination {
 
     private AndroidDownloadDestination() {}
 
-    public static ResolvedDestination resolve(Context context, String destination) {
+    public static ResolvedDestination resolve(Context context, String destination, boolean extendedRoots) {
         if (destination == null || destination.trim().isEmpty()) {
             throw new IllegalArgumentException("Missing destination");
         }
@@ -33,6 +37,17 @@ public final class AndroidDownloadDestination {
         if (trimmed.startsWith("/")) {
             File file = new File(trimmed);
             return new ResolvedDestination(file, preferOkHttpInAutoMode(context, file));
+        }
+
+        if (!extendedRoots) {
+            File base = context.getExternalFilesDir(null);
+            boolean usedInternalFallback = base == null;
+            if (usedInternalFallback) {
+                base = context.getFilesDir();
+            }
+            File file = childUnder(base, trimmed);
+            boolean preferOkHttp = usedInternalFallback;
+            return new ResolvedDestination(file, preferOkHttp);
         }
 
         if (trimmed.startsWith("cache/")) {

@@ -23,14 +23,15 @@ export interface DownloadOptions {
   /**
    * Local file path where the download will be saved.
    *
-   * On Android, relative paths support optional roots. Only destinations that use the `cache/` or `files/` prefix
-   * (or an absolute path under internal storage) select app-private roots; any other relative path keeps the legacy
-   * resolution under app external files:
-   * - `cache/...` saves under app cache (OkHttp with `androidHttpEngine: 'auto'`).
-   * - `files/...` saves under app-private internal storage (OkHttp with `auto`).
+   * On Android, relative paths without `androidHttpEngine` behave like earlier releases: every relative path,
+   * including `cache/...` and `files/...`, is stored under app external files via DownloadManager.
+   *
+   * When you set `androidHttpEngine` to `'auto'` or `'okhttp'`, optional roots apply:
+   * - `cache/...` saves under app cache (OkHttp with `'auto'`).
+   * - `files/...` saves under app-private internal storage (OkHttp with `'auto'`).
    * - `public-downloads/...` saves to the public Downloads folder (DownloadManager).
-   * - Any other relative path saves under app external files (DownloadManager with `auto`).
-   * Absolute paths and `file://` URIs are supported; `auto` picks OkHttp when the path is under cache, data, or files dirs.
+   * - Any other relative path saves under app external files (DownloadManager with `'auto'`).
+   * Absolute paths and `file://` URIs are supported; `'auto'` picks OkHttp when the path is under cache, data, or files dirs.
    */
   destination: string;
   /** Optional HTTP headers to include in the request */
@@ -44,7 +45,8 @@ export interface DownloadOptions {
    *
    * - `'completed'` (default): show while downloading and keep the notification after completion.
    * - `'progress'`: show while downloading, remove the notification when finished.
-   * - `'hidden'`: no system notification; use plugin progress events instead.
+   * - `'hidden'`: no DownloadManager progress notification; use plugin progress events instead.
+   *   `downloadCompletedNotificationText` can still post a completion notification when the transfer succeeds.
    *
    * On the OkHttp Android path, notifications are not shown during the transfer. With `'completed'`, a single
    * completion notification may be posted when the file finishes (Android 13+ requires runtime
@@ -56,18 +58,17 @@ export interface DownloadOptions {
   /**
    * Android HTTP stack used for the download.
    *
-   * - `'auto'` (default): OkHttp for app-private destinations (`cache/...`, `files/...`, or an absolute path under
-   *   cache/data/files); DownloadManager for legacy relative paths under app external storage and `public-downloads/...`.
-   * - `'okhttp'`: always use OkHttp (required for sensitive files in cache or internal storage). Not for
-   *   `public-downloads/...` paths. Transfers run in the app process and do not continue after the process is killed
-   *   (unlike DownloadManager on those paths).
-   * - `'downloadManager'`: always use the system DownloadManager. Cannot write to app-private destinations such as
-   *   `cache/...`, `files/...`, or absolute paths under internal cache, data, or files dirs. Use a legacy relative path
-   *   under app external files or `public-downloads/...` when you need DownloadManager.
+   * - Omitted: always DownloadManager with legacy destination resolution (same as releases before this option).
+   * - `'auto'`: OkHttp for app-private destinations (`cache/...`, `files/...`, or an absolute path under
+   *   cache/data/files when extended roots apply); DownloadManager for legacy relative paths under app external storage
+   *   and `public-downloads/...`.
+   * - `'okhttp'`: always use OkHttp for extended-root destinations. Not for `public-downloads/...` paths. Transfers run
+   *   in the app process and do not continue after the process is killed (unlike DownloadManager on those paths).
+   * - `'downloadManager'`: always use the system DownloadManager with legacy destination resolution.
    *
    * Ignored on iOS and Web.
    *
-   * @since 8.4.0
+   * @since next release
    */
   androidHttpEngine?: 'auto' | 'okhttp' | 'downloadManager';
   /**
@@ -80,7 +81,7 @@ export interface DownloadOptions {
    * Omitted or empty means no completion notification from the plugin (use
    * `downloadCompleted` events while the app is open).
    *
-   * @since 8.4.0
+   * @since next release
    */
   downloadCompletedNotificationText?: string;
 }

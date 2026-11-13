@@ -33,22 +33,63 @@ public class AndroidDownloadDestinationTest {
     }
 
     @Test
-    public void cachePrefixPrefersOkHttpInAutoMode() {
-        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(context, "cache/offline/pkg.zip");
+    public void legacyCachePathMatchesMainUnderExternalFiles() {
+        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(
+            context,
+            "cache/offline/pkg.zip",
+            false
+        );
+        assertFalse(resolved.preferOkHttpInAutoMode);
+        assertEquals(new File(externalFilesDir, "cache/offline/pkg.zip").getPath(), resolved.file.getPath());
+    }
+
+    @Test
+    public void legacyFilesPathMatchesMainUnderExternalFiles() {
+        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(
+            context,
+            "files/secure/data.bin",
+            false
+        );
+        assertFalse(resolved.preferOkHttpInAutoMode);
+        assertEquals(new File(externalFilesDir, "files/secure/data.bin").getPath(), resolved.file.getPath());
+    }
+
+    @Test
+    public void extendedCachePrefixUsesInternalCacheAndOkHttpAuto() {
+        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(
+            context,
+            "cache/offline/pkg.zip",
+            true
+        );
         assertTrue(resolved.preferOkHttpInAutoMode);
         assertEquals(new File(cacheDir, "offline/pkg.zip").getPath(), resolved.file.getPath());
     }
 
     @Test
-    public void filesPrefixPrefersOkHttpInAutoMode() {
-        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(context, "files/secure/data.bin");
+    public void extendedFilesPrefixUsesInternalFilesAndOkHttpAuto() {
+        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(
+            context,
+            "files/secure/data.bin",
+            true
+        );
         assertTrue(resolved.preferOkHttpInAutoMode);
         assertEquals(new File(filesDir, "secure/data.bin").getPath(), resolved.file.getPath());
     }
 
     @Test
     public void legacyRelativePathUsesExternalFilesAndDownloadManagerInAuto() {
-        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(context, "downloads/sample.zip");
+        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(
+            context,
+            "downloads/sample.zip",
+            false
+        );
+        assertFalse(resolved.preferOkHttpInAutoMode);
+        assertEquals(new File(externalFilesDir, "downloads/sample.zip").getPath(), resolved.file.getPath());
+    }
+
+    @Test
+    public void extendedLegacyRelativePathUsesExternalFilesAndDownloadManagerInAuto() {
+        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(context, "downloads/sample.zip", true);
         assertFalse(resolved.preferOkHttpInAutoMode);
         assertEquals(new File(externalFilesDir, "downloads/sample.zip").getPath(), resolved.file.getPath());
     }
@@ -61,18 +102,18 @@ public class AndroidDownloadDestinationTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void rejectsPathTraversalUnderFilesPrefix() {
-        AndroidDownloadDestination.resolve(context, "files/../cache/escape.bin");
+        AndroidDownloadDestination.resolve(context, "files/../cache/escape.bin", true);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void rejectsDestinationAtStorageRoot() {
-        AndroidDownloadDestination.resolve(context, "files/");
+        AndroidDownloadDestination.resolve(context, "files/", true);
     }
 
     @Test
     public void prefersOkHttpWhenExternalFilesDirUnavailable() {
         Mockito.when(context.getExternalFilesDir(null)).thenReturn(null);
-        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(context, "offline/pack.zip");
+        AndroidDownloadDestination.ResolvedDestination resolved = AndroidDownloadDestination.resolve(context, "offline/pack.zip", true);
         assertTrue(resolved.preferOkHttpInAutoMode);
         assertEquals(new File(filesDir, "offline/pack.zip").getPath(), resolved.file.getPath());
     }

@@ -117,6 +117,21 @@ public class CapacitorDownloaderPlugin extends Plugin {
         return downloadGenerations.get(id);
     }
 
+    private static boolean usesExtendedDestinationRoots(String androidHttpEngine) {
+        if (androidHttpEngine == null || androidHttpEngine.isEmpty()) {
+            return false;
+        }
+        if ("downloadManager".equalsIgnoreCase(androidHttpEngine) || "download_manager".equalsIgnoreCase(androidHttpEngine)) {
+            return false;
+        }
+        return true;
+    }
+
+    private boolean isCurrentOkHttpGeneration(String id, long expectedGeneration) {
+        Long current = generationFor(id);
+        return current != null && current.longValue() == expectedGeneration;
+    }
+
     @PluginMethod
     public void download(PluginCall call) {
         String id = call.getString("id");
@@ -133,9 +148,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
+        final boolean extendedDestinationRoots = usesExtendedDestinationRoots(call.getString("androidHttpEngine"));
+
         final AndroidDownloadDestination.ResolvedDestination resolvedDestination;
         try {
-            resolvedDestination = AndroidDownloadDestination.resolve(getContext(), destination);
+            resolvedDestination = AndroidDownloadDestination.resolve(getContext(), destination, extendedDestinationRoots);
         } catch (IllegalArgumentException e) {
             call.reject(e.getMessage(), e);
             return;
@@ -149,12 +166,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
-        if (httpEngine == AndroidHttpEngineSelector.Engine.DOWNLOAD_MANAGER && resolvedDestination.preferOkHttpInAutoMode) {
-            call.reject("DownloadManager cannot write to app-private destinations. Use androidHttpEngine 'auto' or 'okhttp'.");
-            return;
-        }
-
-        if (httpEngine == AndroidHttpEngineSelector.Engine.OKHTTP && destination.trim().startsWith("public-downloads/")) {
+        if (
+            httpEngine == AndroidHttpEngineSelector.Engine.OKHTTP &&
+            extendedDestinationRoots &&
+            destination.trim().startsWith("public-downloads/")
+        ) {
             call.reject("OkHttp cannot write to public-downloads/ paths. Use androidHttpEngine 'auto' or 'downloadManager'.");
             return;
         }
@@ -359,7 +375,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         network,
                         (downloadId, progress) ->
                             handler.post(() -> {
-                                if (!isCurrentOkHttpDownload(downloadId)) {
+                                if (!isCurrentOkHttpDownload(downloadId) || !isCurrentOkHttpGeneration(downloadId, storedGeneration)) {
                                     return;
                                 }
                                 JSObject progressData = new JSObject();
@@ -369,7 +385,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             }),
                         (downloadId, success, cancelled, errorMessage) ->
                             handler.post(() -> {
-                                if (!isCurrentOkHttpDownload(downloadId)) {
+                                if (!isCurrentOkHttpDownload(downloadId) || !isCurrentOkHttpGeneration(downloadId, storedGeneration)) {
                                     return;
                                 }
                                 if (cancelled) {
@@ -385,13 +401,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                         DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), downloadId, completionText);
                                     }
                                 } else {
-                                    okHttpDestinationFiles.remove(downloadId);
+                                    okHttpDestinationFiles.remove(downloadId, destinationFile);
                                     completedNotificationStore.remove(downloadId, storedGeneration);
                                     JSObject failedData = new JSObject();
                                     failedData.put("id", downloadId);
                                     failedData.put("error", errorMessage != null ? errorMessage : "Download failed");
                                     notifyListeners("downloadFailed", failedData);
-                                    DownloadCompletionNotifier.notifyIfRequested(getContext(), downloadId, notificationMode, false);
                                 }
                             })
                     );

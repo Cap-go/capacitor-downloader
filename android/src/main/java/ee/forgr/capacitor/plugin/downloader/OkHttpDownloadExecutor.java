@@ -44,6 +44,7 @@ public class OkHttpDownloadExecutor {
         public volatile Call call;
         public volatile File tempFile;
         public volatile File committedDestination;
+        public volatile Network boundWifiNetwork;
         public final AtomicBoolean cancelled = new AtomicBoolean(false);
 
         ActiveDownload(String id) {
@@ -113,7 +114,12 @@ public class OkHttpDownloadExecutor {
                 }
             }
 
+            Network boundWifi = null;
             OkHttpClient client = buildClientForNetwork(network);
+            if ("wifi-only".equals(network)) {
+                boundWifi = findWifiNetwork();
+                active.boundWifiNetwork = boundWifi;
+            }
 
             File tempFile = null;
             try {
@@ -161,6 +167,14 @@ public class OkHttpDownloadExecutor {
                         return;
                     }
 
+                    if (url.regionMatches(true, 0, "https:", 0, 6) && !response.request().url().isHttps()) {
+                        active.state = State.ERROR;
+                        active.errorMessage = "HTTPS to HTTP redirect is not allowed";
+                        tempFile.delete();
+                        completionListener.onFinished(id, false, false, active.errorMessage);
+                        return;
+                    }
+
                     int code = response.code();
                     if (code == 206) {
                         active.state = State.ERROR;
@@ -200,7 +214,7 @@ public class OkHttpDownloadExecutor {
                                 finishCancelled(active, tempFile, id, completionListener);
                                 return;
                             }
-                            if ("wifi-only".equals(network) && !isOnWifi()) {
+                            if ("wifi-only".equals(network) && boundWifi != null && !isWifiNetworkUsable(boundWifi)) {
                                 tempFile.delete();
                                 active.state = State.ERROR;
                                 active.errorMessage = "Wi-Fi connection lost";
@@ -382,16 +396,21 @@ public class OkHttpDownloadExecutor {
     }
 
     private boolean isOnWifi() {
+        Network wifi = findWifiNetwork();
+        return wifi != null && isWifiNetworkUsable(wifi);
+    }
+
+    private boolean isWifiNetworkUsable(Network network) {
         ConnectivityManager connectivityManager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (connectivityManager == null) {
-            return false;
-        }
-        Network network = connectivityManager.getActiveNetwork();
-        if (network == null) {
+        if (connectivityManager == null || network == null) {
             return false;
         }
         NetworkCapabilities capabilities = connectivityManager.getNetworkCapabilities(network);
-        return capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);
+        return (
+            capabilities != null &&
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) &&
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        );
     }
 
     public interface ProgressReporter {

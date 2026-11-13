@@ -7,8 +7,13 @@ import org.junit.Test;
 public class AndroidHttpEngineSelectorTest {
 
     @Test
+    public void omittedOptionUsesDownloadManagerLikeMain() {
+        assertEquals(AndroidHttpEngineSelector.Engine.DOWNLOAD_MANAGER, AndroidHttpEngineSelector.resolve(null, true));
+        assertEquals(AndroidHttpEngineSelector.Engine.DOWNLOAD_MANAGER, AndroidHttpEngineSelector.resolve("", true));
+    }
+
+    @Test
     public void autoSelectsOkHttpForPrivateDestinations() {
-        assertEquals(AndroidHttpEngineSelector.Engine.OKHTTP, AndroidHttpEngineSelector.resolve(null, true));
         assertEquals(AndroidHttpEngineSelector.Engine.OKHTTP, AndroidHttpEngineSelector.resolve("auto", true));
     }
 

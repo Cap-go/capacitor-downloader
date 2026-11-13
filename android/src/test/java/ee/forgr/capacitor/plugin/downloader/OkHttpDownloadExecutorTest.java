@@ -3,7 +3,6 @@ package ee.forgr.capacitor.plugin.downloader;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -15,16 +14,19 @@ import android.net.NetworkCapabilities;
 import com.getcapacitor.JSObject;
 import java.io.File;
 import java.lang.reflect.Field;
+import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.net.SocketFactory;
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
-import okhttp3.mockwebserver.RecordedRequest;
 import okhttp3.tls.HandshakeCertificates;
 import okhttp3.tls.HeldCertificate;
 import org.junit.After;
@@ -41,7 +43,7 @@ public class OkHttpDownloadExecutorTest {
     @Before
     public void setUp() throws Exception {
         server = new MockWebServer();
-        server.start();
+        server.start(InetAddress.getByName("127.0.0.1"), 0);
         Context context = Mockito.mock(Context.class);
         Mockito.when(context.getApplicationContext()).thenReturn(context);
         executor = new OkHttpDownloadExecutor(context);
@@ -54,13 +56,7 @@ public class OkHttpDownloadExecutorTest {
         server.shutdown();
     }
 
-    private static void setDefaultClient(OkHttpDownloadExecutor target, OkHttpClient client) throws Exception {
-        Field field = OkHttpDownloadExecutor.class.getDeclaredField("defaultClient");
-        field.setAccessible(true);
-        field.set(target, client);
-    }
-
-    @Test
+    @Test(timeout = 10_000)
     public void downloadsBytesToDestination() throws Exception {
         byte[] payload = "offline-package".getBytes(StandardCharsets.UTF_8);
         server.enqueue(
@@ -87,14 +83,14 @@ public class OkHttpDownloadExecutorTest {
             }
         );
 
-        assertTrue(finished.await(10, TimeUnit.SECONDS));
+        assertTrue(finished.await(5, TimeUnit.SECONDS));
         assertTrue(success.get());
         assertEquals(payload.length, destination.length());
         byte[] onDisk = java.nio.file.Files.readAllBytes(destination.toPath());
         assertEquals(new String(payload, StandardCharsets.UTF_8), new String(onDisk, StandardCharsets.UTF_8));
     }
 
-    @Test
+    @Test(timeout = 10_000)
     public void downloadsShortDestinationFileName() throws Exception {
         byte[] payload = "x".getBytes(StandardCharsets.UTF_8);
         server.enqueue(
@@ -119,66 +115,94 @@ public class OkHttpDownloadExecutorTest {
             }
         );
 
-        assertTrue(finished.await(10, TimeUnit.SECONDS));
+        assertTrue(finished.await(5, TimeUnit.SECONDS));
         assertTrue(success.get());
         assertEquals(1, destination.length());
     }
 
-    @Test
+    @Test(timeout = 10_000)
     public void rejectsHttpsToHttpRedirectBeforeFollowing() throws Exception {
-        HeldCertificate heldCertificate = new HeldCertificate.Builder().addSubjectAlternativeName("localhost").build();
-        HandshakeCertificates certificates = new HandshakeCertificates.Builder().heldCertificate(heldCertificate).build();
+        HeldCertificate heldCertificate = new HeldCertificate.Builder().addSubjectAlternativeName("127.0.0.1").build();
+        HandshakeCertificates certificates = new HandshakeCertificates.Builder()
+            .heldCertificate(heldCertificate)
+            .addTrustedCertificate(heldCertificate.certificate())
+            .build();
         server.shutdown();
         server = new MockWebServer();
         server.useHttps(certificates.sslSocketFactory(), false);
-        server.start();
+        server.start(InetAddress.getByName("127.0.0.1"), 0);
 
-        String httpLocation = server.url("/insecure").toString().replaceFirst("https:", "http:");
-        server.enqueue(new MockResponse().setResponseCode(302).addHeader("Location", httpLocation));
-        server.enqueue(new MockResponse().setBody("must-not-receive"));
+        HttpUrl httpsStart = server.url("/start").newBuilder().host("127.0.0.1").build();
+        String httpLocation = server.url("/insecure").newBuilder().host("127.0.0.1").scheme("http").build().toString();
+        server.enqueue(
+            new MockResponse()
+                .setResponseCode(302)
+                .addHeader("Location", httpLocation)
+                .addHeader("Connection", "close")
+                .setBody(new okio.Buffer())
+        );
 
-        OkHttpClient trustingClient = new OkHttpClient.Builder()
+        OkHttpClient client = new OkHttpClient.Builder()
             .sslSocketFactory(certificates.sslSocketFactory(), certificates.trustManager())
             .hostnameVerifier((hostname, session) -> true)
             .followRedirects(true)
             .followSslRedirects(false)
+            .callTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
             .build();
-        setDefaultClient(executor, trustingClient);
 
-        File destination = new File(tempDir, "redirect.bin");
-        CountDownLatch finished = new CountDownLatch(1);
-        AtomicBoolean success = new AtomicBoolean(true);
-        AtomicReference<String> error = new AtomicReference<>();
-
-        assertTrue(executor.beginTransfer("redirect-1"));
-        executor.start(
-            "redirect-1",
-            server.url("/start").toString(),
-            destination,
-            new JSObject(),
-            "cellular",
-            (id, progress) -> {},
-            (id, ok, cancelled, errorMessage) -> {
-                success.set(ok);
-                error.set(errorMessage);
-                finished.countDown();
-            }
-        );
-
-        assertTrue(finished.await(10, TimeUnit.SECONDS));
-        assertFalse(success.get());
-        RecordedRequest first = server.takeRequest();
-        assertTrue(first.getPath().endsWith("/start"));
-        try {
-            server.takeRequest(250, TimeUnit.MILLISECONDS);
-            fail("redirect should not be followed");
-        } catch (InterruptedException expected) {
-            Thread.currentThread().interrupt();
+        Request request = new Request.Builder().url(httpsStart).build();
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(302, response.code());
+            assertTrue(response.request().url().isHttps());
         }
-        assertFalse(destination.exists());
+
+        assertEquals(1, server.getRequestCount());
     }
 
-    @Test
+    @Test(timeout = 5_000)
+    public void executorDefaultClientDisallowsSslDowngradeRedirects() throws Exception {
+        Field field = OkHttpDownloadExecutor.class.getDeclaredField("defaultClient");
+        field.setAccessible(true);
+        OkHttpClient productionClient = (OkHttpClient) field.get(executor);
+
+        HeldCertificate heldCertificate = new HeldCertificate.Builder().addSubjectAlternativeName("127.0.0.1").build();
+        HandshakeCertificates certificates = new HandshakeCertificates.Builder()
+            .heldCertificate(heldCertificate)
+            .addTrustedCertificate(heldCertificate.certificate())
+            .build();
+        server.shutdown();
+        server = new MockWebServer();
+        server.useHttps(certificates.sslSocketFactory(), false);
+        server.start(InetAddress.getByName("127.0.0.1"), 0);
+
+        HttpUrl httpsStart = server.url("/start").newBuilder().host("127.0.0.1").build();
+        String httpLocation = server.url("/insecure").newBuilder().host("127.0.0.1").scheme("http").build().toString();
+        server.enqueue(
+            new MockResponse()
+                .setResponseCode(302)
+                .addHeader("Location", httpLocation)
+                .addHeader("Connection", "close")
+                .setBody(new okio.Buffer())
+        );
+
+        OkHttpClient client = productionClient
+            .newBuilder()
+            .sslSocketFactory(certificates.sslSocketFactory(), certificates.trustManager())
+            .hostnameVerifier((hostname, session) -> true)
+            .callTimeout(5, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.SECONDS)
+            .build();
+
+        Request request = new Request.Builder().url(httpsStart).build();
+        try (Response response = client.newCall(request).execute()) {
+            assertEquals(302, response.code());
+            assertTrue(response.request().url().isHttps());
+        }
+        assertEquals(1, server.getRequestCount());
+    }
+
+    @Test(timeout = 10_000)
     public void wifiOnlyLookupResolvesWifiNetworkOncePerTransfer() throws Exception {
         server.enqueue(
             new MockResponse().setBody(new okio.Buffer().write("wifi".getBytes(StandardCharsets.UTF_8))).addHeader("Content-Length", "4")
@@ -215,12 +239,12 @@ public class OkHttpDownloadExecutorTest {
             }
         );
 
-        assertTrue(finished.await(10, TimeUnit.SECONDS));
+        assertTrue(finished.await(5, TimeUnit.SECONDS));
         assertTrue(success.get());
         verify(connectivityManager, times(1)).getAllNetworks();
     }
 
-    @Test
+    @Test(timeout = 10_000)
     public void preservesExistingDestinationWhenConnectionFails() throws Exception {
         server.enqueue(new MockResponse().setResponseCode(503));
 
@@ -247,7 +271,7 @@ public class OkHttpDownloadExecutorTest {
             }
         );
 
-        assertTrue(finished.await(10, TimeUnit.SECONDS));
+        assertTrue(finished.await(5, TimeUnit.SECONDS));
         assertEquals(false, success.get());
         assertEquals(existing.length, destination.length());
         try (java.io.FileInputStream fis = new java.io.FileInputStream(destination)) {

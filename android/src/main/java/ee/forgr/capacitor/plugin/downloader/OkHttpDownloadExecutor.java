@@ -76,10 +76,16 @@ public class OkHttpDownloadExecutor {
         return activeDownloads.putIfAbsent(id, active) == null ? active : null;
     }
 
-    public void abandonTransfer(String id) {
-        ActiveDownload active = activeDownloads.remove(id);
-        if (active != null && active.call != null) {
-            active.call.cancel();
+    public void abandonTransfer(ActiveDownload reserved) {
+        if (reserved == null) {
+            return;
+        }
+        reserved.cancelled.set(true);
+        if (activeDownloads.remove(reserved.id, reserved)) {
+            Call call = reserved.call;
+            if (call != null) {
+                call.cancel();
+            }
         }
     }
 
@@ -261,6 +267,7 @@ public class OkHttpDownloadExecutor {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            activeDownloads.remove(id, active);
             active.state = State.ERROR;
             active.errorMessage = "Download interrupted";
             completionListener.onFinished(id, false, false, active.errorMessage);

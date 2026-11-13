@@ -132,6 +132,19 @@ public class CapacitorDownloaderPlugin extends Plugin {
         return current != null && current.longValue() == expectedGeneration;
     }
 
+    void applyOkHttpStartFailureIfCurrent(String id, long storedGeneration, File destinationFile, String errorMessage) {
+        if (!isCurrentOkHttpGeneration(id, storedGeneration)) {
+            return;
+        }
+        downloads.remove(id, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID);
+        okHttpDestinationFiles.remove(id, destinationFile);
+        completedNotificationStore.remove(id, storedGeneration);
+        JSObject failedData = new JSObject();
+        failedData.put("id", id);
+        failedData.put("error", errorMessage != null ? errorMessage : "Download failed");
+        notifyListeners("downloadFailed", failedData);
+    }
+
     @PluginMethod
     public void download(PluginCall call) {
         String id = call.getString("id");
@@ -355,8 +368,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 }
 
                 if (!downloads.replace(id, pendingToken, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID)) {
-                    okHttpDownloadExecutor.abandonTransfer(id);
-                    okHttpDestinationFiles.remove(id);
+                    okHttpDownloadExecutor.abandonTransfer(okHttpReservation);
+                    okHttpDestinationFiles.remove(id, destinationFile);
                     completedNotificationStore.remove(id, storedGeneration);
                     call.reject("Download was cancelled");
                     return;
@@ -412,14 +425,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             })
                     );
                 } catch (RuntimeException e) {
-                    okHttpDownloadExecutor.abandonTransfer(id);
-                    downloads.remove(id);
-                    okHttpDestinationFiles.remove(id);
-                    completedNotificationStore.remove(id, storedGeneration);
-                    JSObject failedData = new JSObject();
-                    failedData.put("id", id);
-                    failedData.put("error", e.getMessage());
-                    notifyListeners("downloadFailed", failedData);
+                    okHttpDownloadExecutor.abandonTransfer(okHttpReservation);
+                    applyOkHttpStartFailureIfCurrent(id, storedGeneration, destinationFile, e.getMessage());
                 }
             },
             () -> {

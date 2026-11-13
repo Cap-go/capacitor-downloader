@@ -3,6 +3,9 @@ package ee.forgr.capacitor.plugin.downloader;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -307,7 +310,7 @@ public class OkHttpDownloadExecutorTest {
         );
         OkHttpDownloadExecutor.ActiveDownload stale = executor.beginTransfer("reuse-id");
         assertNotNull(stale);
-        executor.abandonTransfer("reuse-id");
+        executor.abandonTransfer(stale);
         OkHttpDownloadExecutor.ActiveDownload current = executor.beginTransfer("reuse-id");
         assertNotNull(current);
 
@@ -336,5 +339,24 @@ public class OkHttpDownloadExecutorTest {
         assertEquals(0, server.getRequestCount());
         assertNotNull(executor.getActive("reuse-id"));
         assertEquals(current, executor.getActive("reuse-id"));
+    }
+
+    @Test(timeout = 5_000)
+    public void abandonTransferOnlyRemovesMatchingReservation() {
+        OkHttpDownloadExecutor.ActiveDownload current = executor.beginTransfer("shared-id");
+        assertNotNull(current);
+
+        OkHttpDownloadExecutor.ActiveDownload staleHandle = new OkHttpDownloadExecutor.ActiveDownload("shared-id");
+        executor.abandonTransfer(staleHandle);
+        assertSame(current, executor.getActive("shared-id"));
+        assertFalse(current.cancelled.get());
+
+        executor.abandonTransfer(current);
+        assertNull(executor.getActive("shared-id"));
+        assertTrue(current.cancelled.get());
+
+        OkHttpDownloadExecutor.ActiveDownload next = executor.beginTransfer("shared-id");
+        assertNotNull(next);
+        assertNotSame(current, next);
     }
 }

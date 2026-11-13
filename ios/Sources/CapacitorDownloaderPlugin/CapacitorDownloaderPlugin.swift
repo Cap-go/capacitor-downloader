@@ -289,10 +289,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             }
             try FileManager.default.moveItem(at: location, to: destinationURL)
             notifyListeners("downloadCompleted", data: ["id": id])
-            if let completionText = DownloadCompletedNotificationStore.shared.takeText(
-                for: id,
-                generation: generation(for: downloadTask)
-            ) {
+            if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: id, generation: generation) {
                 DownloadCompletedNotificationPresenter.presentIfAllowed(downloadId: id, body: completionText)
             }
         } catch {

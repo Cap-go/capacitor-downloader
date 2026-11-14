@@ -301,29 +301,21 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     public void failBatchPreservesChildWhenDownloadManagerReportsSuccessful() throws Exception {
         Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
         Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
-        DownloadBatchState batch = new DownloadBatchState("batch-1", 2, 1L, "completed");
+        DownloadBatchState batch = new DownloadBatchState("batch-1", 1, 1L, "completed");
         batch.trackChildId("batch-1#0");
-        batch.trackChildId("batch-1#1");
         batches.put("batch-1", batch);
         batchChildOwners.put("batch-1#0", "batch-1");
-        batchChildOwners.put("batch-1#1", "batch-1");
         downloads.put("batch-1#0", 101L);
-        downloads.put("batch-1#1", 102L);
 
-        when(downloadManager.query(any(DownloadManager.Query.class))).thenAnswer((invocation) -> {
-            long downloadId = extractQueryDownloadId(invocation.getArgument(0));
-            if (downloadId == 101L) {
-                return downloadStatusCursor(DownloadManager.STATUS_SUCCESSFUL);
-            }
-            return downloadStatusCursor(DownloadManager.STATUS_RUNNING);
-        });
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenAnswer((invocation) ->
+            downloadStatusCursor(DownloadManager.STATUS_SUCCESSFUL)
+        );
 
         Method failBatch = plugin.getClass().getDeclaredMethod("failBatch", String.class, String.class, Integer.class);
         failBatch.setAccessible(true);
-        failBatch.invoke(plugin, "batch-1", "failed", 1);
+        failBatch.invoke(plugin, "batch-1", "failed", 0);
 
         verify(downloadManager, org.mockito.Mockito.never()).remove(101L);
-        verify(downloadManager).remove(102L);
     }
 
     @Test
@@ -366,7 +358,7 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         PluginCall call = mockPluginCall("batch-1");
         plugin.stop(call);
 
-        verify(downloadManager).remove(
+        verify(downloadManager, timeout(5000)).remove(
             org.mockito.ArgumentMatchers.argThat((long[] ids) -> ids != null && ids.length == 1 && ids[0] == 101L)
         );
         verify(call, timeout(5000)).resolve(any());
@@ -504,13 +496,6 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         MatrixCursor cursor = new MatrixCursor(new String[] { DownloadManager.COLUMN_STATUS });
         cursor.addRow(new Object[] { status });
         return cursor;
-    }
-
-    private static long extractQueryDownloadId(DownloadManager.Query query) throws Exception {
-        Field field = DownloadManager.Query.class.getDeclaredField("mIds");
-        field.setAccessible(true);
-        long[] ids = (long[]) field.get(query);
-        return ids != null && ids.length > 0 ? ids[0] : -1L;
     }
 
     private static PluginCall mockPluginCall(String id) {

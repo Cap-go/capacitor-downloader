@@ -9,7 +9,7 @@ export const DOWNLOAD_BATCH_MAX_FILES = 32;
 export interface DownloadTask {
   /** Unique identifier for the download task */
   id: string;
-  /** Download progress from 0 to 100 */
+  /** Download progress from 0 to 1 */
   progress: number;
   /** Current state of the download */
   state: 'PENDING' | 'RUNNING' | 'PAUSED' | 'DONE' | 'ERROR';
@@ -33,7 +33,7 @@ export interface DownloadFileSpec {
    * - `public-downloads/...` saves to the public Downloads folder (DownloadManager).
    * - Any other relative path saves under app external files (DownloadManager with `'auto'`).
    *
-   * Multi-file batches on Android always use DownloadManager with legacy destination resolution (`androidHttpEngine` `'auto'` or `'okhttp'` rejects).
+   * Multi-file batches on Android use the same destination rules as single downloads for the batch `androidHttpEngine` value (including extended roots when `'auto'` or `'okhttp'` is set). The batch is rejected only when a file would use OkHttp (for example `cache/...` or `files/...` with `'okhttp'`).
    *
    * Absolute paths and `file://` URIs are supported on iOS and on Android single downloads.
    */
@@ -129,18 +129,24 @@ export interface DownloadOptions {
    * @since 8.5.0
    */
   downloadCompletedNotificationText?: string;
+  /**
+   * Multi-file batches use `files` instead. Omit for single-file downloads.
+   *
+   * @since 8.7.0
+   */
+  files?: never;
 }
 
 /**
  * Configuration options for a multi-file batch download.
  *
- * On Android, multi-file batches always use the system DownloadManager. If `androidHttpEngine` is `'auto'` or `'okhttp'` and any file would take the OkHttp path, `download()` rejects before enqueue.
+ * On Android, multi-file batches use the system DownloadManager only. Each file uses the same `androidHttpEngine` destination rules as a single download; `download()` rejects before enqueue if any file would use OkHttp.
  *
- * Batch metadata and in-flight tracking are held in memory. If the host process is killed, the batch id and per-file progress are not restored automatically when the app returns (iOS may still deliver background URLSession events; Android DownloadManager work continues, but the plugin does not rebuild batch progress until you start a new download).
+ * **Process death:** On Android, batch state lives in memory only and is lost when the host process is killed (DownloadManager work may still finish, but the plugin does not rebuild batch progress). On iOS, batch metadata is persisted in `DownloadBatchStore` (UserDefaults) and restored when the plugin initializes.
  *
  * When one file fails, remaining transfers are cancelled. Files that already finished successfully stay on disk (Android stops tracking completed children without calling DownloadManager.remove on them).
  *
- * `stop({ id })` on a batch id: iOS removes files recorded after successful writes. Android removes active DownloadManager entries, which can delete in-progress partial files but leaves completed files that were already detached from tracking.
+ * `stop({ id })` on a batch id: iOS removes files recorded after successful writes. Android removes active DownloadManager entries, which can delete in-progress partial files but leaves completed batch files on disk (including files that finished before `stop()`).
  */
 export interface DownloadBatchOptions {
   /** Unique identifier for this batch (shared by every file in `files`) */
@@ -148,7 +154,7 @@ export interface DownloadBatchOptions {
   /**
    * Download multiple files as one native-owned batch.
    *
-   * The batch shares the top-level `id`. Progress events use `progress` and `fileProgress` from 0 to 100 (same scale as DownloadTask).
+   * The batch shares the top-level `id`. Progress events use `progress` and `fileProgress` from 0 to 1 (same scale as DownloadTask).
    * `downloadCompleted` fires once when every file succeeds. Any failure cancels the batch.
    * At most 32 entries are allowed.
    *
@@ -206,7 +212,7 @@ export interface DownloadBatchOptions {
    *   in the app process and do not continue after the process is killed (unlike DownloadManager on those paths).
    * - `'downloadManager'`: always use the system DownloadManager with legacy destination resolution.
    *
-   * Ignored on iOS and Web. Multi-file batches on Android reject `'auto'` and `'okhttp'`.
+   * Ignored on iOS and Web. On Android batches, each file uses these rules; the call is rejected if any file would use OkHttp.
    *
    * @since 8.5.0
    */
@@ -311,7 +317,7 @@ export interface CapacitorDownloaderPlugin {
    * Listen for download progress updates.
    * Fired periodically as download progresses.
    *
-   * For batch downloads, `progress` and `fileProgress` use the same 0 to 100 scale as DownloadTask.
+   * For batch downloads, `progress` and `fileProgress` use the same 0 to 1 scale as DownloadTask.
    *
    * @param eventName - Must be 'downloadProgress'
    * @param listenerFunc - Callback receiving progress updates
@@ -319,7 +325,7 @@ export interface CapacitorDownloaderPlugin {
    * @example
    * ```typescript
    * const listener = await Downloader.addListener('downloadProgress', (data) => {
-   *   console.log(`Download ${data.id}: ${data.progress}%`);
+   *   console.log(`Download ${data.id}: ${data.progress}`);
    * });
    * ```
    */
@@ -334,7 +340,7 @@ export interface CapacitorDownloaderPlugin {
       bytesTotal?: number;
       /** Index of the file within a batch when `files` was used */
       fileIndex?: number;
-      /** Progress of the file at `fileIndex` from 0 to 100 for batch downloads */
+      /** Progress of the file at `fileIndex` from 0 to 1 for batch downloads */
       fileProgress?: number;
     }) => void,
   ): Promise<PluginListenerHandle>;

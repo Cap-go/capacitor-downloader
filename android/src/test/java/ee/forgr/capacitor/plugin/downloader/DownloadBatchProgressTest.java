@@ -1,6 +1,8 @@
 package ee.forgr.capacitor.plugin.downloader;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
@@ -17,6 +19,14 @@ public class DownloadBatchProgressTest {
         DownloadBatchState.BatchIdParts parts = DownloadBatchState.parseFileTaskId("bundle#2");
         assertEquals("bundle", parts.batchId);
         assertEquals(2, parts.fileIndex);
+    }
+
+    @Test
+    public void shouldPreserveCompletedChildWhenProgressComplete() {
+        DownloadBatchState batch = new DownloadBatchState("bundle", 2, 1L, "hidden");
+        batch.updateFileProgress(0, 1f);
+        assertTrue(batch.shouldPreserveCompletedChild(0));
+        assertFalse(batch.shouldPreserveCompletedChild(1));
     }
 
     @Test

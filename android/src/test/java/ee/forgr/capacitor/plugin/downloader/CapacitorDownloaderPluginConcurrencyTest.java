@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.app.DownloadManager;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.PluginCall;
 import java.io.File;
 import java.lang.reflect.Constructor;
@@ -268,6 +269,65 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         assertFalse(batches.containsKey("batch-1"));
         assertFalse(downloads.containsKey("batch-1#0"));
         assertFalse(downloads.containsKey("batch-1#1"));
+    }
+
+    @Test
+    public void stopBatchDoesNotRemoveCompletedChildFromDownloadManager() throws Exception {
+        Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
+        Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
+        DownloadBatchState batch = new DownloadBatchState("batch-1", 2, 1L, "completed");
+        batch.markFileCompleted(0);
+        batch.trackChildId("batch-1#0");
+        batch.trackChildId("batch-1#1");
+        batches.put("batch-1", batch);
+        batchChildOwners.put("batch-1#0", "batch-1");
+        batchChildOwners.put("batch-1#1", "batch-1");
+        downloads.put("batch-1#0", 101L);
+        downloads.put("batch-1#1", 102L);
+
+        when(downloadManager.remove(any(long[].class))).thenReturn(1);
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenReturn(null);
+
+        PluginCall call = mockPluginCall("batch-1");
+        plugin.stop(call);
+
+        verify(downloadManager, org.mockito.Mockito.never()).remove(101L);
+        verify(call, timeout(5000)).resolve(any());
+        assertFalse(batches.containsKey("batch-1"));
+    }
+
+    @Test
+    public void failBatchPreservesChildWithFullProgressBeforeCompletionFlag() throws Exception {
+        Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
+        Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
+        DownloadBatchState batch = new DownloadBatchState("batch-1", 2, 1L, "completed");
+        batch.updateFileProgress(0, 1f);
+        batch.trackChildId("batch-1#0");
+        batch.trackChildId("batch-1#1");
+        batches.put("batch-1", batch);
+        batchChildOwners.put("batch-1#0", "batch-1");
+        batchChildOwners.put("batch-1#1", "batch-1");
+        downloads.put("batch-1#0", 101L);
+        downloads.put("batch-1#1", 102L);
+
+        Method failBatch = plugin.getClass().getDeclaredMethod("failBatch", String.class, String.class, Integer.class);
+        failBatch.setAccessible(true);
+        failBatch.invoke(plugin, "batch-1", "failed", 1);
+
+        verify(downloadManager, org.mockito.Mockito.never()).remove(101L);
+        verify(downloadManager).remove(102L);
+    }
+
+    @Test
+    public void downloadRejectsUrlAndFilesTogether() {
+        PluginCall call = mock(PluginCall.class);
+        when(call.getString("id")).thenReturn("mixed");
+        when(call.getString("url")).thenReturn("https://example.com/file");
+        when(call.getArray("files")).thenReturn(new JSArray("[{\"url\":\"https://example.com/a.zip\",\"destination\":\"a.zip\"}]"));
+
+        plugin.download(call);
+
+        verify(call).reject("Provide either url and destination or files, not both");
     }
 
     @Test

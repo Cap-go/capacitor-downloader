@@ -179,12 +179,15 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         JSArray files = call.getArray("files");
+        String url = call.getString("url");
         if (files != null && files.length() > 0) {
+            if (url != null && !url.isEmpty()) {
+                call.reject("Provide either url and destination or files, not both");
+                return;
+            }
             downloadBatch(call, id, files);
             return;
         }
-
-        String url = call.getString("url");
         String destination = call.getString("destination");
 
         if (url == null || destination == null) {
@@ -651,7 +654,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 continue;
             }
             DownloadBatchState.BatchIdParts parts = DownloadBatchState.parseFileTaskId(childId);
-            if (parts != null && batch.isFileCompleted(parts.fileIndex)) {
+            if (parts != null && batch.shouldPreserveCompletedChild(parts.fileIndex)) {
                 unregisterBatchChild(batchId, childId);
                 continue;
             }
@@ -685,9 +688,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         JSObject progressData = new JSObject();
         progressData.put("id", batchId);
-        progressData.put("progress", DownloadBatchProgress.toPercent(overall));
+        progressData.put("progress", overall);
         progressData.put("fileIndex", fileIndex);
-        progressData.put("fileProgress", DownloadBatchProgress.toPercent(fileProgress));
+        progressData.put("fileProgress", fileProgress);
         progressData.put("bytesWritten", bytesWritten);
         progressData.put("bytesTotal", bytesTotal);
         notifyListeners("downloadProgress", progressData);
@@ -1087,6 +1090,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
             if (!batchId.equals(batchChildOwners.get(childId))) {
                 continue;
             }
+            DownloadBatchState.BatchIdParts parts = DownloadBatchState.parseFileTaskId(childId);
+            if (parts != null && batch.shouldPreserveCompletedChild(parts.fileIndex)) {
+                unregisterBatchChild(batchId, childId);
+                continue;
+            }
             Long childDownloadId = downloads.get(childId);
             batchChildOwners.remove(childId, batchId);
             if (childDownloadId != null && downloads.remove(childId, childDownloadId)) {
@@ -1208,7 +1216,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             JSObject result = new JSObject();
             result.put("id", id);
             result.put("state", batch.failed.get() ? "ERROR" : "RUNNING");
-            result.put("progress", DownloadBatchProgress.toPercent(batch.overallProgress()));
+            result.put("progress", batch.overallProgress());
             call.resolve(result);
             return;
         }

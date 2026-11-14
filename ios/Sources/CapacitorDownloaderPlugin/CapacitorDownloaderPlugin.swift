@@ -62,19 +62,36 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         if !identifier.isEmpty {
             restoredBackgroundSessionIdentifiers.append(identifier)
         }
-        urlSession.getAllTasks { [weak self] tasks in
-            guard let self else {
-                return
+        let applyRestored: ([URLSessionTask]) -> Void = { [weak self] tasks in
+            self?.rehydrateBackgroundDownloadTasks(tasks)
+        }
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            let semaphore = DispatchSemaphore(value: 0)
+            urlSession.getAllTasks { tasks in
+                applyRestored(tasks)
+                semaphore.signal()
             }
-            for task in tasks {
-                guard let downloadTask = task as? URLSessionDownloadTask,
-                      let id = downloadTask.taskDescription,
-                      !id.isEmpty else {
-                    continue
-                }
-                self.setTask(downloadTask, for: id)
+            _ = semaphore.wait(timeout: .now() + 5)
+        } else {
+            urlSession.getAllTasks { tasks in
+                applyRestored(tasks)
             }
         }
+    }
+
+    internal func rehydrateBackgroundDownloadTasks(_ tasks: [URLSessionTask]) {
+        for task in tasks {
+            guard let downloadTask = task as? URLSessionDownloadTask,
+                  let id = downloadTask.taskDescription,
+                  !id.isEmpty else {
+                continue
+            }
+            setTask(downloadTask, for: id)
+        }
+    }
+
+    internal func hasRegisteredTask(id: String) -> Bool {
+        getTask(for: id) != nil
     }
 
     private func setTask(_ task: URLSessionDownloadTask, for id: String) {
@@ -186,8 +203,12 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
-        if call.getArray("files") != nil {
-            guard let files = call.getArray("files") as? [[String: Any]] else {
+        if let filesValue = call.getArray("files") {
+            if let urlString = call.getString("url"), !urlString.isEmpty {
+                call.reject("Provide either url and destination or files, not both")
+                return
+            }
+            guard let files = filesValue as? [[String: Any]] else {
                 call.reject("Invalid file entry")
                 return
             }
@@ -433,7 +454,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         if batchCoordinator.isBatch(batchId: id) {
-            let progress = DownloadBatchProgress.toPercent(batchCoordinator.overallProgress(batchId: id) ?? 0)
+            let progress = batchCoordinator.overallProgress(batchId: id) ?? 0
             let state = batchCoordinator.isPaused(batchId: id) ? "PAUSED" : "RUNNING"
             call.resolve([
                 "id": id,
@@ -572,9 +593,9 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                         "downloadProgress",
                         data: [
                             "id": batchParts.batchId,
-                            "progress": DownloadBatchProgress.toPercent(overall),
+                            "progress": overall,
                             "fileIndex": batchParts.fileIndex,
-                            "fileProgress": 100
+                            "fileProgress": 1
                         ]
                     )
                 case .none:
@@ -660,9 +681,9 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 "downloadProgress",
                 data: [
                     "id": batchParts.batchId,
-                    "progress": DownloadBatchProgress.toPercent(batchProgress.overall),
+                    "progress": batchProgress.overall,
                     "fileIndex": batchParts.fileIndex,
-                    "fileProgress": DownloadBatchProgress.toPercent(batchProgress.file),
+                    "fileProgress": batchProgress.file,
                     "bytesWritten": totalBytesWritten,
                     "bytesTotal": bytesTotal
                 ]

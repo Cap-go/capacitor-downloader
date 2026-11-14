@@ -104,4 +104,14 @@ final class DownloadBatchState {
         }
         return fileCompleted[fileIndex];
     }
+
+    synchronized boolean shouldPreserveCompletedChild(int fileIndex) {
+        if (fileIndex < 0 || fileIndex >= fileCount) {
+            return false;
+        }
+        if (fileCompleted[fileIndex]) {
+            return true;
+        }
+        return fileProgress[fileIndex] >= 1f;
+    }
 }

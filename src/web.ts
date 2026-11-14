@@ -6,18 +6,22 @@ import { DOWNLOAD_BATCH_MAX_FILES } from './definitions';
 export class CapacitorDownloaderWeb extends WebPlugin implements CapacitorDownloaderPlugin {
   async download(options: DownloadOptions | DownloadBatchOptions): Promise<DownloadTask> {
     const hasFiles = 'files' in options && Array.isArray(options.files) && options.files.length > 0;
-    if (hasFiles && options.files.length > DOWNLOAD_BATCH_MAX_FILES) {
-      throw new Error(`Batch exceeds maximum of ${DOWNLOAD_BATCH_MAX_FILES} files`);
+    const hasUrl = 'url' in options && typeof options.url === 'string' && options.url.length > 0;
+    if (hasFiles && hasUrl) {
+      throw new Error('Provide either url and destination or files, not both');
     }
-    if (!hasFiles && (!('url' in options) || !options.url || !('destination' in options) || !options.destination)) {
-      throw new Error('url and destination are required when files is not provided');
-    }
-    if (hasFiles && 'files' in options) {
-      for (const file of options.files) {
+    if (hasFiles) {
+      const files = (options as DownloadBatchOptions).files;
+      if (files.length > DOWNLOAD_BATCH_MAX_FILES) {
+        throw new Error(`Batch exceeds maximum of ${DOWNLOAD_BATCH_MAX_FILES} files`);
+      }
+      for (const file of files) {
         if (!file.url || !file.destination) {
           throw new Error('Each file entry requires url and destination');
         }
       }
+    } else if (!hasUrl || !('destination' in options) || !options.destination) {
+      throw new Error('url and destination are required when files is not provided');
     }
     console.log('DOWNLOAD', options);
     throw new Error('Method not implemented.');

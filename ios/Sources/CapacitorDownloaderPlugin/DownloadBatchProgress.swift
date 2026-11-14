@@ -12,8 +12,4 @@ enum DownloadBatchProgress {
         }
         return sum / Float(fileCount)
     }
-
-    static func toPercent(_ ratio: Float) -> Float {
-        min(100, max(0, ratio * 100))
-    }
 }

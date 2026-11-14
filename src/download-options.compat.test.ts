@@ -28,6 +28,14 @@ const batchOk: BatchOnlyPayload = {
   files: [{ url: 'https://example.com/a.zip', destination: 'a.zip' }],
 };
 
+const mixedSingleShape = {
+  id: 'bad',
+  url: 'https://example.com/x',
+  destination: 'x.zip',
+  // @ts-expect-error single options cannot include files
+  files: [{ url: 'https://example.com/a.zip', destination: 'a.zip' }],
+} satisfies DownloadOptions;
+
 const mixedBatchShape = {
   id: 'bad',
   // @ts-expect-error batch options cannot include top-level url
@@ -35,6 +43,7 @@ const mixedBatchShape = {
   files: [{ url: 'https://example.com/a.zip', destination: 'a.zip' }],
 } satisfies DownloadBatchOptions;
 
+void mixedSingleShape;
 void mixedBatchShape;
 void readDestination;
 void readUrl;

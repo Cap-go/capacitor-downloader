@@ -137,9 +137,16 @@ final class DownloadBatchProgressTests: XCTestCase {
 
     func testLoadRestoresBackgroundTasksForMainAndWifiOnlySessions() {
         let plugin = CapacitorDownloaderPlugin()
+        let session = URLSession(configuration: .ephemeral)
+        let downloadTask = session.downloadTask(with: URL(string: "https://example.com/file.bin")!)
+        downloadTask.taskDescription = "restored-single"
+        plugin.rehydrateBackgroundDownloadTasks([downloadTask])
+        XCTAssertTrue(plugin.hasRegisteredTask(id: "restored-single"))
+
         plugin.load()
         XCTAssertTrue(plugin.restoredBackgroundSessionIdentifiers.contains(DownloadSessionIdentifiers.main))
         XCTAssertTrue(plugin.restoredBackgroundSessionIdentifiers.contains(DownloadSessionIdentifiers.wifiOnly))
+        XCTAssertTrue(plugin.hasRegisteredTask(id: "restored-single"))
     }
 
     func testBatchCoordinatorParsesRegisteredTaskId() {

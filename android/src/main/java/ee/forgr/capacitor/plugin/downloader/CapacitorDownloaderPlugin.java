@@ -1065,16 +1065,24 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             systemDownloadIds.add(stoppedChild.downloadId);
                         }
                     }
-                    int removedCount = 0;
                     if (!systemDownloadIds.isEmpty()) {
                         long[] ids = new long[systemDownloadIds.size()];
                         for (int i = 0; i < systemDownloadIds.size(); i++) {
                             ids[i] = systemDownloadIds.get(i);
                         }
-                        removedCount = downloadManager.remove(ids);
+                        downloadManager.remove(ids);
                     }
-                    if (!systemDownloadIds.isEmpty() && removedCount < systemDownloadIds.size()) {
-                        restoreStoppedBatchChildren(batch, batchId, stoppedChildren);
+                    List<StoppedBatchChild> stillActiveChildren = new ArrayList<>();
+                    for (StoppedBatchChild stoppedChild : stoppedChildren) {
+                        if (isPendingDownload(stoppedChild.downloadId)) {
+                            continue;
+                        }
+                        if (isSystemDownloadActive(stoppedChild.downloadId)) {
+                            stillActiveChildren.add(stoppedChild);
+                        }
+                    }
+                    if (!stillActiveChildren.isEmpty()) {
+                        restoreStoppedBatchChildren(batch, batchId, stillActiveChildren);
                         batches.putIfAbsent(batchId, batch);
                         call.reject("Download could not be removed");
                         return;
@@ -1083,7 +1091,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     batch.ownedChildIds.clear();
                     clearChildOwnersForBatch(batchId);
                     completedNotificationStore.remove(batchId, storedGeneration);
-                    call.resolve(new JSObject().put("removed", removedCount > 0));
+                    call.resolve(new JSObject().put("removed", !systemDownloadIds.isEmpty()));
                 } catch (RuntimeException e) {
                     restoreStoppedBatchChildren(batch, batchId, stoppedChildren);
                     batches.putIfAbsent(batchId, batch);
@@ -1108,11 +1116,38 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private void restoreStoppedBatchChildren(DownloadBatchState batch, String batchId, List<StoppedBatchChild> stoppedChildren) {
         batch.cancelled.set(false);
         for (StoppedBatchChild stoppedChild : stoppedChildren) {
+            Long currentDownloadId = downloads.get(stoppedChild.childId);
+            if (currentDownloadId != null && currentDownloadId.longValue() != stoppedChild.downloadId) {
+                continue;
+            }
+            String currentOwner = batchChildOwners.get(stoppedChild.childId);
+            if (currentOwner != null && !currentOwner.equals(batchId)) {
+                continue;
+            }
+            if (currentDownloadId == null) {
+                Long displaced = downloads.putIfAbsent(stoppedChild.childId, stoppedChild.downloadId);
+                if (displaced != null && displaced.longValue() != stoppedChild.downloadId) {
+                    continue;
+                }
+            }
             batchChildOwners.put(stoppedChild.childId, batchId);
             batch.trackChildId(stoppedChild.childId);
-            downloads.putIfAbsent(stoppedChild.childId, stoppedChild.downloadId);
+            if (!isPendingDownload(stoppedChild.downloadId)) {
+                startProgressCheck(stoppedChild.childId, stoppedChild.downloadId);
+            }
         }
         batches.putIfAbsent(batchId, batch);
+    }
+
+    private boolean isSystemDownloadActive(long systemDownloadId) {
+        DownloadManager.Query query = new DownloadManager.Query().setFilterById(systemDownloadId);
+        Cursor cursor = downloadManager.query(query);
+        if (cursor == null) {
+            return false;
+        }
+        try (cursor) {
+            return cursor.moveToFirst();
+        }
     }
 
     @PluginMethod

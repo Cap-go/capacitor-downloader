@@ -104,6 +104,20 @@ final class DownloadBatchProgressTests: XCTestCase {
         XCTAssertEqual(overall, 0.5, accuracy: 0.0001)
     }
 
+    func testRecordMovedDestinationStoresResolvedFilesystemPath() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard coordinator.startBatch(batchId: "bundle", fileCount: 1, singleDownloadIds: []) != nil else {
+            XCTFail("expected batch to start")
+            return
+        }
+        let resolvedPath = "/var/mobile/Documents/bundle#0"
+        coordinator.recordMovedDestination(batchId: "bundle", fileIndex: 0, destination: resolvedPath)
+        XCTAssertEqual(coordinator.destinationsForCancellation(batchId: "bundle"), [resolvedPath])
+        coordinator.removeBatch(batchId: "bundle")
+        store.clear()
+    }
+
     func testBatchCoordinatorParsesRegisteredTaskId() {
         let store = DownloadBatchStore(defaults: batchDefaults)
         let coordinator = DownloadBatchCoordinator(store: store)

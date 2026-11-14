@@ -128,6 +128,8 @@ export interface DownloadSingleOptions extends DownloadCommonOptions {
  *
  * Also includes every field documented on {@link DownloadCommonOptions}
  * (`id`, `headers`, `network`, `priority`, `notification`, `title`, `description`, `androidHttpEngine`, `downloadCompletedNotificationText`).
+ *
+ * On Android, multi-file batches always use the system DownloadManager. If `androidHttpEngine` is `'auto'` or `'okhttp'` and any file would take the OkHttp path, `download()` rejects before enqueue.
  */
 export interface DownloadBatchOptions extends DownloadCommonOptions {
   /**

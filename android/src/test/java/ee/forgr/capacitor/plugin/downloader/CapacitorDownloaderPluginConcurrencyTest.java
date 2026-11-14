@@ -15,8 +15,10 @@ import static org.mockito.Mockito.when;
 import android.app.DownloadManager;
 import com.getcapacitor.PluginCall;
 import java.io.File;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -243,6 +245,57 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     @Test
+    public void stopBatchSucceedsWhenChildrenNoLongerInDownloadManager() throws Exception {
+        Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
+        Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
+
+        DownloadBatchState batch = new DownloadBatchState("batch-1", 2, 1L, "completed");
+        batch.trackChildId("batch-1#0");
+        batch.trackChildId("batch-1#1");
+        batches.put("batch-1", batch);
+        downloads.put("batch-1#0", 101L);
+        downloads.put("batch-1#1", 102L);
+        batchChildOwners.put("batch-1#0", "batch-1");
+        batchChildOwners.put("batch-1#1", "batch-1");
+
+        when(downloadManager.remove(any(long[].class))).thenReturn(1);
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenReturn(null);
+
+        PluginCall call = mockPluginCall("batch-1");
+        plugin.stop(call);
+
+        verify(call, timeout(5000)).resolve(any());
+        assertFalse(batches.containsKey("batch-1"));
+        assertFalse(downloads.containsKey("batch-1#0"));
+        assertFalse(downloads.containsKey("batch-1#1"));
+    }
+
+    @Test
+    public void restoreStoppedBatchChildrenSkipsReusedChildId() throws Exception {
+        Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
+        downloads.put("batch-1#0", 999L);
+
+        DownloadBatchState batch = new DownloadBatchState("batch-1", 1, 1L, "completed");
+        Class<?> stoppedChildClass = Class.forName("ee.forgr.capacitor.plugin.downloader.CapacitorDownloaderPlugin$StoppedBatchChild");
+        Constructor<?> constructor = stoppedChildClass.getDeclaredConstructor(String.class, long.class);
+        constructor.setAccessible(true);
+        Object stoppedChild = constructor.newInstance("batch-1#0", 101L);
+
+        Method method = CapacitorDownloaderPlugin.class.getDeclaredMethod(
+            "restoreStoppedBatchChildren",
+            DownloadBatchState.class,
+            String.class,
+            List.class
+        );
+        method.setAccessible(true);
+        method.invoke(plugin, batch, "batch-1", List.of(stoppedChild));
+
+        assertEquals(Long.valueOf(999L), downloads.get("batch-1#0"));
+        assertFalse(batchChildOwners.containsKey("batch-1#0"));
+        assertTrue(batch.ownedChildIds.isEmpty());
+    }
+
+    @Test
     public void checkStatusRejectsWhenQueryThrows() throws Exception {
         downloads.put("test-id", 42L);
         DownloadManager throwingManager = mock(DownloadManager.class, (invocation) -> {
@@ -293,5 +346,19 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         Field field = CapacitorDownloaderPlugin.class.getDeclaredField("completedNotificationStore");
         field.setAccessible(true);
         return (DownloadCompletedNotificationStore) field.get(plugin);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, DownloadBatchState> getBatchesMap(CapacitorDownloaderPlugin plugin) throws Exception {
+        Field field = CapacitorDownloaderPlugin.class.getDeclaredField("batches");
+        field.setAccessible(true);
+        return (Map<String, DownloadBatchState>) field.get(plugin);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, String> getBatchChildOwnersMap(CapacitorDownloaderPlugin plugin) throws Exception {
+        Field field = CapacitorDownloaderPlugin.class.getDeclaredField("batchChildOwners");
+        field.setAccessible(true);
+        return (Map<String, String>) field.get(plugin);
     }
 }

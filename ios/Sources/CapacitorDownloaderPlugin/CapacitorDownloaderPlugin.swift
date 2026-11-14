@@ -29,8 +29,20 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.background(withIdentifier: "CapacitorDownloader")
         config.sessionSendsLaunchEvents = true
+        config.allowsCellularAccess = true
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }()
+
+    private lazy var wifiOnlySession: URLSession = {
+        let config = URLSessionConfiguration.background(withIdentifier: "CapacitorDownloader.wifiOnly")
+        config.sessionSendsLaunchEvents = true
+        config.allowsCellularAccess = false
+        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
+    }()
+
+    private func downloadSession(allowsCellularAccess: Bool) -> URLSession {
+        allowsCellularAccess ? session : wifiOnlySession
+    }
 
     public override func load() {
         tasksLock.lock()
@@ -231,6 +243,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private func downloadBatch(_ call: CAPPluginCall, batchId: String, files: [[String: Any]]) {
         var parsed: [(url: URL, destination: String)] = []
         let headers = call.getObject("headers") as? [String: String] ?? [:]
+        let wifiOnly = call.getString("network") == "wifi-only"
+        let batchSession = downloadSession(allowsCellularAccess: !wifiOnly)
 
         for fileObject in files {
             guard let urlString = fileObject["url"] as? String,
@@ -270,7 +284,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 request.setValue(value, forHTTPHeaderField: key)
             }
 
-            let task = session.downloadTask(with: request)
+            let task = batchSession.downloadTask(with: request)
             task.taskDescription = taskId
             stagedTasks.append((taskId, task))
         }
@@ -528,13 +542,11 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
             if let batchParts = batchCoordinator.childParts(for: id) {
                 removeTask(for: id, completing: downloadTask)
-                if let storedDestination {
-                    batchCoordinator.recordMovedDestination(
-                        batchId: batchParts.batchId,
-                        fileIndex: batchParts.fileIndex,
-                        destination: storedDestination
-                    )
-                }
+                batchCoordinator.recordMovedDestination(
+                    batchId: batchParts.batchId,
+                    fileIndex: batchParts.fileIndex,
+                    destination: destinationURL.path
+                )
                 switch batchCoordinator.markFileCompleted(batchId: batchParts.batchId, fileIndex: batchParts.fileIndex) {
                 case .allSucceeded(let batchId, let generation):
                     notifyListeners("downloadCompleted", data: ["id": batchId])

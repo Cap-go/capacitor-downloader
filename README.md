@@ -425,6 +425,8 @@ Configuration options for a multi-file batch download.
 Also includes every field documented on {@link DownloadCommonOptions}
 (`id`, `headers`, `network`, `priority`, `notification`, `title`, `description`, `androidHttpEngine`, `downloadCompletedNotificationText`).
 
+On Android, multi-file batches always use the system DownloadManager. If `androidHttpEngine` is `'auto'` or `'okhttp'` and any file would take the OkHttp path, `download()` rejects before enqueue.
+
 | Prop              | Type                            | Description                                                                                                                                                                                                                            | Since |
 | ----------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
 | **`files`**       | <code>DownloadFileSpec[]</code> | Download multiple files as one native-owned batch. The batch shares the top-level `id`. Progress events include per-file and overall progress. `downloadCompleted` fires once when every file succeeds. Any failure cancels the batch. | 8.4.0 |

@@ -3,7 +3,9 @@ import Foundation
 
 /// Optional iOS 26+ BGContinuedProcessingTask wrapper so progress stays visible while the device is locked.
 final class DownloadContinuedProcessingCoordinator {
-    static let permittedIdentifierPrefix = DownloadSessionIdentifiers.continuedProcessingPrefix
+    static var permittedIdentifierPattern: String {
+        DownloadSessionIdentifiers.continuedProcessingPermittedIdentifierPattern()
+    }
 
     private let lock = NSLock()
     private var activeTask: BGContinuedProcessingTask?
@@ -64,7 +66,7 @@ final class DownloadContinuedProcessingCoordinator {
         request: Request,
         onReady: @escaping (_ useForegroundCapableSession: Bool) -> Void
     ) {
-        let identifier = Self.permittedIdentifierPrefix + UUID().uuidString
+        let identifier = DownloadSessionIdentifiers.continuedProcessingTaskIdentifier()
         let launchLock = NSLock()
         var completed = false
         let completeOnce: (_ useForegroundCapableSession: Bool) -> Void = { useForeground in

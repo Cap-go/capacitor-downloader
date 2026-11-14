@@ -140,7 +140,8 @@ export interface DownloadOptions {
   /**
    * iOS 26 and later: opt in to a `BGContinuedProcessingTask` so the system can show download progress while the
    * device is locked. Falls back to the background URL session when the task does not launch in time. Ignored on
-   * Android and Web. The host app must allow `CapacitorDownloader.continuedProcessing.*` in
+   * Android and Web. The host app must allow
+   * `$(PRODUCT_BUNDLE_IDENTIFIER).CapacitorDownloader.continuedProcessing.*` in
    * `BGTaskSchedulerPermittedIdentifiers` (see plugin README).
    *
    * @since 8.8.0

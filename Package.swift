@@ -15,7 +15,10 @@ let package = Package(
     targets: [
         .target(
             name: "CapacitorDownloaderBootstrap",
-            path: "ios/Sources/CapacitorDownloaderBootstrap"),
+            path: "ios/Sources/CapacitorDownloaderBootstrap",
+            linkerSettings: [
+                .linkedFramework("Foundation")
+            ]),
         .target(
             name: "CapacitorDownloaderPlugin",
             dependencies: [

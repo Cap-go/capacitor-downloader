@@ -360,6 +360,16 @@ final class DownloadSessionIdentifiersTests: XCTestCase {
         XCTAssertTrue(DownloadSessionIdentifiers.isPluginSession(DownloadSessionIdentifiers.wifiOnly))
         XCTAssertFalse(DownloadSessionIdentifiers.isPluginSession("com.example.other"))
     }
+
+    func testContinuedProcessingIdentifiersUseBundlePrefix() {
+        let bundleId = Bundle.main.bundleIdentifier ?? "CapacitorDownloader"
+        let taskId = DownloadSessionIdentifiers.continuedProcessingTaskIdentifier()
+        XCTAssertTrue(taskId.hasPrefix(bundleId + DownloadSessionIdentifiers.continuedProcessingSuffix))
+        XCTAssertEqual(
+            DownloadSessionIdentifiers.continuedProcessingPermittedIdentifierPattern(),
+            bundleId + DownloadSessionIdentifiers.continuedProcessingSuffix + "*"
+        )
+    }
 }
 
 final class DownloadBackgroundSessionManagerTests: XCTestCase {

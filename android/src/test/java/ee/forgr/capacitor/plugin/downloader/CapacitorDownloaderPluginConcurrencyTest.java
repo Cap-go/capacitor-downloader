@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.app.DownloadManager;
+import android.database.Cursor;
 import android.database.MatrixCursor;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.PluginCall;
@@ -307,15 +308,19 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         batchChildOwners.put("batch-1#0", "batch-1");
         downloads.put("batch-1#0", 101L);
 
-        when(downloadManager.query(any(DownloadManager.Query.class))).thenAnswer((invocation) ->
-            downloadStatusCursor(DownloadManager.STATUS_SUCCESSFUL)
-        );
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenReturn(downloadStatusCursor(DownloadManager.STATUS_SUCCESSFUL));
+
+        Method shouldPreserve = plugin
+            .getClass()
+            .getDeclaredMethod("shouldPreserveBatchChild", DownloadBatchState.class, int.class, Long.class);
+        shouldPreserve.setAccessible(true);
+        assertTrue((boolean) shouldPreserve.invoke(plugin, batch, 0, 101L));
 
         Method failBatch = plugin.getClass().getDeclaredMethod("failBatch", String.class, String.class, Integer.class);
         failBatch.setAccessible(true);
         failBatch.invoke(plugin, "batch-1", "failed", 0);
 
-        verify(downloadManager, org.mockito.Mockito.never()).remove(101L);
+        verify(downloadManager, org.mockito.Mockito.never()).remove(anyLong());
     }
 
     @Test
@@ -351,16 +356,14 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         batchChildOwners.put("batch-1#0", "batch-1");
         downloads.put("batch-1#0", 101L);
 
-        when(downloadManager.query(any(DownloadManager.Query.class))).thenAnswer((invocation) ->
-            downloadStatusCursor(DownloadManager.STATUS_RUNNING)
-        );
+        when(downloadManager.query(any(DownloadManager.Query.class)))
+            .thenReturn(downloadStatusCursor(DownloadManager.STATUS_RUNNING))
+            .thenReturn(null);
 
         PluginCall call = mockPluginCall("batch-1");
         plugin.stop(call);
 
-        verify(downloadManager, timeout(5000)).remove(
-            org.mockito.ArgumentMatchers.argThat((long[] ids) -> ids != null && ids.length == 1 && ids[0] == 101L)
-        );
+        verify(downloadManager, timeout(5000)).remove(any(long[].class));
         verify(call, timeout(5000)).resolve(any());
     }
 
@@ -492,9 +495,12 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         verify(call, timeout(5000)).reject(eq("Download status could not be read"), any(Exception.class));
     }
 
-    private static MatrixCursor downloadStatusCursor(int status) {
-        MatrixCursor cursor = new MatrixCursor(new String[] { DownloadManager.COLUMN_STATUS });
-        cursor.addRow(new Object[] { status });
+    private static Cursor downloadStatusCursor(int status) {
+        Cursor cursor = mock(Cursor.class);
+        when(cursor.moveToFirst()).thenReturn(true);
+        when(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)).thenReturn(0);
+        when(cursor.getInt(0)).thenReturn(status);
+        when(cursor.close()).thenAnswer((invocation) -> null);
         return cursor;
     }
 

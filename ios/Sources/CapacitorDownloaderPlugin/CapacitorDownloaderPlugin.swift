@@ -26,15 +26,17 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private var taskGenerations: [Int: UInt64] = [:]
     private let tasksLock = NSLock()
     private let batchCoordinator = DownloadBatchCoordinator()
+    static let batchMaxFiles = 32
+
     private lazy var session: URLSession = {
-        let config = URLSessionConfiguration.background(withIdentifier: "CapacitorDownloader")
+        let config = URLSessionConfiguration.background(withIdentifier: DownloadSessionIdentifiers.main)
         config.sessionSendsLaunchEvents = true
         config.allowsCellularAccess = true
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
     }()
 
     private lazy var wifiOnlySession: URLSession = {
-        let config = URLSessionConfiguration.background(withIdentifier: "CapacitorDownloader.wifiOnly")
+        let config = URLSessionConfiguration.background(withIdentifier: DownloadSessionIdentifiers.wifiOnly)
         config.sessionSendsLaunchEvents = true
         config.allowsCellularAccess = false
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
@@ -49,11 +51,12 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         downloadGenerations = DownloadIdGenerationStore.shared.allGenerations()
         taskGenerations = DownloadTaskGenerationStore.shared.allGenerations()
         tasksLock.unlock()
-        restoreBackgroundSessionTasks()
+        restoreBackgroundSessionTasks(session)
+        restoreBackgroundSessionTasks(wifiOnlySession)
     }
 
-    private func restoreBackgroundSessionTasks() {
-        session.getAllTasks { [weak self] tasks in
+    private func restoreBackgroundSessionTasks(_ urlSession: URLSession) {
+        urlSession.getAllTasks { [weak self] tasks in
             guard let self else {
                 return
             }
@@ -161,15 +164,15 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func deleteDownloadedFiles(destinations: [String]) {
-      for destination in destinations {
-          guard let documentsDirectory = documentsDirectoryURL(),
-                let destinationURL = destinationURL(for: "cleanup", storedDestination: destination),
-                FileManager.default.fileExists(atPath: destinationURL.path) else {
-              continue
-          }
-          try? FileManager.default.removeItem(at: destinationURL)
-      }
-  }
+        for destination in destinations {
+            let destinationURL = URL(fileURLWithPath: destination)
+            guard
+                  FileManager.default.fileExists(atPath: destinationURL.path) else {
+                continue
+            }
+            try? FileManager.default.removeItem(at: destinationURL)
+        }
+    }
 
     @objc func download(_ call: CAPPluginCall) {
         guard let id = call.getString("id") else {
@@ -241,6 +244,11 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func downloadBatch(_ call: CAPPluginCall, batchId: String, files: [[String: Any]]) {
+        if files.count > Self.batchMaxFiles {
+            call.reject("Batch exceeds maximum of \(Self.batchMaxFiles) files")
+            return
+        }
+
         var parsed: [(url: URL, destination: String)] = []
         let headers = call.getObject("headers") as? [String: String] ?? [:]
         let wifiOnly = call.getString("network") == "wifi-only"

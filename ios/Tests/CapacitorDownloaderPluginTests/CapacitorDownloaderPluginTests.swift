@@ -104,18 +104,42 @@ final class DownloadBatchProgressTests: XCTestCase {
         XCTAssertEqual(overall, 0.5, accuracy: 0.0001)
     }
 
-    func testRecordMovedDestinationStoresResolvedFilesystemPath() {
+    func testBatchCancellationNeedsResolvedPathNotWhitespaceDestination() {
+        let documents = URL(fileURLWithPath: "/var/mobile/Documents")
+        let childId = "bundle#0"
+        let whitespace = "   "
+        let resolvedPath = DownloadDestinationResolver.resolveDestinationURL(
+            destination: whitespace,
+            id: childId,
+            documentsDirectory: documents
+        ).path
+
         let store = DownloadBatchStore(defaults: batchDefaults)
         let coordinator = DownloadBatchCoordinator(store: store)
         guard coordinator.startBatch(batchId: "bundle", fileCount: 1, singleDownloadIds: []) != nil else {
             XCTFail("expected batch to start")
             return
         }
-        let resolvedPath = "/var/mobile/Documents/bundle#0"
+
         coordinator.recordMovedDestination(batchId: "bundle", fileIndex: 0, destination: resolvedPath)
         XCTAssertEqual(coordinator.destinationsForCancellation(batchId: "bundle"), [resolvedPath])
+
+        let mistakenCleanupTarget = DownloadDestinationResolver.resolveDestinationURL(
+            destination: whitespace,
+            id: "cleanup",
+            documentsDirectory: documents
+        ).path
+        XCTAssertNotEqual(mistakenCleanupTarget, resolvedPath)
+
         coordinator.removeBatch(batchId: "bundle")
         store.clear()
+    }
+
+    func testWifiOnlySessionIdentifierAndCellularPolicy() {
+        XCTAssertEqual(DownloadSessionIdentifiers.wifiOnly, "CapacitorDownloader.wifiOnly")
+        let config = URLSessionConfiguration.background(withIdentifier: DownloadSessionIdentifiers.wifiOnly)
+        config.allowsCellularAccess = false
+        XCTAssertFalse(config.allowsCellularAccess)
     }
 
     func testBatchCoordinatorParsesRegisteredTaskId() {

@@ -32,6 +32,8 @@ import org.json.JSONObject;
 @CapacitorPlugin(name = "CapacitorDownloader")
 public class CapacitorDownloaderPlugin extends Plugin {
 
+    static final int BATCH_MAX_FILES = 32;
+
     private final String pluginVersion = "8.6.0";
 
     private DownloadManager downloadManager;
@@ -357,6 +359,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
+        if (files.length() > BATCH_MAX_FILES) {
+            call.reject("Batch exceeds maximum of " + BATCH_MAX_FILES + " files");
+            return;
+        }
+
         final String notification = call.getString("notification");
         final long batchGeneration = nextGeneration(batchId);
         final String completionNotificationText = call.getString("downloadCompletedNotificationText");
@@ -596,12 +603,22 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (!batches.remove(batch.batchId, batch)) {
             return;
         }
-        for (String childId : batch.ownedChildIds) {
-            downloads.remove(childId);
-            batchChildOwners.remove(childId, batch.batchId);
+        for (String childId : new ArrayList<>(batch.ownedChildIds)) {
+            unregisterBatchChild(batch.batchId, childId);
         }
         batch.ownedChildIds.clear();
         completedNotificationStore.remove(batch.batchId, batch.generation);
+    }
+
+    private void unregisterBatchChild(String batchId, String childId) {
+        if (!batchId.equals(batchChildOwners.get(childId))) {
+            return;
+        }
+        batchChildOwners.remove(childId, batchId);
+        Long trackedDownloadId = downloads.get(childId);
+        if (trackedDownloadId != null) {
+            downloads.remove(childId, trackedDownloadId);
+        }
     }
 
     private void removeSystemDownloads(List<Long> downloadIds) {
@@ -618,16 +635,22 @@ public class CapacitorDownloaderPlugin extends Plugin {
     }
 
     private void failBatch(String batchId, String error, Integer fileIndex) {
-        DownloadBatchState batch = batches.remove(batchId);
+        DownloadBatchState batch = batches.get(batchId);
         if (batch == null || batch.failed.getAndSet(true)) {
+            return;
+        }
+        if (!batches.remove(batchId, batch)) {
             return;
         }
 
         List<Long> childDownloadIds = new ArrayList<>();
-        for (String childId : batch.ownedChildIds) {
-            Long childDownloadId = downloads.remove(childId);
+        for (String childId : new ArrayList<>(batch.ownedChildIds)) {
+            if (!batchId.equals(batchChildOwners.get(childId))) {
+                continue;
+            }
+            Long childDownloadId = downloads.get(childId);
             batchChildOwners.remove(childId, batchId);
-            if (childDownloadId != null && !isPendingDownload(childDownloadId)) {
+            if (childDownloadId != null && downloads.remove(childId, childDownloadId) && !isPendingDownload(childDownloadId)) {
                 childDownloadIds.add(childDownloadId);
             }
         }
@@ -674,18 +697,17 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         if (allDone) {
             final long storedGeneration = batch.generation;
-            final String notificationMode = batch.notification;
-            batches.remove(batchId);
-            for (String childId : batch.ownedChildIds) {
-                downloads.remove(childId);
-                batchChildOwners.remove(childId, batchId);
+            if (!batches.remove(batchId, batch)) {
+                return;
+            }
+            for (String childId : new ArrayList<>(batch.ownedChildIds)) {
+                unregisterBatchChild(batchId, childId);
             }
             batch.ownedChildIds.clear();
 
             JSObject completedData = new JSObject();
             completedData.put("id", batchId);
             notifyListeners("downloadCompleted", completedData);
-            DownloadCompletionNotifier.notifyIfRequested(getContext(), batchId, notificationMode, true);
             String completionText = completedNotificationStore.takeText(batchId, storedGeneration);
             if (completionText != null) {
                 DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), batchId, completionText);
@@ -966,13 +988,21 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
     @PluginMethod
     public void pause(PluginCall call) {
-        // DownloadManager doesn't support pausing individual downloads
+        String id = call.getString("id");
+        if (id != null && batches.containsKey(id)) {
+            call.reject("Pausing batch downloads is not supported on Android");
+            return;
+        }
         call.reject("Pausing individual downloads is not supported on Android");
     }
 
     @PluginMethod
     public void resume(PluginCall call) {
-        // DownloadManager doesn't support resuming individual downloads
+        String id = call.getString("id");
+        if (id != null && batches.containsKey(id)) {
+            call.reject("Resuming batch downloads is not supported on Android");
+            return;
+        }
         call.reject("Resuming individual downloads is not supported on Android");
     }
 
@@ -1047,9 +1077,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         List<StoppedBatchChild> stoppedChildren = new ArrayList<>();
         for (String childId : new ArrayList<>(batch.ownedChildIds)) {
-            Long childDownloadId = downloads.remove(childId);
+            if (!batchId.equals(batchChildOwners.get(childId))) {
+                continue;
+            }
+            Long childDownloadId = downloads.get(childId);
             batchChildOwners.remove(childId, batchId);
-            if (childDownloadId != null) {
+            if (childDownloadId != null && downloads.remove(childId, childDownloadId)) {
                 stoppedChildren.add(new StoppedBatchChild(childId, childDownloadId));
             }
         }
@@ -1083,18 +1116,19 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     }
                     if (!stillActiveChildren.isEmpty()) {
                         restoreStoppedBatchChildren(batch, batchId, stillActiveChildren);
-                        batches.putIfAbsent(batchId, batch);
                         call.reject("Download could not be removed");
                         return;
                     }
-                    batches.remove(batchId);
+                    if (!batches.remove(batchId, batch)) {
+                        call.reject("Download not found");
+                        return;
+                    }
                     batch.ownedChildIds.clear();
                     clearChildOwnersForBatch(batchId);
                     completedNotificationStore.remove(batchId, storedGeneration);
                     call.resolve(new JSObject().put("removed", !systemDownloadIds.isEmpty()));
                 } catch (RuntimeException e) {
                     restoreStoppedBatchChildren(batch, batchId, stoppedChildren);
-                    batches.putIfAbsent(batchId, batch);
                     call.reject("Download could not be removed", e);
                 }
             },
@@ -1115,6 +1149,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
     private void restoreStoppedBatchChildren(DownloadBatchState batch, String batchId, List<StoppedBatchChild> stoppedChildren) {
         batch.cancelled.set(false);
+        boolean restoredAny = false;
         for (StoppedBatchChild stoppedChild : stoppedChildren) {
             Long currentDownloadId = downloads.get(stoppedChild.childId);
             if (currentDownloadId != null && currentDownloadId.longValue() != stoppedChild.downloadId) {
@@ -1132,11 +1167,14 @@ public class CapacitorDownloaderPlugin extends Plugin {
             }
             batchChildOwners.put(stoppedChild.childId, batchId);
             batch.trackChildId(stoppedChild.childId);
+            restoredAny = true;
             if (!isPendingDownload(stoppedChild.downloadId)) {
                 startProgressCheck(stoppedChild.childId, stoppedChild.downloadId);
             }
         }
-        batches.putIfAbsent(batchId, batch);
+        if (restoredAny && batches.get(batchId) == null) {
+            batches.putIfAbsent(batchId, batch);
+        }
     }
 
     private boolean isSystemDownloadActive(long systemDownloadId) {

@@ -271,6 +271,28 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     @Test
+    public void rollbackBatchDoesNotRemoveReusedChildId() throws Exception {
+        Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
+        Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
+        DownloadBatchState batch = new DownloadBatchState("batch-1", 1, 1L, "completed");
+        batch.trackChildId("batch-1#0");
+        batches.put("batch-1", batch);
+        batchChildOwners.put("batch-1#0", "batch-1");
+        downloads.put("batch-1#0", 101L);
+
+        batchChildOwners.remove("batch-1#0", "batch-1");
+        downloads.remove("batch-1#0", 101L);
+        downloads.put("batch-1#0", 909L);
+
+        Method rollback = CapacitorDownloaderPlugin.class.getDeclaredMethod("rollbackBatch", DownloadBatchState.class);
+        rollback.setAccessible(true);
+        rollback.invoke(plugin, batch);
+
+        assertEquals(Long.valueOf(909L), downloads.get("batch-1#0"));
+        assertFalse(batches.containsKey("batch-1"));
+    }
+
+    @Test
     public void restoreStoppedBatchChildrenSkipsReusedChildId() throws Exception {
         Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
         downloads.put("batch-1#0", 999L);

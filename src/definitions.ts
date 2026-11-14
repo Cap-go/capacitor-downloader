@@ -56,6 +56,23 @@ export interface DownloadOptions {
    */
   notification?: 'completed' | 'progress' | 'hidden';
   /**
+   * Title shown on the Android DownloadManager progress notification.
+   *
+   * When omitted or empty, the system uses its default (typically the destination file name).
+   * Ignored on iOS, Web, and the OkHttp Android download path.
+   *
+   * @since 8.6.0
+   */
+  title?: string;
+  /**
+   * Description shown on the Android DownloadManager progress notification.
+   *
+   * When omitted or empty, the system uses its default. Ignored on iOS, Web, and the OkHttp Android download path.
+   *
+   * @since 8.6.0
+   */
+  description?: string;
+  /**
    * Android HTTP stack used for the download.
    *
    * - Omitted: always DownloadManager with legacy destination resolution (same as releases before this option).

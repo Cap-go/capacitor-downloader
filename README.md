@@ -36,6 +36,7 @@ We build, improve and fix our plugins with heavy use of AI, so issues usually ge
 - **Status and files**: `checkStatus()` for a task and `getFileInfo()` for a downloaded file.
 - **Platforms**: iOS and Android. iOS uses a background `URLSession`. Android uses `DownloadManager` by default (same as earlier releases). **OkHttp** is opt in via `androidHttpEngine` for app-private destinations. Not available on web.
 - **Android private storage**: set `androidHttpEngine: 'auto'` or `'okhttp'` and use `cache/...` or `files/...` for internal storage. `notification: 'hidden'` hides DownloadManager progress UI; `downloadCompletedNotificationText` can still alert on success.
+- **Android notification copy (8.6.0)**: optional `title` and `description` on DownloadManager progress notifications (ignored on iOS, Web, and OkHttp).
 
 ## Android OkHttp engine (8.5.0)
 
@@ -70,6 +71,23 @@ await CapacitorDownloader.download({
 **Notifications on OkHttp:** no notification during the transfer. Use `notification: 'hidden'` with `downloadProgress` events, or `'completed'` to post one completion-style notification when the file finishes (not on failure). DownloadManager paths still honor `completed`, `progress`, and `hidden` as before. `downloadCompletedNotificationText` is separate and can still post on success when set.
 
 Full guide: https://capgo.app/docs/plugins/downloader/getting-started/#android-okhttp-engine
+
+## Android DownloadManager notification title and description (8.6.0)
+
+**Available since 8.6.0:** set `title` and `description` on `download()` so the Android DownloadManager progress notification shows a user-facing label instead of the raw destination file name. Omit either field (or pass empty text) to keep the system default. Applies only on the DownloadManager path; iOS, Web, and OkHttp Android downloads ignore both options.
+
+```typescript
+await CapacitorDownloader.download({
+  id: 'offline-pack',
+  url: 'https://cdn.example.com/large-pack.zip',
+  destination: 'downloads/offline-pack.zip',
+  notification: 'progress',
+  title: 'Offline map pack',
+  description: 'Downloading region data for offline use',
+});
+```
+
+Full guide: https://capgo.app/docs/plugins/downloader/getting-started/#android-downloadmanager-notification-labels
 
 ## Download completed notifications
 

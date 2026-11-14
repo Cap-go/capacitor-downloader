@@ -511,6 +511,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         startProgressCheck(childId, downloadId);
                     }
 
+                    batchState.committed.set(true);
                     JSObject result = new JSObject();
                     result.put("id", batchId);
                     result.put("state", "RUNNING");
@@ -600,6 +601,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (batch == null) {
             return;
         }
+        batch.rolledBack.set(true);
         if (!batches.remove(batch.batchId, batch)) {
             return;
         }
@@ -648,6 +650,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
             if (!batchId.equals(batchChildOwners.get(childId))) {
                 continue;
             }
+            DownloadBatchState.BatchIdParts parts = DownloadBatchState.parseFileTaskId(childId);
+            if (parts != null && batch.isFileCompleted(parts.fileIndex)) {
+                unregisterBatchChild(batchId, childId);
+                continue;
+            }
             Long childDownloadId = downloads.get(childId);
             batchChildOwners.remove(childId, batchId);
             if (childDownloadId != null && downloads.remove(childId, childDownloadId) && !isPendingDownload(childDownloadId)) {
@@ -678,9 +685,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         JSObject progressData = new JSObject();
         progressData.put("id", batchId);
-        progressData.put("progress", overall);
+        progressData.put("progress", DownloadBatchProgress.toPercent(overall));
         progressData.put("fileIndex", fileIndex);
-        progressData.put("fileProgress", fileProgress);
+        progressData.put("fileProgress", DownloadBatchProgress.toPercent(fileProgress));
         progressData.put("bytesWritten", bytesWritten);
         progressData.put("bytesTotal", bytesTotal);
         notifyListeners("downloadProgress", progressData);
@@ -1172,7 +1179,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 startProgressCheck(stoppedChild.childId, stoppedChild.downloadId);
             }
         }
-        if (restoredAny && batches.get(batchId) == null) {
+        if (restoredAny && batch.committed.get() && !batch.rolledBack.get() && batches.get(batchId) == null) {
             batches.putIfAbsent(batchId, batch);
         }
     }
@@ -1201,7 +1208,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             JSObject result = new JSObject();
             result.put("id", id);
             result.put("state", batch.failed.get() ? "ERROR" : "RUNNING");
-            result.put("progress", batch.overallProgress());
+            result.put("progress", DownloadBatchProgress.toPercent(batch.overallProgress()));
             call.resolve(result);
             return;
         }

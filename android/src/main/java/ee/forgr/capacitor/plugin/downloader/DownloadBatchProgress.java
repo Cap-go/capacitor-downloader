@@ -4,6 +4,10 @@ final class DownloadBatchProgress {
 
     private DownloadBatchProgress() {}
 
+    static float toPercent(float ratio) {
+        return Math.max(0f, Math.min(100f, ratio * 100f));
+    }
+
     static float overallProgress(float[] fileProgress, int fileCount) {
         if (fileCount <= 0 || fileProgress == null || fileProgress.length == 0) {
             return 0f;

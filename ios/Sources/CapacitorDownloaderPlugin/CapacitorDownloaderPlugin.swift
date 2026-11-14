@@ -26,6 +26,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private var taskGenerations: [Int: UInt64] = [:]
     private let tasksLock = NSLock()
     private let batchCoordinator = DownloadBatchCoordinator()
+    internal private(set) var restoredBackgroundSessionIdentifiers: [String] = []
     static let batchMaxFiles = 32
 
     private lazy var session: URLSession = {
@@ -51,11 +52,16 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         downloadGenerations = DownloadIdGenerationStore.shared.allGenerations()
         taskGenerations = DownloadTaskGenerationStore.shared.allGenerations()
         tasksLock.unlock()
+        restoredBackgroundSessionIdentifiers.removeAll(keepingCapacity: true)
         restoreBackgroundSessionTasks(session)
         restoreBackgroundSessionTasks(wifiOnlySession)
     }
 
     private func restoreBackgroundSessionTasks(_ urlSession: URLSession) {
+        let identifier = urlSession.configuration.identifier ?? ""
+        if !identifier.isEmpty {
+            restoredBackgroundSessionIdentifiers.append(identifier)
+        }
         urlSession.getAllTasks { [weak self] tasks in
             guard let self else {
                 return
@@ -427,7 +433,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         if batchCoordinator.isBatch(batchId: id) {
-            let progress = batchCoordinator.overallProgress(batchId: id) ?? 0
+            let progress = DownloadBatchProgress.toPercent(batchCoordinator.overallProgress(batchId: id) ?? 0)
             let state = batchCoordinator.isPaused(batchId: id) ? "PAUSED" : "RUNNING"
             call.resolve([
                 "id": id,
@@ -566,9 +572,9 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                         "downloadProgress",
                         data: [
                             "id": batchParts.batchId,
-                            "progress": overall,
+                            "progress": DownloadBatchProgress.toPercent(overall),
                             "fileIndex": batchParts.fileIndex,
-                            "fileProgress": 1
+                            "fileProgress": 100
                         ]
                     )
                 case .none:
@@ -654,9 +660,9 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 "downloadProgress",
                 data: [
                     "id": batchParts.batchId,
-                    "progress": batchProgress.overall,
+                    "progress": DownloadBatchProgress.toPercent(batchProgress.overall),
                     "fileIndex": batchParts.fileIndex,
-                    "fileProgress": batchProgress.file,
+                    "fileProgress": DownloadBatchProgress.toPercent(batchProgress.file),
                     "bytesWritten": totalBytesWritten,
                     "bytesTotal": bytesTotal
                 ]

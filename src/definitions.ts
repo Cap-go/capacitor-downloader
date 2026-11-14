@@ -41,14 +41,26 @@ export interface DownloadFileSpec {
 }
 
 /**
- * Configuration options for a single-file download.
+ * Configuration options for starting a single-file download.
  */
-export interface DownloadSingleOptions {
+export interface DownloadOptions {
   /** Unique identifier for this download task */
   id: string;
   /** URL of the file to download */
   url: string;
-  /** Local file path where the download will be saved */
+  /**
+   * Local file path where the download will be saved.
+   *
+   * On Android, relative paths without `androidHttpEngine` behave like earlier releases: every relative path,
+   * including `cache/...` and `files/...`, is stored under app external files via DownloadManager.
+   *
+   * When you set `androidHttpEngine` to `'auto'` or `'okhttp'`, optional roots apply:
+   * - `cache/...` saves under app cache (OkHttp with `'auto'`).
+   * - `files/...` saves under app-private internal storage (OkHttp with `'auto'`).
+   * - `public-downloads/...` saves to the public Downloads folder (DownloadManager).
+   * - Any other relative path saves under app external files (DownloadManager with `'auto'`).
+   * Absolute paths and `file://` URIs are supported; `'auto'` picks OkHttp when the path is under cache, data, or files dirs.
+   */
   destination: string;
   /** Optional HTTP headers to include in the request */
   headers?: { [key: string]: string };
@@ -126,7 +138,9 @@ export interface DownloadSingleOptions {
  *
  * Batch metadata and in-flight tracking are held in memory. If the host process is killed, the batch id and per-file progress are not restored automatically when the app returns (iOS may still deliver background URLSession events; Android DownloadManager work continues, but the plugin does not rebuild batch progress until you start a new download).
  *
- * When one file fails, remaining transfers are cancelled. Files that already finished successfully stay on disk. Call `stop({ id })` on the batch id to cancel and remove files the plugin recorded after successful writes (iOS).
+ * When one file fails, remaining transfers are cancelled. Files that already finished successfully stay on disk (Android stops tracking completed children without calling DownloadManager.remove on them).
+ *
+ * `stop({ id })` on a batch id: iOS removes files recorded after successful writes. Android removes active DownloadManager entries, which can delete in-progress partial files but leaves completed files that were already detached from tracking.
  */
 export interface DownloadBatchOptions {
   /** Unique identifier for this batch (shared by every file in `files`) */
@@ -134,13 +148,15 @@ export interface DownloadBatchOptions {
   /**
    * Download multiple files as one native-owned batch.
    *
-   * The batch shares the top-level `id`. Progress events include per-file and overall progress.
+   * The batch shares the top-level `id`. Progress events use `progress` and `fileProgress` from 0 to 100 (same scale as DownloadTask).
    * `downloadCompleted` fires once when every file succeeds. Any failure cancels the batch.
    * At most 32 entries are allowed.
    *
    * @since 8.7.0
    */
   files: DownloadFileSpec[];
+  url?: never;
+  destination?: never;
   /** Optional HTTP headers to include in the request */
   headers?: { [key: string]: string };
   /** Network type requirement for download */
@@ -210,9 +226,6 @@ export interface DownloadBatchOptions {
   downloadCompletedNotificationText?: string;
 }
 
-/** Options passed to the download() method. */
-export type DownloadOptions = DownloadSingleOptions | DownloadBatchOptions;
-
 /**
  * Capacitor plugin for downloading files with background support.
  * Provides resumable downloads with progress tracking.
@@ -245,7 +258,7 @@ export interface CapacitorDownloaderPlugin {
    * });
    * ```
    */
-  download(options: DownloadOptions): Promise<DownloadTask>;
+  download(options: DownloadOptions | DownloadBatchOptions): Promise<DownloadTask>;
 
   /**
    * Pause an active download.
@@ -271,7 +284,7 @@ export interface CapacitorDownloaderPlugin {
 
   /**
    * Stop and cancel a download permanently.
-   * Downloaded data will be deleted.
+   * Downloaded data will be deleted when the platform removes it (see batch docs for iOS vs Android).
    *
    * @param options - Options containing the download task ID
    * @returns Promise that resolves when stopped
@@ -298,6 +311,8 @@ export interface CapacitorDownloaderPlugin {
    * Listen for download progress updates.
    * Fired periodically as download progresses.
    *
+   * For batch downloads, `progress` and `fileProgress` use the same 0 to 100 scale as DownloadTask.
+   *
    * @param eventName - Must be 'downloadProgress'
    * @param listenerFunc - Callback receiving progress updates
    * @returns Promise with listener handle for removal
@@ -319,7 +334,7 @@ export interface CapacitorDownloaderPlugin {
       bytesTotal?: number;
       /** Index of the file within a batch when `files` was used */
       fileIndex?: number;
-      /** Progress of the file at `fileIndex` from 0 to 1 */
+      /** Progress of the file at `fileIndex` from 0 to 100 for batch downloads */
       fileProgress?: number;
     }) => void,
   ): Promise<PluginListenerHandle>;

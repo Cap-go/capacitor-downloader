@@ -45,6 +45,8 @@ final class DownloadBatchState {
     final Set<String> ownedChildIds = ConcurrentHashMap.newKeySet();
     final AtomicBoolean failed = new AtomicBoolean(false);
     final AtomicBoolean cancelled = new AtomicBoolean(false);
+    final AtomicBoolean committed = new AtomicBoolean(false);
+    final AtomicBoolean rolledBack = new AtomicBoolean(false);
     int completedCount;
 
     DownloadBatchState(String batchId, int fileCount, long generation, String notification) {
@@ -94,5 +96,12 @@ final class DownloadBatchState {
             return 0f;
         }
         return fileProgress[fileIndex];
+    }
+
+    synchronized boolean isFileCompleted(int fileIndex) {
+        if (fileIndex < 0 || fileIndex >= fileCount) {
+            return false;
+        }
+        return fileCompleted[fileIndex];
     }
 }

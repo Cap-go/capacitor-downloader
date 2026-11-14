@@ -293,6 +293,56 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     @Test
+    public void failBatchDoesNotRemoveCompletedChildFromDownloadManager() throws Exception {
+        Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
+        Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
+        DownloadBatchState batch = new DownloadBatchState("batch-1", 2, 1L, "completed");
+        batch.markFileCompleted(0);
+        batch.trackChildId("batch-1#0");
+        batch.trackChildId("batch-1#1");
+        batches.put("batch-1", batch);
+        batchChildOwners.put("batch-1#0", "batch-1");
+        batchChildOwners.put("batch-1#1", "batch-1");
+        downloads.put("batch-1#0", 101L);
+        downloads.put("batch-1#1", 102L);
+
+        Method failBatch = plugin.getClass().getDeclaredMethod("failBatch", String.class, String.class, Integer.class);
+        failBatch.setAccessible(true);
+        failBatch.invoke(plugin, "batch-1", "failed", 1);
+
+        verify(downloadManager, org.mockito.Mockito.never()).remove(101L);
+        verify(downloadManager).remove(102L);
+        assertFalse(downloads.containsKey("batch-1#0"));
+        assertFalse(downloads.containsKey("batch-1#1"));
+    }
+
+    @Test
+    public void restoreStoppedBatchChildrenDoesNotResurrectRolledBackBatch() throws Exception {
+        Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
+        DownloadBatchState batch = new DownloadBatchState("batch-1", 1, 1L, "completed");
+        batch.committed.set(true);
+        batch.rolledBack.set(true);
+        batch.trackChildId("batch-1#0");
+
+        Class<?> stoppedChildClass = Class.forName("ee.forgr.capacitor.plugin.downloader.CapacitorDownloaderPlugin$StoppedBatchChild");
+        Constructor<?> constructor = stoppedChildClass.getDeclaredConstructor(String.class, long.class);
+        constructor.setAccessible(true);
+        Object stoppedChild = constructor.newInstance("batch-1#0", 101L);
+        downloads.put("batch-1#0", 101L);
+
+        Method restore = CapacitorDownloaderPlugin.class.getDeclaredMethod(
+            "restoreStoppedBatchChildren",
+            DownloadBatchState.class,
+            String.class,
+            List.class
+        );
+        restore.setAccessible(true);
+        restore.invoke(plugin, batch, "batch-1", List.of(stoppedChild));
+
+        assertFalse(batches.containsKey("batch-1"));
+    }
+
+    @Test
     public void restoreStoppedBatchChildrenSkipsReusedChildId() throws Exception {
         Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
         downloads.put("batch-1#0", 999L);

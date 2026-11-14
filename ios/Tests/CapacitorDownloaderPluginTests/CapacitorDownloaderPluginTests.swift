@@ -135,11 +135,11 @@ final class DownloadBatchProgressTests: XCTestCase {
         store.clear()
     }
 
-    func testWifiOnlySessionIdentifierAndCellularPolicy() {
-        XCTAssertEqual(DownloadSessionIdentifiers.wifiOnly, "CapacitorDownloader.wifiOnly")
-        let config = URLSessionConfiguration.background(withIdentifier: DownloadSessionIdentifiers.wifiOnly)
-        config.allowsCellularAccess = false
-        XCTAssertFalse(config.allowsCellularAccess)
+    func testLoadRestoresBackgroundTasksForMainAndWifiOnlySessions() {
+        let plugin = CapacitorDownloaderPlugin()
+        plugin.load()
+        XCTAssertTrue(plugin.restoredBackgroundSessionIdentifiers.contains(DownloadSessionIdentifiers.main))
+        XCTAssertTrue(plugin.restoredBackgroundSessionIdentifiers.contains(DownloadSessionIdentifiers.wifiOnly))
     }
 
     func testBatchCoordinatorParsesRegisteredTaskId() {

@@ -826,7 +826,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
                 if (!okHttpProgressNotifier.started(id, title, description, notificationMode)) {
                     okHttpDownloadExecutor.abandonTransfer(okHttpReservation);
-                    applyOkHttpStartFailureIfCurrent(id, storedGeneration, destinationFile, "Unable to start download notification service");
+                    applyOkHttpStartFailureIfCurrent(
+                        id,
+                        storedGeneration,
+                        destinationFile,
+                        "Unable to start download notification service"
+                    );
                     return;
                 }
 

@@ -7,6 +7,7 @@ import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
@@ -14,7 +15,6 @@ import static org.mockito.Mockito.when;
 
 import android.app.DownloadManager;
 import android.database.Cursor;
-import android.database.MatrixCursor;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.PluginCall;
 import java.io.File;
@@ -500,7 +500,7 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         when(cursor.moveToFirst()).thenReturn(true);
         when(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)).thenReturn(0);
         when(cursor.getInt(0)).thenReturn(status);
-        when(cursor.close()).thenAnswer((invocation) -> null);
+        doNothing().when(cursor).close();
         return cursor;
     }
 

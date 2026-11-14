@@ -75,7 +75,7 @@ final class DownloadBackgroundSessionManager: NSObject {
     pendingLock.unlock()
 
     for finish in finishes {
-      downloadDelegate?.urlSession?(
+      downloadDelegate?.urlSession(
         finish.session,
         downloadTask: finish.downloadTask,
         didFinishDownloadingTo: finish.location
@@ -85,7 +85,7 @@ final class DownloadBackgroundSessionManager: NSObject {
       }
     }
     for completion in completions {
-      downloadDelegate?.urlSession?(completion.session, task: completion.task, didCompleteWithError: completion.error)
+      downloadDelegate?.urlSession(completion.session, task: completion.task, didCompleteWithError: completion.error)
     }
   }
 
@@ -160,7 +160,7 @@ extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
     didFinishDownloadingTo location: URL
   ) {
     if let downloadDelegate {
-      downloadDelegate.urlSession?(session, downloadTask: downloadTask, didFinishDownloadingTo: location)
+      downloadDelegate.urlSession(session, downloadTask: downloadTask, didFinishDownloadingTo: location)
       return
     }
     guard let staged = stageDownloadIfNeeded(session: session, downloadTask: downloadTask, location: location) else {
@@ -173,7 +173,7 @@ extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
 
   func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
     if let downloadDelegate {
-      downloadDelegate.urlSession?(session, task: task, didCompleteWithError: error)
+      downloadDelegate.urlSession(session, task: task, didCompleteWithError: error)
       return
     }
     pendingLock.lock()
@@ -188,7 +188,7 @@ extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
     totalBytesWritten: Int64,
     totalBytesExpectedToWrite: Int64
   ) {
-    downloadDelegate?.urlSession?(
+    downloadDelegate?.urlSession(
       session,
       downloadTask: downloadTask,
       didWriteData: bytesWritten,

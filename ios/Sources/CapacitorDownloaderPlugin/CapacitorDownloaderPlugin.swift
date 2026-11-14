@@ -61,7 +61,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             _ = semaphore.wait(timeout: .now() + 5)
         } else {
-            DownloadBackgroundSessionManager.shared.rehydrateTasks(applyRestored)
+            DownloadBackgroundSessionManager.shared.rehydrateTasks(completion: applyRestored)
         }
     }
 

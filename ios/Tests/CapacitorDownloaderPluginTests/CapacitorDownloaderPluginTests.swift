@@ -60,6 +60,21 @@ final class DownloadDestinationResolverTests: XCTestCase {
         XCTAssertEqual(url, caches.appendingPathComponent("temp.bin"))
     }
 
+    func testFilesPrefixWithEmptyIdDoesNotResolveToStorageRoot() {
+        let documents = URL(fileURLWithPath: "/var/mobile/Documents")
+        let url = DownloadDestinationResolver.resolveDestinationURL(
+            destination: "files/",
+            id: "",
+            documentsDirectory: documents
+        )
+        XCTAssertEqual(url, documents.appendingPathComponent("files/"))
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            XCTFail("Missing application support directory")
+            return
+        }
+        XCTAssertNotEqual(url.deletingLastPathComponent().path, support.path)
+    }
+
     func testPrivatePrefixUsesPluginSupportFolder() {
         let url = DownloadDestinationResolver.resolveDestinationURL(
             destination: "private/maps/tile.pack",

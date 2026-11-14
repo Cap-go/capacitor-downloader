@@ -22,7 +22,7 @@ public class OkHttpDownloadForegroundServiceTest {
     public void serviceStartsStickyAndExposesNoBinder() {
         OkHttpDownloadForegroundService service = Robolectric.buildService(OkHttpDownloadForegroundService.class).create().get();
         int startId = service.onStartCommand(new Intent(), 0, 1);
-        assertEquals(android.app.Service.START_STICKY, startId);
+        assertEquals(android.app.Service.START_NOT_STICKY, startId);
         assertNull(service.onBind(new Intent()));
     }
 

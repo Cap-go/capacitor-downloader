@@ -155,7 +155,9 @@ await CapacitorDownloader.download({
 | `public-downloads/...` | Public Downloads folder (DownloadManager) | App external files under `public-downloads/...` (DownloadManager) |
 | Other relative paths | App external files dir (DownloadManager) | App external files dir (DownloadManager) |
 
-**Notifications on OkHttp:** no notification during the transfer. Use `notification: 'hidden'` with `downloadProgress` events, or `'completed'` to post one completion-style notification when the file finishes (not on failure). DownloadManager paths still honor `completed`, `progress`, and `hidden` as before. `downloadCompletedNotificationText` is separate and can still post on success when set.
+**Notifications on OkHttp (8.8.0):** `notification: 'progress'` or `'completed'` shows an ongoing progress notification while the transfer runs (`'completed'` keeps a completion notification when done). Use `'hidden'` with `downloadProgress` events only. DownloadManager paths still honor `completed`, `progress`, and `hidden` as before. `downloadCompletedNotificationText` is separate and can still post on success when set.
+
+**iOS private paths (8.8.0):** `files/`, `cache/`, and `private/` prefixes now resolve to app-private directories instead of Documents. Keep existing paths if you rely on the old Documents layout.
 
 Full guide: https://capgo.app/docs/plugins/downloader/getting-started/#android-okhttp-engine
 

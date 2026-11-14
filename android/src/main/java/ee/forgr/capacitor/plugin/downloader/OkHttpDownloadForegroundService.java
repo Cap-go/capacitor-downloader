@@ -5,6 +5,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.os.Build;
 import android.os.IBinder;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.ServiceCompat;
@@ -16,9 +17,14 @@ public class OkHttpDownloadForegroundService extends Service {
 
     private static final int SERVICE_NOTIFICATION_ID = 0x4f4b4854;
 
-    public static void start(Context context) {
-        Intent intent = new Intent(context, OkHttpDownloadForegroundService.class);
-        androidx.core.content.ContextCompat.startForegroundService(context, intent);
+    public static boolean start(Context context) {
+        try {
+            Intent intent = new Intent(context, OkHttpDownloadForegroundService.class);
+            androidx.core.content.ContextCompat.startForegroundService(context, intent);
+            return true;
+        } catch (RuntimeException ignored) {
+            return false;
+        }
     }
 
     public static void stop(Context context) {
@@ -40,7 +46,13 @@ public class OkHttpDownloadForegroundService extends Service {
             .setSilent(true)
             .build();
         ServiceCompat.startForeground(this, SERVICE_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-        return START_STICKY;
+        return START_NOT_STICKY;
+    }
+
+    @Override
+    public void onTimeout(int startId, int fgsType) {
+        stopSelf();
+        super.onTimeout(startId, fgsType);
     }
 
     @Override

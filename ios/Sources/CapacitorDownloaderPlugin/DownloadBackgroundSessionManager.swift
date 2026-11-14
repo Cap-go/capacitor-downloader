@@ -112,7 +112,7 @@ final class DownloadBackgroundSessionManager: NSObject {
   }
 
   func session(allowsCellularAccess: Bool, preferForegroundCapable: Bool) -> URLSession {
-    if preferForegroundCapable, foregroundCapableSession != nil {
+    if preferForegroundCapable, allowsCellularAccess, foregroundCapableSession != nil {
       return foregroundCapableSession
     }
     return allowsCellularAccess ? mainSession : wifiOnlySession

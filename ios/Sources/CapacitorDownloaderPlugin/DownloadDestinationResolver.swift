@@ -36,6 +36,9 @@ enum DownloadDestinationResolver {
                 return nil
             }
             let path = relative.isEmpty ? fallbackId : relative
+            guard !path.isEmpty else {
+                return nil
+            }
             return base.appendingPathComponent(path)
         }
 
@@ -45,6 +48,9 @@ enum DownloadDestinationResolver {
                 return nil
             }
             let path = relative.isEmpty ? fallbackId : relative
+            guard !path.isEmpty else {
+                return nil
+            }
             return base.appendingPathComponent(path)
         }
 
@@ -55,6 +61,9 @@ enum DownloadDestinationResolver {
             }
             let privateRoot = base.appendingPathComponent("CapacitorDownloader", isDirectory: true)
             let path = relative.isEmpty ? fallbackId : relative
+            guard !path.isEmpty else {
+                return nil
+            }
             return privateRoot.appendingPathComponent(path)
         }
 

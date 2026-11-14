@@ -8,9 +8,10 @@ final class DownloadContinuedProcessingCoordinator {
     }
 
     private let lock = NSLock()
-    private var activeTaskBox: Any?
-    private var activeDownloadId: String?
-    private var totalUnitCount: Int64 = 1
+    private var activeTasks: [String: Any] = [:]
+    private var totalUnitCounts: [String: Int64] = [:]
+
+    var onDownloadExpired: ((String) -> Void)?
 
     struct Request {
         let title: String
@@ -39,8 +40,10 @@ final class DownloadContinuedProcessingCoordinator {
             return
         }
         lock.lock()
-        defer { lock.unlock() }
-        guard activeDownloadId == downloadId, let task = activeTaskBox as? BGContinuedProcessingTask else {
+        let task = activeTasks[downloadId] as? BGContinuedProcessingTask
+        let totalUnitCount = totalUnitCounts[downloadId] ?? 1
+        lock.unlock()
+        guard let task else {
             return
         }
         let clamped = min(max(fraction, 0), 1)
@@ -49,16 +52,10 @@ final class DownloadContinuedProcessingCoordinator {
 
     func finish(downloadId: String, success: Bool) {
         lock.lock()
-        let taskBox: Any?
-        if activeDownloadId == downloadId {
-            taskBox = activeTaskBox
-            activeTaskBox = nil
-            activeDownloadId = nil
-        } else {
-            taskBox = nil
-        }
+        let task = activeTasks.removeValue(forKey: downloadId) as? BGContinuedProcessingTask
+        totalUnitCounts.removeValue(forKey: downloadId)
         lock.unlock()
-        if #available(iOS 26.0, *), let task = taskBox as? BGContinuedProcessingTask {
+        if #available(iOS 26.0, *), let task {
             task.setTaskCompleted(success: success)
         }
     }
@@ -120,15 +117,13 @@ final class DownloadContinuedProcessingCoordinator {
     @available(iOS 26.0, *)
     private func activate(task: BGContinuedProcessingTask, downloadId: String) {
         lock.lock()
-        if let existing = activeTaskBox as? BGContinuedProcessingTask {
-            existing.setTaskCompleted(success: false)
-        }
-        activeTaskBox = task
-        activeDownloadId = downloadId
-        totalUnitCount = 1_000
-        task.progress.totalUnitCount = totalUnitCount
+        activeTasks[downloadId] = task
+        totalUnitCounts[downloadId] = 1_000
+        task.progress.totalUnitCount = 1_000
         task.progress.completedUnitCount = 0
+        let onExpired = onDownloadExpired
         task.expirationHandler = { [weak self] in
+            onExpired?(downloadId)
             self?.finish(downloadId: downloadId, success: false)
         }
         lock.unlock()

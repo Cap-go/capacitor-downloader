@@ -28,6 +28,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private let batchCoordinator = DownloadBatchCoordinator()
     private let continuedProcessing = DownloadContinuedProcessingCoordinator()
     private var foregroundSessionDownloadIds = Set<String>()
+    private var pendingDownloadStarts = Set<String>()
     private let foregroundSessionLock = NSLock()
     internal private(set) var restoredBackgroundSessionIdentifiers: [String] = []
     static let batchMaxFiles = 32
@@ -63,6 +64,25 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         } else {
             DownloadBackgroundSessionManager.shared.rehydrateTasks(completion: applyRestored)
         }
+        continuedProcessing.onDownloadExpired = { [weak self] downloadId in
+            self?.cancelDownloadFromContinuedProcessingExpiry(downloadId)
+        }
+    }
+
+    private func cancelDownloadFromContinuedProcessingExpiry(_ downloadId: String) {
+        guard let task = getTask(for: downloadId) else {
+            return
+        }
+        task.cancel()
+        removeTask(for: downloadId, completing: task)
+        DownloadDestinationStore.shared.removeDestination(for: downloadId)
+        if let generation = generation(for: downloadId) {
+            DownloadCompletedNotificationStore.shared.removeText(for: downloadId, generation: generation)
+        }
+        foregroundSessionLock.lock()
+        foregroundSessionDownloadIds.remove(downloadId)
+        foregroundSessionLock.unlock()
+        notifyListeners("downloadFailed", data: ["id": downloadId, "error": "Continued processing task expired"])
     }
 
     internal func rehydrateBackgroundDownloadTasks(_ tasks: [URLSessionTask]) {
@@ -184,7 +204,12 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func download(_ call: CAPPluginCall) {
-        guard let id = call.getString("id") else {
+        guard let rawId = call.getString("id") else {
+            call.reject("Invalid parameters")
+            return
+        }
+        let id = rawId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else {
             call.reject("Invalid parameters")
             return
         }
@@ -228,6 +253,14 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
+        tasksLock.lock()
+        let reserved = pendingDownloadStarts.insert(id).inserted
+        tasksLock.unlock()
+        guard reserved else {
+            call.reject("Download already exists")
+            return
+        }
+
         let generation = nextGeneration(for: id)
         DownloadDestinationStore.shared.setDestination(destination, for: id)
         DownloadCompletedNotificationStore.shared.setText(
@@ -250,6 +283,9 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let self else {
                 return
             }
+            self.tasksLock.lock()
+            self.pendingDownloadStarts.remove(id)
+            self.tasksLock.unlock()
             self.foregroundSessionLock.lock()
             if useForeground {
                 self.foregroundSessionDownloadIds.insert(id)

@@ -19,13 +19,14 @@ final class OkHttpDownloadProgressNotifier {
 
     static final String CHANNEL_ID = "capgo_capacitor_downloader_okhttp";
     private static final String CHANNEL_NAME = "Downloads";
-    private static final int NOTIFICATION_ID_BASE = 0x44554f57;
+    private static final int NOTIFICATION_ID = 0x44554f57;
     private static final long UPDATE_INTERVAL_MS = 1_000L;
 
     private final Context context;
     private final NotificationManager notificationManager;
     private final ConcurrentHashMap<String, ProgressEntry> entries = new ConcurrentHashMap<>();
     private final AtomicInteger activeDownloads = new AtomicInteger(0);
+    private final Object serviceLock = new Object();
 
     OkHttpDownloadProgressNotifier(Context context) {
         this.context = context.getApplicationContext();
@@ -33,14 +34,21 @@ final class OkHttpDownloadProgressNotifier {
         ensureChannel();
     }
 
-    void started(String downloadId, String title, String description, String notificationMode) {
+    boolean started(String downloadId, String title, String description, String notificationMode) {
         if (!shouldShowProgress(notificationMode)) {
-            return;
+            return true;
         }
-        entries.put(downloadId, new ProgressEntry(title, description, notificationMode, SystemClock.elapsedRealtime()));
-        activeDownloads.incrementAndGet();
-        maybeStartForeground();
+        synchronized (serviceLock) {
+            entries.put(downloadId, new ProgressEntry(title, description, notificationMode, SystemClock.elapsedRealtime()));
+            activeDownloads.incrementAndGet();
+            if (!OkHttpDownloadForegroundService.start(context)) {
+                entries.remove(downloadId);
+                activeDownloads.updateAndGet((value) -> Math.max(0, value - 1));
+                return false;
+            }
+        }
         postProgress(downloadId, 0f, true);
+        return true;
     }
 
     void update(String downloadId, float progress) {
@@ -57,17 +65,21 @@ final class OkHttpDownloadProgressNotifier {
     }
 
     void finished(String downloadId, boolean success) {
-        ProgressEntry entry = entries.remove(downloadId);
-        if (entry == null) {
-            return;
+        synchronized (serviceLock) {
+            ProgressEntry entry = entries.remove(downloadId);
+            if (entry == null) {
+                return;
+            }
+            activeDownloads.updateAndGet((value) -> Math.max(0, value - 1));
+            if (!success || "progress".equals(entry.notificationMode)) {
+                cancelNotification(downloadId);
+            } else if (success) {
+                postCompleted(downloadId, entry);
+            }
+            if (activeDownloads.get() <= 0) {
+                OkHttpDownloadForegroundService.stop(context);
+            }
         }
-        activeDownloads.updateAndGet((value) -> Math.max(0, value - 1));
-        if (!success || "progress".equals(entry.notificationMode)) {
-            notificationManager.cancel(notificationIdFor(downloadId));
-        } else if (success) {
-            postCompleted(downloadId, entry);
-        }
-        maybeStopForeground();
     }
 
     private void postProgress(String downloadId, float progress, boolean force) {
@@ -92,12 +104,9 @@ final class OkHttpDownloadProgressNotifier {
             .setContentIntent(launchIntent())
             .build();
         try {
-            notificationManager.notify(notificationIdFor(downloadId), notification);
+            notificationManager.notify(notificationTagFor(downloadId), NOTIFICATION_ID, notification);
         } catch (SecurityException ignored) {
             entries.remove(downloadId);
-        }
-        if (force && progress <= 0f) {
-            OkHttpDownloadForegroundService.start(context);
         }
     }
 
@@ -111,9 +120,17 @@ final class OkHttpDownloadProgressNotifier {
             .setContentIntent(launchIntent())
             .build();
         try {
-            notificationManager.notify(notificationIdFor(downloadId), notification);
+            notificationManager.notify(notificationTagFor(downloadId), NOTIFICATION_ID, notification);
         } catch (SecurityException ignored) {
             return;
+        }
+    }
+
+    private void cancelNotification(String downloadId) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            notificationManager.cancel(notificationTagFor(downloadId), NOTIFICATION_ID);
+        } else {
+            notificationManager.cancel(NOTIFICATION_ID);
         }
     }
 
@@ -128,16 +145,20 @@ final class OkHttpDownloadProgressNotifier {
         return notificationMode == null || "completed".equals(notificationMode) || "progress".equals(notificationMode);
     }
 
+    static String notificationTagForDownload(String downloadId) {
+        return "capgo_okhttp_" + (downloadId != null ? downloadId : "");
+    }
+
     static int notificationIdForDownload(String downloadId) {
-        return NOTIFICATION_ID_BASE ^ (downloadId != null ? downloadId.hashCode() : 0);
+        return NOTIFICATION_ID;
     }
 
     private boolean shouldShowProgress(String notificationMode) {
         return shouldShowProgressForMode(notificationMode);
     }
 
-    private int notificationIdFor(String downloadId) {
-        return notificationIdForDownload(downloadId);
+    private String notificationTagFor(String downloadId) {
+        return notificationTagForDownload(downloadId);
     }
 
     private PendingIntent launchIntent() {
@@ -155,18 +176,6 @@ final class OkHttpDownloadProgressNotifier {
         NotificationChannel channel = new NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW);
         channel.setDescription("Download progress");
         notificationManager.createNotificationChannel(channel);
-    }
-
-    private void maybeStartForeground() {
-        if (activeDownloads.get() > 0) {
-            OkHttpDownloadForegroundService.start(context);
-        }
-    }
-
-    private void maybeStopForeground() {
-        if (activeDownloads.get() <= 0) {
-            OkHttpDownloadForegroundService.stop(context);
-        }
     }
 
     private static final class ProgressEntry {

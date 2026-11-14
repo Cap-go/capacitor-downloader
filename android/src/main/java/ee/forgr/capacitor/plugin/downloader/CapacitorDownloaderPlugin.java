@@ -646,8 +646,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
             if (!cursor.moveToFirst()) {
                 return false;
             }
-            int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-            return status == DownloadManager.STATUS_SUCCESSFUL;
+            int statusColumn = cursor.getColumnIndex(DownloadManager.COLUMN_STATUS);
+            if (statusColumn < 0) {
+                return false;
+            }
+            return cursor.getInt(statusColumn) == DownloadManager.STATUS_SUCCESSFUL;
         }
     }
 

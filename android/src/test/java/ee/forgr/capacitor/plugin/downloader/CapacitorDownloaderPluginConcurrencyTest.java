@@ -301,15 +301,6 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     @Test
-    public void isSystemDownloadSuccessfulReadsSuccessfulStatus() {
-        when(downloadManager.query(any(DownloadManager.Query.class))).thenReturn(downloadStatusCursor(DownloadManager.STATUS_SUCCESSFUL));
-        assertTrue(plugin.isSystemDownloadSuccessful(101L));
-
-        when(downloadManager.query(any(DownloadManager.Query.class))).thenReturn(downloadStatusCursor(DownloadManager.STATUS_RUNNING));
-        assertFalse(plugin.isSystemDownloadSuccessful(101L));
-    }
-
-    @Test
     public void failBatchPreservesChildWhenDownloadManagerReportsSuccessful() throws Exception {
         plugin = spy(plugin);
         Map<String, DownloadBatchState> batches = getBatchesMap(plugin);

@@ -146,7 +146,7 @@ export interface DownloadOptions {
  *
  * When one file fails, remaining transfers are cancelled. Files that already finished successfully stay on disk (Android stops tracking completed children without calling DownloadManager.remove on them).
  *
- * `stop({ id })` on a batch id: iOS removes files recorded after successful writes. Android removes active DownloadManager entries, which can delete in-progress partial files but leaves completed batch files on disk (including files that finished before `stop()`).
+ * **`stop({ id })` on a batch id:** On iOS, deletes every path stored via `recordMovedDestination` for that batch (files written before `stop()`). A later batch failure does not delete those paths; only `stop()` removes them. On Android, removes active DownloadManager entries for in-flight children. Finished children stay on disk (plugin marks them complete or `STATUS_SUCCESSFUL`), including files finished before `stop()`.
  */
 export interface DownloadBatchOptions {
   /** Unique identifier for this batch (shared by every file in `files`) */
@@ -290,7 +290,12 @@ export interface CapacitorDownloaderPlugin {
 
   /**
    * Stop and cancel a download permanently.
-   * Downloaded data will be deleted when the platform removes it (see batch docs for iOS vs Android).
+   *
+   * **Single downloads:** Cancels the transfer. Platform cleanup depends on the OS; the plugin does not guarantee file removal for singles.
+   *
+   * **Batch id on iOS:** Deletes each path recorded by `recordMovedDestination` for that batch. Batch failure alone does not delete finished files.
+   *
+   * **Batch id on Android:** Removes DownloadManager work for non-finished children. Completed batch files (marked complete or `STATUS_SUCCESSFUL` in DownloadManager) stay on disk.
    *
    * @param options - Options containing the download task ID
    * @returns Promise that resolves when stopped

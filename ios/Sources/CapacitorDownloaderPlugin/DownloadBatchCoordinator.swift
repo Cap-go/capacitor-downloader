@@ -30,9 +30,24 @@ final class DownloadBatchCoordinator {
         "\(batchId)#\(generation):\(fileIndex)"
     }
 
-    func childParts(for taskId: String) -> (batchId: String, fileIndex: Int)? {
+    func childParts(for taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
         batchesLock.lock()
         defer { batchesLock.unlock() }
+        return childPartsUnlocked(for: taskId)
+    }
+
+    func activeChildParts(for taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        guard let parts = childPartsUnlocked(for: taskId),
+              let batch = batches[parts.batchId],
+              batch.generation == parts.generation else {
+            return nil
+        }
+        return parts
+    }
+
+    private func childPartsUnlocked(for taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
         guard registeredChildren[taskId] != nil else {
             return nil
         }
@@ -42,11 +57,15 @@ final class DownloadBatchCoordinator {
             return nil
         }
         let batchId = String(taskId[..<hashIndex])
+        let generationPart = String(taskId[taskId.index(after: hashIndex)..<colonIndex])
+        guard let generation = UInt64(generationPart) else {
+            return nil
+        }
         let indexPart = String(taskId[taskId.index(after: colonIndex)...])
         guard let fileIndex = Int(indexPart) else {
             return nil
         }
-        return (batchId, fileIndex)
+        return (batchId, generation, fileIndex)
     }
 
     func startBatch(batchId: String, fileCount: Int, singleDownloadIds: Set<String>) -> UInt64? {
@@ -187,10 +206,10 @@ final class DownloadBatchCoordinator {
         return batch.savedDestinations.values.sorted()
     }
 
-    func recordMovedDestination(batchId: String, fileIndex: Int, destination: String) {
+    func recordMovedDestination(batchId: String, generation: UInt64, fileIndex: Int, destination: String) {
         batchesLock.lock()
         defer { batchesLock.unlock() }
-        guard var batch = batches[batchId], !batch.cancelled, !batch.failed else {
+        guard var batch = batches[batchId], batch.generation == generation, !batch.cancelled, !batch.failed else {
             return
         }
         batch.savedDestinations[fileIndex] = destination
@@ -198,10 +217,10 @@ final class DownloadBatchCoordinator {
         persistBatchesLocked()
     }
 
-    func updateFileProgress(batchId: String, fileIndex: Int, progress: Float) -> (overall: Float, file: Float)? {
+    func updateFileProgress(batchId: String, generation: UInt64, fileIndex: Int, progress: Float) -> (overall: Float, file: Float)? {
         batchesLock.lock()
         defer { batchesLock.unlock() }
-        guard var batch = batches[batchId], !batch.failed, !batch.cancelled else {
+        guard var batch = batches[batchId], batch.generation == generation, !batch.failed, !batch.cancelled else {
             return nil
         }
         guard fileIndex >= 0, fileIndex < batch.fileProgress.count else {
@@ -218,10 +237,10 @@ final class DownloadBatchCoordinator {
         return (overall, clamped)
     }
 
-    func markFileCompleted(batchId: String, fileIndex: Int) -> BatchCompletionState? {
+    func markFileCompleted(batchId: String, generation: UInt64, fileIndex: Int) -> BatchCompletionState? {
         batchesLock.lock()
         defer { batchesLock.unlock() }
-        guard var batch = batches[batchId], !batch.failed, !batch.cancelled else {
+        guard var batch = batches[batchId], batch.generation == generation, !batch.failed, !batch.cancelled else {
             return nil
         }
         guard fileIndex >= 0, fileIndex < batch.fileProgress.count else {
@@ -250,10 +269,10 @@ final class DownloadBatchCoordinator {
         )
     }
 
-    func beginFailure(batchId: String) -> Bool {
+    func beginFailure(batchId: String, generation: UInt64) -> Bool {
         batchesLock.lock()
         defer { batchesLock.unlock() }
-        guard var batch = batches[batchId], !batch.failed, !batch.cancelled else {
+        guard var batch = batches[batchId], batch.generation == generation, !batch.failed, !batch.cancelled else {
             return false
         }
         batch.failed = true

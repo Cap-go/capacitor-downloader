@@ -62,7 +62,7 @@ await CapacitorDownloader.download({
 
 `downloadProgress` uses `progress` and `fileProgress` from 0 to 1 (same scale as single downloads and `checkStatus`). Events also include `fileIndex` while a batch is running. `downloadCompleted` fires once when every file succeeds. If any file fails, the plugin emits `downloadFailed` for the batch id (with `fileIndex` when known) and cancels the rest. Files that already finished successfully stay on disk; only remaining transfers are cancelled.
 
-**`stop()` on a batch:** iOS deletes files recorded after successful writes. Android removes active DownloadManager entries (in-progress partial files may be deleted by the system). Files that already finished in the batch stay on disk.
+**`stop()` on a batch:** On iOS, deletes paths recorded by `recordMovedDestination` for that batch (including files that finished before `stop()`). Batch failure alone does not remove those paths. On Android, removes active DownloadManager entries for in-flight children; completed batch files stay on disk.
 
 **Pause and resume:** iOS supports `pause()` and `resume()` on the batch id. Android rejects pause and resume for batches and single downloads (use `stop()`).
 
@@ -274,7 +274,12 @@ stop(options: { id: string; }) => Promise<void>
 ```
 
 Stop and cancel a download permanently.
-Downloaded data will be deleted when the platform removes it (see batch docs for iOS vs Android).
+
+**Single downloads:** Cancels the transfer. Platform cleanup depends on the OS; the plugin does not guarantee file removal for singles.
+
+**Batch id on iOS:** Deletes each path recorded by `recordMovedDestination` for that batch. Batch failure alone does not delete finished files.
+
+**Batch id on Android:** Removes DownloadManager work for non-finished children. Completed batch files (marked complete or `STATUS_SUCCESSFUL` in DownloadManager) stay on disk.
 
 | Param         | Type                         | Description                               |
 | ------------- | ---------------------------- | ----------------------------------------- |
@@ -445,7 +450,7 @@ On Android, multi-file batches use the system DownloadManager only. Each file us
 
 When one file fails, remaining transfers are cancelled. Files that already finished successfully stay on disk (Android stops tracking completed children without calling DownloadManager.remove on them).
 
-`stop({ id })` on a batch id: iOS removes files recorded after successful writes. Android removes active DownloadManager entries, which can delete in-progress partial files but leaves completed batch files on disk (including files that finished before `stop()`).
+**`stop({ id })` on a batch id:** On iOS, deletes every path stored via `recordMovedDestination` for that batch (files written before `stop()`). A later batch failure does not delete those paths; only `stop()` removes them. On Android, removes active DownloadManager entries for in-flight children. Finished children stay on disk (plugin marks them complete or `STATUS_SUCCESSFUL`), including files finished before `stop()`.
 
 | Prop                                    | Type                                                 | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Since |
 | --------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |

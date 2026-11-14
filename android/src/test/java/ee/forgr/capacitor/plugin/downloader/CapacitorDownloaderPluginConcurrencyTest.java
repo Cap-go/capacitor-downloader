@@ -276,6 +276,28 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     @Test
+    public void stopBatchPreservesChildWhenDownloadManagerReportsSuccessful() throws Exception {
+        plugin = spy(plugin);
+        Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
+        Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
+        DownloadBatchState batch = new DownloadBatchState("batch-1", 1, 1L, "completed");
+        batch.trackChildId("batch-1#0");
+        batches.put("batch-1", batch);
+        batchChildOwners.put("batch-1#0", "batch-1");
+        downloads.put("batch-1#0", 101L);
+
+        doReturn(true).when(plugin).isSystemDownloadSuccessful(101L);
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenReturn(null);
+
+        PluginCall call = mockPluginCall("batch-1");
+        plugin.stop(call);
+
+        verify(plugin).isSystemDownloadSuccessful(101L);
+        verify(downloadManager, org.mockito.Mockito.never()).remove(any(long[].class));
+        verify(call, timeout(5000)).resolve(any());
+    }
+
+    @Test
     public void stopBatchDoesNotRemoveCompletedChildFromDownloadManager() throws Exception {
         Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
         Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);

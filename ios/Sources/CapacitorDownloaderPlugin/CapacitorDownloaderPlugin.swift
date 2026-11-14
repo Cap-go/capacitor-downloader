@@ -403,8 +403,12 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    private func failBatch(batchId: String, fileIndex: Int, error: String) {
-        guard batchCoordinator.beginFailure(batchId: batchId) else {
+    internal var mainBackgroundSessionForTests: URLSession {
+        session
+    }
+
+    private func failBatch(batchId: String, generation: UInt64, fileIndex: Int, error: String) {
+        guard batchCoordinator.beginFailure(batchId: batchId, generation: generation) else {
             return
         }
         cancelBatchTasks(batchId: batchId)
@@ -544,8 +548,13 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         if let httpResponse = downloadTask.response as? HTTPURLResponse,
            !DownloadHTTPValidator.isSuccessfulStatusCode(httpResponse.statusCode) {
             try? FileManager.default.removeItem(at: location)
-            if let batchParts = batchCoordinator.childParts(for: id) {
-                failBatch(batchId: batchParts.batchId, fileIndex: batchParts.fileIndex, error: "HTTP \(httpResponse.statusCode)")
+            if let batchParts = batchCoordinator.activeChildParts(for: id) {
+                failBatch(
+                    batchId: batchParts.batchId,
+                    generation: batchParts.generation,
+                    fileIndex: batchParts.fileIndex,
+                    error: "HTTP \(httpResponse.statusCode)"
+                )
             } else {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
@@ -565,7 +574,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             }
 
             if let batchParts = batchCoordinator.childParts(for: id) {
-                guard batchCoordinator.isBatch(batchId: batchParts.batchId) else {
+                guard batchCoordinator.activeChildParts(for: id) != nil else {
                     try? FileManager.default.removeItem(at: location)
                     removeTask(for: id, completing: downloadTask)
                     batchCoordinator.unregisterChildTask(id)
@@ -575,14 +584,19 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
             try FileManager.default.moveItem(at: location, to: destinationURL)
 
-            if let batchParts = batchCoordinator.childParts(for: id) {
+            if let batchParts = batchCoordinator.activeChildParts(for: id) {
                 removeTask(for: id, completing: downloadTask)
                 batchCoordinator.recordMovedDestination(
                     batchId: batchParts.batchId,
+                    generation: batchParts.generation,
                     fileIndex: batchParts.fileIndex,
                     destination: destinationURL.path
                 )
-                switch batchCoordinator.markFileCompleted(batchId: batchParts.batchId, fileIndex: batchParts.fileIndex) {
+                switch batchCoordinator.markFileCompleted(
+                    batchId: batchParts.batchId,
+                    generation: batchParts.generation,
+                    fileIndex: batchParts.fileIndex
+                ) {
                 case .allSucceeded(let batchId, let generation):
                     notifyListeners("downloadCompleted", data: ["id": batchId])
                     if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: batchId, generation: generation) {
@@ -609,8 +623,13 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 }
             }
         } catch {
-            if let batchParts = batchCoordinator.childParts(for: id) {
-                failBatch(batchId: batchParts.batchId, fileIndex: batchParts.fileIndex, error: error.localizedDescription)
+            if let batchParts = batchCoordinator.activeChildParts(for: id) {
+                failBatch(
+                    batchId: batchParts.batchId,
+                    generation: batchParts.generation,
+                    fileIndex: batchParts.fileIndex,
+                    error: error.localizedDescription
+                )
             } else {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
@@ -639,8 +658,13 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         }
 
         if let error {
-            if let batchParts = batchCoordinator.childParts(for: id) {
-                failBatch(batchId: batchParts.batchId, fileIndex: batchParts.fileIndex, error: error.localizedDescription)
+            if let batchParts = batchCoordinator.activeChildParts(for: id) {
+                failBatch(
+                    batchId: batchParts.batchId,
+                    generation: batchParts.generation,
+                    fileIndex: batchParts.fileIndex,
+                    error: error.localizedDescription
+                )
             } else {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
@@ -669,9 +693,10 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         let bytesTotal = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : 0
         let progress = bytesTotal > 0 ? Float(totalBytesWritten) / Float(bytesTotal) : 0
 
-        if let batchParts = batchCoordinator.childParts(for: id) {
+        if let batchParts = batchCoordinator.activeChildParts(for: id) {
             guard let batchProgress = batchCoordinator.updateFileProgress(
                 batchId: batchParts.batchId,
+                generation: batchParts.generation,
                 fileIndex: batchParts.fileIndex,
                 progress: progress
             ) else {

@@ -32,7 +32,7 @@ import org.json.JSONObject;
 @CapacitorPlugin(name = "CapacitorDownloader")
 public class CapacitorDownloaderPlugin extends Plugin {
 
-    private final String pluginVersion = "8.5.1";
+    private final String pluginVersion = "8.6.0";
 
     private DownloadManager downloadManager;
     private final Map<String, Long> downloads = new ConcurrentHashMap<>();
@@ -282,6 +282,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
             } else {
                 request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_MOBILE | DownloadManager.Request.NETWORK_WIFI);
             }
+
+            DownloadManagerNotificationLabels.apply(request, call.getString("title"), call.getString("description"));
         } catch (RuntimeException e) {
             call.reject("Invalid download request", e);
             return;
@@ -459,6 +461,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             network,
                             notification
                         );
+                        DownloadManagerNotificationLabels.apply(request, call.getString("title"), call.getString("description"));
 
                         long downloadId;
                         try {

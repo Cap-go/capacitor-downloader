@@ -62,6 +62,23 @@ export interface DownloadCommonOptions {
    */
   notification?: 'completed' | 'progress' | 'hidden';
   /**
+   * Title shown on the Android DownloadManager progress notification.
+   *
+   * When omitted or empty, the system uses its default (typically the destination file name).
+   * Ignored on iOS, Web, and the OkHttp Android download path.
+   *
+   * @since 8.6.0
+   */
+  title?: string;
+  /**
+   * Description shown on the Android DownloadManager progress notification.
+   *
+   * When omitted or empty, the system uses its default. Ignored on iOS, Web, and the OkHttp Android download path.
+   *
+   * @since 8.6.0
+   */
+  description?: string;
+  /**
    * Android HTTP stack used for the download.
    *
    * - Omitted: always DownloadManager with legacy destination resolution (same as releases before this option).
@@ -96,7 +113,7 @@ export interface DownloadCommonOptions {
  * Configuration options for a single-file download.
  *
  * Also includes every field documented on {@link DownloadCommonOptions}
- * (`id`, `headers`, `network`, `priority`, `notification`, `androidHttpEngine`, `downloadCompletedNotificationText`).
+ * (`id`, `headers`, `network`, `priority`, `notification`, `title`, `description`, `androidHttpEngine`, `downloadCompletedNotificationText`).
  */
 export interface DownloadSingleOptions extends DownloadCommonOptions {
   /** URL of the file to download */
@@ -110,7 +127,7 @@ export interface DownloadSingleOptions extends DownloadCommonOptions {
  * Configuration options for a multi-file batch download.
  *
  * Also includes every field documented on {@link DownloadCommonOptions}
- * (`id`, `headers`, `network`, `priority`, `notification`, `androidHttpEngine`, `downloadCompletedNotificationText`).
+ * (`id`, `headers`, `network`, `priority`, `notification`, `title`, `description`, `androidHttpEngine`, `downloadCompletedNotificationText`).
  */
 export interface DownloadBatchOptions extends DownloadCommonOptions {
   /**

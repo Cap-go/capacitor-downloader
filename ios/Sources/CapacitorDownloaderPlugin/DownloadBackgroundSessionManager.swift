@@ -173,7 +173,7 @@ extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
 
   func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
     if let downloadDelegate {
-      downloadDelegate.urlSession(session, task: task, didCompleteWithError: error)
+      downloadDelegate.urlSession?(session, task: task, didCompleteWithError: error)
       return
     }
     pendingLock.lock()
@@ -188,7 +188,7 @@ extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
     totalBytesWritten: Int64,
     totalBytesExpectedToWrite: Int64
   ) {
-    downloadDelegate?.urlSession(
+    downloadDelegate?.urlSession?(
       session,
       downloadTask: downloadTask,
       didWriteData: bytesWritten,

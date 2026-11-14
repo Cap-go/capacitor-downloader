@@ -57,7 +57,7 @@ await CapacitorDownloader.download({
 The plugin calls `warmUpBackgroundSessions` from an internal launch hook, but you should still forward background URL session events:
 
 ```swift
-import CapgoCapacitorDownloader
+import CapacitorDownloaderPlugin // SPM. CocoaPods: import CapgoCapacitorDownloader
 
 func application(_ application: UIApplication, didFinishLaunchingWithOptions ...) -> Bool {
   CapacitorDownloaderLifecycle.warmUpBackgroundSessions()

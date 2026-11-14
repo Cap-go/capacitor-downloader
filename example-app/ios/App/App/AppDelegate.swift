@@ -1,6 +1,6 @@
 import UIKit
 import Capacitor
-import CapgoCapacitorDownloader
+import CapacitorDownloaderPlugin
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {

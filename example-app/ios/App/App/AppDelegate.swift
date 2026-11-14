@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import CapgoCapacitorDownloader
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -7,8 +8,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        CapacitorDownloaderLifecycle.warmUpBackgroundSessions()
         return true
+    }
+
+    func application(_ application: UIApplication,
+                     handleEventsForBackgroundURLSession identifier: String,
+                     completionHandler: @escaping () -> Void) {
+        CapacitorDownloaderLifecycle.handleEventsForBackgroundURLSession(
+            identifier: identifier,
+            completionHandler: completionHandler
+        )
     }
 
     func applicationWillResignActive(_ application: UIApplication) {

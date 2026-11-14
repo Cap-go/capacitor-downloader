@@ -34,6 +34,48 @@ final class DownloadDestinationResolverTests: XCTestCase {
         XCTAssertEqual(url, documentsDirectory.appendingPathComponent("downloads/sample.zip"))
     }
 
+    func testFilesPrefixUsesApplicationSupport() {
+        let url = DownloadDestinationResolver.resolveDestinationURL(
+            destination: "files/offline/map.zip",
+            id: "download-1",
+            documentsDirectory: documentsDirectory
+        )
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            XCTFail("Missing application support directory")
+            return
+        }
+        XCTAssertEqual(url, support.appendingPathComponent("offline/map.zip"))
+    }
+
+    func testCachePrefixUsesCachesDirectory() {
+        let url = DownloadDestinationResolver.resolveDestinationURL(
+            destination: "cache/temp.bin",
+            id: "download-1",
+            documentsDirectory: documentsDirectory
+        )
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            XCTFail("Missing caches directory")
+            return
+        }
+        XCTAssertEqual(url, caches.appendingPathComponent("temp.bin"))
+    }
+
+    func testPrivatePrefixUsesPluginSupportFolder() {
+        let url = DownloadDestinationResolver.resolveDestinationURL(
+            destination: "private/maps/tile.pack",
+            id: "download-1",
+            documentsDirectory: documentsDirectory
+        )
+        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            XCTFail("Missing application support directory")
+            return
+        }
+        let expected = support
+            .appendingPathComponent("CapacitorDownloader", isDirectory: true)
+            .appendingPathComponent("maps/tile.pack")
+        XCTAssertEqual(url, expected)
+    }
+
     func testAbsolutePathUsesFileURL() {
         let url = DownloadDestinationResolver.resolveDestinationURL(
             destination: "/tmp/custom-file.bin",
@@ -309,6 +351,14 @@ final class DownloadTaskGenerationStoreTests: XCTestCase {
         XCTAssertEqual(store.allGenerations()[42], 7)
         store.removeGeneration(forTaskIdentifier: 42)
         XCTAssertNil(store.allGenerations()[42])
+    }
+}
+
+final class DownloadSessionIdentifiersTests: XCTestCase {
+    func testRecognizesPluginSessionIdentifiers() {
+        XCTAssertTrue(DownloadSessionIdentifiers.isPluginSession(DownloadSessionIdentifiers.main))
+        XCTAssertTrue(DownloadSessionIdentifiers.isPluginSession(DownloadSessionIdentifiers.wifiOnly))
+        XCTAssertFalse(DownloadSessionIdentifiers.isPluginSession("com.example.other"))
     }
 }
 

@@ -85,7 +85,7 @@ final class DownloadBackgroundSessionManager: NSObject {
       }
     }
     for completion in completions {
-      downloadDelegate?.urlSession(completion.session, task: completion.task, didCompleteWithError: completion.error)
+      downloadDelegate?.urlSession?(completion.session, task: completion.task, didCompleteWithError: completion.error)
     }
   }
 

@@ -8,7 +8,7 @@ final class DownloadContinuedProcessingCoordinator {
     }
 
     private let lock = NSLock()
-    private var activeTask: BGContinuedProcessingTask?
+    private var activeTaskBox: Any?
     private var activeDownloadId: String?
     private var totalUnitCount: Int64 = 1
 
@@ -35,9 +35,12 @@ final class DownloadContinuedProcessingCoordinator {
     }
 
     func reportProgress(downloadId: String, fraction: Double) {
+        guard #available(iOS 26.0, *) else {
+            return
+        }
         lock.lock()
         defer { lock.unlock() }
-        guard activeDownloadId == downloadId, let task = activeTask else {
+        guard activeDownloadId == downloadId, let task = activeTaskBox as? BGContinuedProcessingTask else {
             return
         }
         let clamped = min(max(fraction, 0), 1)
@@ -46,17 +49,17 @@ final class DownloadContinuedProcessingCoordinator {
 
     func finish(downloadId: String, success: Bool) {
         lock.lock()
-        let task: BGContinuedProcessingTask?
+        let taskBox: Any?
         if activeDownloadId == downloadId {
-            task = activeTask
-            activeTask = nil
+            taskBox = activeTaskBox
+            activeTaskBox = nil
             activeDownloadId = nil
         } else {
-            task = nil
+            taskBox = nil
         }
         lock.unlock()
-        if #available(iOS 26.0, *) {
-            task?.setTaskCompleted(success: success)
+        if #available(iOS 26.0, *), let task = taskBox as? BGContinuedProcessingTask {
+            task.setTaskCompleted(success: success)
         }
     }
 
@@ -117,8 +120,10 @@ final class DownloadContinuedProcessingCoordinator {
     @available(iOS 26.0, *)
     private func activate(task: BGContinuedProcessingTask, downloadId: String) {
         lock.lock()
-        activeTask?.setTaskCompleted(success: false)
-        activeTask = task
+        if let existing = activeTaskBox as? BGContinuedProcessingTask {
+            existing.setTaskCompleted(success: false)
+        }
+        activeTaskBox = task
         activeDownloadId = downloadId
         totalUnitCount = 1_000
         task.progress.totalUnitCount = totalUnitCount

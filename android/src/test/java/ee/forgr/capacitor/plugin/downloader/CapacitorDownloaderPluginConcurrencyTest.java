@@ -7,14 +7,16 @@ import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.app.DownloadManager;
 import android.database.Cursor;
+import android.database.MatrixCursor;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.PluginCall;
 import java.io.File;
@@ -299,7 +301,17 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     @Test
+    public void isSystemDownloadSuccessfulReadsSuccessfulStatus() {
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenReturn(downloadStatusCursor(DownloadManager.STATUS_SUCCESSFUL));
+        assertTrue(plugin.isSystemDownloadSuccessful(101L));
+
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenReturn(downloadStatusCursor(DownloadManager.STATUS_RUNNING));
+        assertFalse(plugin.isSystemDownloadSuccessful(101L));
+    }
+
+    @Test
     public void failBatchPreservesChildWhenDownloadManagerReportsSuccessful() throws Exception {
+        plugin = spy(plugin);
         Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
         Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
         DownloadBatchState batch = new DownloadBatchState("batch-1", 1, 1L, "completed");
@@ -308,23 +320,19 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         batchChildOwners.put("batch-1#0", "batch-1");
         downloads.put("batch-1#0", 101L);
 
-        when(downloadManager.query(any(DownloadManager.Query.class))).thenReturn(downloadStatusCursor(DownloadManager.STATUS_SUCCESSFUL));
-
-        Method shouldPreserve = plugin
-            .getClass()
-            .getDeclaredMethod("shouldPreserveBatchChild", DownloadBatchState.class, int.class, Long.class);
-        shouldPreserve.setAccessible(true);
-        assertTrue((boolean) shouldPreserve.invoke(plugin, batch, 0, 101L));
+        doReturn(true).when(plugin).isSystemDownloadSuccessful(101L);
 
         Method failBatch = plugin.getClass().getDeclaredMethod("failBatch", String.class, String.class, Integer.class);
         failBatch.setAccessible(true);
         failBatch.invoke(plugin, "batch-1", "failed", 0);
 
+        verify(plugin).isSystemDownloadSuccessful(101L);
         verify(downloadManager, org.mockito.Mockito.never()).remove(anyLong());
     }
 
     @Test
     public void failBatchRemovesChildWhenProgressLooksCompleteButDownloadStillRunning() throws Exception {
+        plugin = spy(plugin);
         Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
         Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
         DownloadBatchState batch = new DownloadBatchState("batch-1", 1, 1L, "completed");
@@ -334,9 +342,7 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         batchChildOwners.put("batch-1#0", "batch-1");
         downloads.put("batch-1#0", 101L);
 
-        when(downloadManager.query(any(DownloadManager.Query.class))).thenAnswer((invocation) ->
-            downloadStatusCursor(DownloadManager.STATUS_RUNNING)
-        );
+        doReturn(false).when(plugin).isSystemDownloadSuccessful(101L);
 
         Method failBatch = plugin.getClass().getDeclaredMethod("failBatch", String.class, String.class, Integer.class);
         failBatch.setAccessible(true);
@@ -347,6 +353,7 @@ public class CapacitorDownloaderPluginConcurrencyTest {
 
     @Test
     public void stopBatchRemovesChildWhenProgressLooksCompleteButDownloadStillRunning() throws Exception {
+        plugin = spy(plugin);
         Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
         Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
         DownloadBatchState batch = new DownloadBatchState("batch-1", 1, 1L, "completed");
@@ -356,9 +363,8 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         batchChildOwners.put("batch-1#0", "batch-1");
         downloads.put("batch-1#0", 101L);
 
-        when(downloadManager.query(any(DownloadManager.Query.class)))
-            .thenReturn(downloadStatusCursor(DownloadManager.STATUS_RUNNING))
-            .thenReturn(null);
+        doReturn(false).when(plugin).isSystemDownloadSuccessful(101L);
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenReturn(null);
 
         PluginCall call = mockPluginCall("batch-1");
         plugin.stop(call);
@@ -496,11 +502,8 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     private static Cursor downloadStatusCursor(int status) {
-        Cursor cursor = mock(Cursor.class);
-        when(cursor.moveToFirst()).thenReturn(true);
-        when(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)).thenReturn(0);
-        when(cursor.getInt(0)).thenReturn(status);
-        doNothing().when(cursor).close();
+        MatrixCursor cursor = new MatrixCursor(new String[] { DownloadManager.COLUMN_STATUS });
+        cursor.addRow(new Object[] { status });
         return cursor;
     }
 

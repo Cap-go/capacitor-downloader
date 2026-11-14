@@ -626,7 +626,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
     }
 
-    private boolean shouldPreserveBatchChild(DownloadBatchState batch, int fileIndex, Long systemDownloadId) {
+    boolean shouldPreserveBatchChild(DownloadBatchState batch, int fileIndex, Long systemDownloadId) {
         if (batch.isFileCompleted(fileIndex)) {
             return true;
         }
@@ -636,7 +636,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         return isSystemDownloadSuccessful(systemDownloadId);
     }
 
-    private boolean isSystemDownloadSuccessful(long systemDownloadId) {
+    boolean isSystemDownloadSuccessful(long systemDownloadId) {
         DownloadManager.Query query = new DownloadManager.Query().setFilterById(systemDownloadId);
         Cursor cursor = downloadManager.query(query);
         if (cursor == null) {

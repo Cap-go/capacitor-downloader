@@ -319,11 +319,13 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     @Test
-    public void downloadRejectsUrlAndFilesTogether() throws Exception {
+    public void downloadRejectsUrlAndFilesTogether() {
         PluginCall call = mock(PluginCall.class);
+        JSArray filesArray = mock(JSArray.class);
         when(call.getString("id")).thenReturn("mixed");
         when(call.getString("url")).thenReturn("https://example.com/file");
-        when(call.getArray("files")).thenReturn(new JSArray("[{\"url\":\"https://example.com/a.zip\",\"destination\":\"a.zip\"}]"));
+        when(call.getArray("files")).thenReturn(filesArray);
+        when(filesArray.length()).thenReturn(1);
 
         plugin.download(call);
 

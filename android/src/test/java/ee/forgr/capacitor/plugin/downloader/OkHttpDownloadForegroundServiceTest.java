@@ -5,6 +5,7 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Intent;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.Test;
@@ -28,7 +29,7 @@ public class OkHttpDownloadForegroundServiceTest {
     @Test
     public void androidManifestDeclaresDataSyncForegroundService() throws Exception {
         Path manifest = Path.of("src/main/AndroidManifest.xml");
-        String xml = Files.readString(manifest);
+        String xml = String.join("\n", Files.readAllLines(manifest, StandardCharsets.UTF_8));
         assertTrue(xml.contains("android:foregroundServiceType=\"dataSync\""));
         assertTrue(xml.contains("android.permission.FOREGROUND_SERVICE_DATA_SYNC"));
         assertTrue(xml.contains(OkHttpDownloadForegroundService.class.getName()));

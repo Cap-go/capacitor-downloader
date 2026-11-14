@@ -65,28 +65,36 @@ final class DownloadContinuedProcessingCoordinator {
         onReady: @escaping (_ useForegroundCapableSession: Bool) -> Void
     ) {
         let identifier = Self.permittedIdentifierPrefix + UUID().uuidString
-        var launched = false
-        let fallback = DispatchWorkItem {
-            if launched {
+        let launchLock = NSLock()
+        var completed = false
+        let completeOnce: (_ useForegroundCapableSession: Bool) -> Void = { useForeground in
+            launchLock.lock()
+            defer { launchLock.unlock() }
+            if completed {
                 return
             }
-            onReady(false)
+            completed = true
+            onReady(useForeground)
+        }
+        var fallback: DispatchWorkItem!
+        fallback = DispatchWorkItem {
+            completeOnce(false)
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: fallback)
 
         let registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil) { [weak self] task in
             fallback.cancel()
-            launched = true
             guard let continued = task as? BGContinuedProcessingTask else {
                 task.setTaskCompleted(success: false)
-                onReady(false)
+                completeOnce(false)
                 return
             }
             self?.activate(task: continued, downloadId: downloadId)
-            onReady(true)
+            completeOnce(true)
         }
         guard registered else {
-            onReady(false)
+            fallback.cancel()
+            completeOnce(false)
             return
         }
 
@@ -99,7 +107,8 @@ final class DownloadContinuedProcessingCoordinator {
         do {
             try BGTaskScheduler.shared.submit(processingRequest)
         } catch {
-            onReady(false)
+            fallback.cancel()
+            completeOnce(false)
         }
     }
 

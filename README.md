@@ -35,7 +35,7 @@ Use this when users fetch several large files and keep using other apps:
 - **iOS**: background `URLSession` instances warm up at launch. Wire `CapacitorDownloaderLifecycle` in `AppDelegate` (see below) so `handleEventsForBackgroundURLSession` finishes relaunched work.
 - **iOS private paths**: save under `files/...`, `cache/...`, or `private/...` instead of Documents.
 - **iOS 26+**: set `iosContinuedProcessingTitle` (and optional `iosContinuedProcessingSubtitle`) for a system continued-processing task while the device is locked.
-- **Android OkHttp**: with `androidHttpEngine: 'auto'` or `'okhttp'`, `notification: 'progress'` or `'completed'` shows an ongoing progress notification (plus a lightweight data sync foreground service while transfers run).
+- **Android OkHttp**: with `androidHttpEngine: 'auto'` or `'okhttp'`, `notification: 'progress'` or `'completed'` shows an ongoing progress notification (plus a lightweight `dataSync` foreground service on Android 14+). The plugin manifest merges `POST_NOTIFICATIONS`; on Android 13+ your app still requests that permission at runtime.
 
 ```typescript
 await CapacitorDownloader.download({

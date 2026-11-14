@@ -362,6 +362,71 @@ final class DownloadSessionIdentifiersTests: XCTestCase {
     }
 }
 
+final class DownloadBackgroundSessionManagerTests: XCTestCase {
+    func testWarmUpCreatesDistinctBackgroundSessions() {
+        let manager = DownloadBackgroundSessionManager.shared
+        manager.warmUp()
+        XCTAssertNotNil(manager.mainSession)
+        XCTAssertNotNil(manager.wifiOnlySession)
+        XCTAssertNotEqual(
+            manager.mainSession.configuration.identifier,
+            manager.wifiOnlySession.configuration.identifier
+        )
+        XCTAssertEqual(manager.mainSession.configuration.identifier, DownloadSessionIdentifiers.main)
+        XCTAssertEqual(manager.wifiOnlySession.configuration.identifier, DownloadSessionIdentifiers.wifiOnly)
+    }
+
+    func testWarmUpIsIdempotent() {
+        let manager = DownloadBackgroundSessionManager.shared
+        manager.warmUp()
+        let main = manager.mainSession
+        manager.warmUp()
+        XCTAssertTrue(main === manager.mainSession)
+    }
+
+    func testBackgroundEventsCompletionHandlerRunsForKnownSession() {
+        let manager = DownloadBackgroundSessionManager.shared
+        manager.warmUp()
+        let expectation = expectation(description: "completion handler")
+        manager.storeBackgroundEventsCompletionHandler({ expectation.fulfill() }, for: DownloadSessionIdentifiers.main)
+        manager.urlSessionDidFinishEvents(forBackgroundURLSession: manager.mainSession)
+        wait(for: [expectation], timeout: 2)
+    }
+
+    func testSessionSelectionRespectsCellularPreference() {
+        let manager = DownloadBackgroundSessionManager.shared
+        manager.warmUp()
+        XCTAssertTrue(manager.session(allowsCellularAccess: true, preferForegroundCapable: false) === manager.mainSession)
+        XCTAssertTrue(manager.session(allowsCellularAccess: false, preferForegroundCapable: false) === manager.wifiOnlySession)
+        XCTAssertTrue(manager.session(allowsCellularAccess: true, preferForegroundCapable: true) === manager.foregroundCapableSession)
+    }
+}
+
+final class CapacitorDownloaderLifecycleTests: XCTestCase {
+    func testIgnoresUnknownBackgroundSessionIdentifier() {
+        let manager = DownloadBackgroundSessionManager.shared
+        manager.warmUp()
+        let expectation = expectation(description: "unknown session completes immediately")
+        CapacitorDownloaderLifecycle.handleEventsForBackgroundURLSession(
+            identifier: "com.example.other",
+            completionHandler: { expectation.fulfill() }
+        )
+        wait(for: [expectation], timeout: 1)
+    }
+
+    func testStoresCompletionHandlerForPluginSession() {
+        let manager = DownloadBackgroundSessionManager.shared
+        manager.warmUp()
+        let routed = expectation(description: "plugin session handler")
+        CapacitorDownloaderLifecycle.handleEventsForBackgroundURLSession(
+            identifier: DownloadSessionIdentifiers.main,
+            completionHandler: { routed.fulfill() }
+        )
+        manager.urlSessionDidFinishEvents(forBackgroundURLSession: manager.mainSession)
+        wait(for: [routed], timeout: 2)
+    }
+}
+
 final class DownloadHTTPValidatorTests: XCTestCase {
     func testSuccessfulStatusCodes() {
         XCTAssertTrue(DownloadHTTPValidator.isSuccessfulStatusCode(200))

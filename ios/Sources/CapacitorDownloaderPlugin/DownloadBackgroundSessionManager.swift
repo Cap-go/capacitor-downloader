@@ -5,6 +5,22 @@ final class DownloadBackgroundSessionManager: NSObject {
     static let shared = DownloadBackgroundSessionManager()
 
     private weak var downloadDelegate: URLSessionDownloadDelegate?
+    private struct PendingFinish {
+        let session: URLSession
+        let downloadTask: URLSessionDownloadTask
+        let location: URL
+        let removeStagedFile: Bool
+    }
+
+    private struct PendingCompletion {
+        let session: URLSession
+        let task: URLSessionTask
+        let error: Error?
+    }
+
+    private var pendingFinishes: [PendingFinish] = []
+    private var pendingCompletions: [PendingCompletion] = []
+    private let pendingLock = NSLock()
     private let delegateQueue: OperationQueue = {
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
@@ -47,6 +63,52 @@ final class DownloadBackgroundSessionManager: NSObject {
 
   func register(downloadDelegate: URLSessionDownloadDelegate) {
     self.downloadDelegate = downloadDelegate
+    flushPendingEvents()
+  }
+
+  private func flushPendingEvents() {
+    pendingLock.lock()
+    let finishes = pendingFinishes
+    let completions = pendingCompletions
+    pendingFinishes = []
+    pendingCompletions = []
+    pendingLock.unlock()
+
+    for finish in finishes {
+      downloadDelegate?.urlSession?(
+        finish.session,
+        downloadTask: finish.downloadTask,
+        didFinishDownloadingTo: finish.location
+      )
+      if finish.removeStagedFile {
+        try? FileManager.default.removeItem(at: finish.location)
+      }
+    }
+    for completion in completions {
+      downloadDelegate?.urlSession?(completion.session, task: completion.task, didCompleteWithError: completion.error)
+    }
+  }
+
+  private func stageDownloadIfNeeded(
+    session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    location: URL
+  ) -> PendingFinish? {
+    let stagingDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("CapacitorDownloaderPending", isDirectory: true)
+    try? FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+    let stagedURL = stagingDirectory.appendingPathComponent(UUID().uuidString)
+    do {
+      try FileManager.default.copyItem(at: location, to: stagedURL)
+      return PendingFinish(
+        session: session,
+        downloadTask: downloadTask,
+        location: stagedURL,
+        removeStagedFile: true
+      )
+    } catch {
+      return nil
+    }
   }
 
   func session(allowsCellularAccess: Bool, preferForegroundCapable: Bool) -> URLSession {
@@ -97,11 +159,26 @@ extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
     downloadTask: URLSessionDownloadTask,
     didFinishDownloadingTo location: URL
   ) {
-    downloadDelegate?.urlSession?(session, downloadTask: downloadTask, didFinishDownloadingTo: location)
+    if let downloadDelegate {
+      downloadDelegate.urlSession?(session, downloadTask: downloadTask, didFinishDownloadingTo: location)
+      return
+    }
+    guard let staged = stageDownloadIfNeeded(session: session, downloadTask: downloadTask, location: location) else {
+      return
+    }
+    pendingLock.lock()
+    pendingFinishes.append(staged)
+    pendingLock.unlock()
   }
 
   func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-    downloadDelegate?.urlSession?(session, task: task, didCompleteWithError: error)
+    if let downloadDelegate {
+      downloadDelegate.urlSession?(session, task: task, didCompleteWithError: error)
+      return
+    }
+    pendingLock.lock()
+    pendingCompletions.append(PendingCompletion(session: session, task: task, error: error))
+    pendingLock.unlock()
   }
 
   func urlSession(

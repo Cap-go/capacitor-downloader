@@ -857,7 +857,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                     JSObject completedData = new JSObject();
                                     completedData.put("id", downloadId);
                                     notifyListeners("downloadCompleted", completedData);
-                                    DownloadCompletionNotifier.notifyIfRequested(getContext(), downloadId, notificationMode, true);
+                                    if (!OkHttpDownloadProgressNotifier.shouldShowProgressForMode(notificationMode)) {
+                                        DownloadCompletionNotifier.notifyIfRequested(getContext(), downloadId, notificationMode, true);
+                                    }
                                     String completionText = completedNotificationStore.takeText(downloadId, storedGeneration);
                                     if (completionText != null) {
                                         DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), downloadId, completionText);

@@ -14,8 +14,12 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "CapacitorDownloaderBootstrap",
+            path: "ios/Sources/CapacitorDownloaderBootstrap"),
+        .target(
             name: "CapacitorDownloaderPlugin",
             dependencies: [
+                "CapacitorDownloaderBootstrap",
                 .product(name: "Capacitor", package: "capacitor-swift-pm"),
                 .product(name: "Cordova", package: "capacitor-swift-pm")
             ],

@@ -2,6 +2,10 @@ package ee.forgr.capacitor.plugin.downloader;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -68,9 +72,10 @@ public class OkHttpDownloadExecutorTest {
         AtomicBoolean success = new AtomicBoolean(false);
         AtomicReference<String> error = new AtomicReference<>();
 
-        assertTrue(executor.beginTransfer("task-1"));
+        OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer("task-1");
+        assertNotNull(reservation);
         executor.start(
-            "task-1",
+            reservation,
             server.url("/file").toString(),
             destination,
             new JSObject(),
@@ -101,9 +106,10 @@ public class OkHttpDownloadExecutorTest {
         CountDownLatch finished = new CountDownLatch(1);
         AtomicBoolean success = new AtomicBoolean(false);
 
-        assertTrue(executor.beginTransfer("task-short"));
+        OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer("task-short");
+        assertNotNull(reservation);
         executor.start(
-            "task-short",
+            reservation,
             server.url("/file").toString(),
             destination,
             new JSObject(),
@@ -225,9 +231,10 @@ public class OkHttpDownloadExecutorTest {
         CountDownLatch finished = new CountDownLatch(1);
         AtomicBoolean success = new AtomicBoolean(false);
 
-        assertTrue(wifiExecutor.beginTransfer("wifi-1"));
+        OkHttpDownloadExecutor.ActiveDownload reservation = wifiExecutor.beginTransfer("wifi-1");
+        assertNotNull(reservation);
         wifiExecutor.start(
-            "wifi-1",
+            reservation,
             server.url("/wifi").toString(),
             destination,
             new JSObject(),
@@ -257,9 +264,10 @@ public class OkHttpDownloadExecutorTest {
         CountDownLatch finished = new CountDownLatch(1);
         AtomicBoolean success = new AtomicBoolean(true);
 
-        assertTrue(executor.beginTransfer("task-2"));
+        OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer("task-2");
+        assertNotNull(reservation);
         executor.start(
-            "task-2",
+            reservation,
             server.url("/file").toString(),
             destination,
             new JSObject(),
@@ -278,5 +286,77 @@ public class OkHttpDownloadExecutorTest {
             byte[] restored = fis.readAllBytes();
             assertEquals(new String(existing, StandardCharsets.UTF_8), new String(restored, StandardCharsets.UTF_8));
         }
+    }
+
+    @Test(timeout = 5_000)
+    public void ensureDestinationParentAcceptsExistingDirectory() throws Exception {
+        File parent = new File(tempDir, "mkdir-race");
+        assertTrue(parent.mkdirs() || parent.isDirectory());
+        File destination = new File(parent, "out.bin");
+        OkHttpDownloadExecutor.ensureDestinationParentDirectory(destination);
+        assertTrue(parent.isDirectory());
+
+        File nested = new File(tempDir, "nested/deep/file.bin");
+        OkHttpDownloadExecutor.ensureDestinationParentDirectory(nested);
+        assertTrue(nested.getParentFile().isDirectory());
+    }
+
+    @Test(timeout = 10_000)
+    public void startRejectsStaleReservationWithoutHittingNetwork() throws Exception {
+        server.enqueue(
+            new MockResponse()
+                .setBody(new okio.Buffer().write("must-not-fetch".getBytes(StandardCharsets.UTF_8)))
+                .addHeader("Content-Length", "14")
+        );
+        OkHttpDownloadExecutor.ActiveDownload stale = executor.beginTransfer("reuse-id");
+        assertNotNull(stale);
+        executor.abandonTransfer(stale);
+        OkHttpDownloadExecutor.ActiveDownload current = executor.beginTransfer("reuse-id");
+        assertNotNull(current);
+
+        File destination = new File(tempDir, "stale.bin");
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicBoolean success = new AtomicBoolean(true);
+        AtomicBoolean cancelled = new AtomicBoolean(false);
+
+        executor.start(
+            stale,
+            server.url("/file").toString(),
+            destination,
+            new JSObject(),
+            "cellular",
+            (id, progress) -> {},
+            (id, ok, cancelledFlag, errorMessage) -> {
+                success.set(ok);
+                cancelled.set(cancelledFlag);
+                finished.countDown();
+            }
+        );
+
+        assertTrue(finished.await(5, TimeUnit.SECONDS));
+        assertFalse(success.get());
+        assertTrue(cancelled.get());
+        assertEquals(0, server.getRequestCount());
+        assertNotNull(executor.getActive("reuse-id"));
+        assertEquals(current, executor.getActive("reuse-id"));
+    }
+
+    @Test(timeout = 5_000)
+    public void abandonTransferOnlyRemovesMatchingReservation() {
+        OkHttpDownloadExecutor.ActiveDownload current = executor.beginTransfer("shared-id");
+        assertNotNull(current);
+
+        OkHttpDownloadExecutor.ActiveDownload staleHandle = new OkHttpDownloadExecutor.ActiveDownload("shared-id");
+        executor.abandonTransfer(staleHandle);
+        assertSame(current, executor.getActive("shared-id"));
+        assertFalse(current.cancelled.get());
+
+        executor.abandonTransfer(current);
+        assertNull(executor.getActive("shared-id"));
+        assertTrue(current.cancelled.get());
+
+        OkHttpDownloadExecutor.ActiveDownload next = executor.beginTransfer("shared-id");
+        assertNotNull(next);
+        assertNotSame(current, next);
     }
 }

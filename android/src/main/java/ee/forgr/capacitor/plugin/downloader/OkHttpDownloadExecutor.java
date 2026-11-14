@@ -70,21 +70,27 @@ public class OkHttpDownloadExecutor {
      * Reserve an in-memory slot before the transfer id is published to JS. Prevents a race where
      * {@code stop()} runs between marker publication and worker registration.
      */
-    public boolean beginTransfer(String id) {
+    public ActiveDownload beginTransfer(String id) {
         ActiveDownload active = new ActiveDownload(id);
         active.state = State.PENDING;
-        return activeDownloads.putIfAbsent(id, active) == null;
+        return activeDownloads.putIfAbsent(id, active) == null ? active : null;
     }
 
-    public void abandonTransfer(String id) {
-        ActiveDownload active = activeDownloads.remove(id);
-        if (active != null && active.call != null) {
-            active.call.cancel();
+    public void abandonTransfer(ActiveDownload reserved) {
+        if (reserved == null) {
+            return;
+        }
+        reserved.cancelled.set(true);
+        if (activeDownloads.remove(reserved.id, reserved)) {
+            Call call = reserved.call;
+            if (call != null) {
+                call.cancel();
+            }
         }
     }
 
     public void start(
-        String id,
+        ActiveDownload reserved,
         String url,
         File destinationFile,
         JSObject headers,
@@ -92,10 +98,15 @@ public class OkHttpDownloadExecutor {
         ProgressReporter reporter,
         CompletionListener completionListener
     ) {
-        ActiveDownload active = activeDownloads.get(id);
-        if (active == null) {
-            throw new IllegalStateException("Download not registered");
+        if (reserved == null) {
+            throw new IllegalArgumentException("Download reservation required");
         }
+        final String id = reserved.id;
+        if (activeDownloads.get(id) != reserved) {
+            completionListener.onFinished(id, false, true, null);
+            return;
+        }
+        ActiveDownload active = reserved;
 
         Network wifiNetwork = resolveWifiNetworkForTransfer(network);
         if ("wifi-only".equals(network) && (wifiNetwork == null || !isWifiNetworkUsable(wifiNetwork))) {
@@ -113,6 +124,10 @@ public class OkHttpDownloadExecutor {
                     finishCancelled(active, null, id, completionListener);
                     return;
                 }
+            }
+            if (activeDownloads.get(id) != active) {
+                finishCancelled(active, null, id, completionListener);
+                return;
             }
 
             if (wifiNetwork != null) {
@@ -152,10 +167,8 @@ public class OkHttpDownloadExecutor {
                 }
                 active.state = State.RUNNING;
 
+                ensureDestinationParentDirectory(destinationFile);
                 File parent = destinationFile.getParentFile();
-                if (parent != null && !parent.exists() && !parent.mkdirs()) {
-                    throw new IOException("Could not create destination directory");
-                }
 
                 tempFile = createTempDownloadFile(destinationFile, parent);
                 active.tempFile = tempFile;
@@ -254,6 +267,7 @@ public class OkHttpDownloadExecutor {
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            activeDownloads.remove(id, active);
             active.state = State.ERROR;
             active.errorMessage = "Download interrupted";
             completionListener.onFinished(id, false, false, active.errorMessage);
@@ -308,6 +322,13 @@ public class OkHttpDownloadExecutor {
             toDelete.delete();
         }
         completionListener.onFinished(id, false, true, null);
+    }
+
+    static void ensureDestinationParentDirectory(File destinationFile) throws IOException {
+        File parent = destinationFile.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs() && !parent.isDirectory()) {
+            throw new IOException("Could not create destination directory");
+        }
     }
 
     private static File createTempDownloadFile(File destinationFile, File parent) throws IOException {

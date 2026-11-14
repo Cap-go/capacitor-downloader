@@ -68,7 +68,7 @@ export interface DownloadOptions {
    *
    * Ignored on iOS and Web.
    *
-   * @since next release
+   * @since 8.5.0
    */
   androidHttpEngine?: 'auto' | 'okhttp' | 'downloadManager';
   /**
@@ -81,7 +81,7 @@ export interface DownloadOptions {
    * Omitted or empty means no completion notification from the plugin (use
    * `downloadCompleted` events while the app is open).
    *
-   * @since next release
+   * @since 8.5.0
    */
   downloadCompletedNotificationText?: string;
 }

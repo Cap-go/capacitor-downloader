@@ -136,7 +136,7 @@ export interface DownloadBatchOptions {
    *
    * The batch shares the top-level `id`. Progress events include per-file and overall progress.
    * `downloadCompleted` fires once when every file succeeds. Any failure cancels the batch.
-   * At most {@link DOWNLOAD_BATCH_MAX_FILES} entries are allowed.
+   * At most 32 entries are allowed.
    *
    * @since 8.7.0
    */
@@ -210,7 +210,7 @@ export interface DownloadBatchOptions {
   downloadCompletedNotificationText?: string;
 }
 
-/** Options accepted by {@link CapacitorDownloaderPlugin.download}. */
+/** Options passed to the download() method. */
 export type DownloadOptions = DownloadSingleOptions | DownloadBatchOptions;
 
 /**

@@ -626,6 +626,31 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
     }
 
+    private boolean shouldPreserveBatchChild(DownloadBatchState batch, int fileIndex, Long systemDownloadId) {
+        if (batch.isFileCompleted(fileIndex)) {
+            return true;
+        }
+        if (systemDownloadId == null || isPendingDownload(systemDownloadId)) {
+            return false;
+        }
+        return isSystemDownloadSuccessful(systemDownloadId);
+    }
+
+    private boolean isSystemDownloadSuccessful(long systemDownloadId) {
+        DownloadManager.Query query = new DownloadManager.Query().setFilterById(systemDownloadId);
+        Cursor cursor = downloadManager.query(query);
+        if (cursor == null) {
+            return false;
+        }
+        try (cursor) {
+            if (!cursor.moveToFirst()) {
+                return false;
+            }
+            int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+            return status == DownloadManager.STATUS_SUCCESSFUL;
+        }
+    }
+
     private void removeSystemDownloads(List<Long> downloadIds) {
         for (Long downloadId : downloadIds) {
             if (downloadId == null) {
@@ -653,12 +678,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
             if (!batchId.equals(batchChildOwners.get(childId))) {
                 continue;
             }
+            Long childDownloadId = downloads.get(childId);
             DownloadBatchState.BatchIdParts parts = DownloadBatchState.parseFileTaskId(childId);
-            if (parts != null && batch.shouldPreserveCompletedChild(parts.fileIndex)) {
+            if (parts != null && shouldPreserveBatchChild(batch, parts.fileIndex, childDownloadId)) {
                 unregisterBatchChild(batchId, childId);
                 continue;
             }
-            Long childDownloadId = downloads.get(childId);
             batchChildOwners.remove(childId, batchId);
             if (childDownloadId != null && downloads.remove(childId, childDownloadId) && !isPendingDownload(childDownloadId)) {
                 childDownloadIds.add(childDownloadId);
@@ -1090,12 +1115,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
             if (!batchId.equals(batchChildOwners.get(childId))) {
                 continue;
             }
+            Long childDownloadId = downloads.get(childId);
             DownloadBatchState.BatchIdParts parts = DownloadBatchState.parseFileTaskId(childId);
-            if (parts != null && batch.shouldPreserveCompletedChild(parts.fileIndex)) {
+            if (parts != null && shouldPreserveBatchChild(batch, parts.fileIndex, childDownloadId)) {
                 unregisterBatchChild(batchId, childId);
                 continue;
             }
-            Long childDownloadId = downloads.get(childId);
             batchChildOwners.remove(childId, batchId);
             if (childDownloadId != null && downloads.remove(childId, childDownloadId)) {
                 stoppedChildren.add(new StoppedBatchChild(childId, childDownloadId));

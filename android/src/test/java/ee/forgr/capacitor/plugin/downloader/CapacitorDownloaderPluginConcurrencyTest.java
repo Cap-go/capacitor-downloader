@@ -13,6 +13,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.app.DownloadManager;
+import android.database.MatrixCursor;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.PluginCall;
 import java.io.File;
@@ -297,11 +298,10 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     @Test
-    public void failBatchPreservesChildWithFullProgressBeforeCompletionFlag() throws Exception {
+    public void failBatchPreservesChildWhenDownloadManagerReportsSuccessful() throws Exception {
         Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
         Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
         DownloadBatchState batch = new DownloadBatchState("batch-1", 2, 1L, "completed");
-        batch.updateFileProgress(0, 1f);
         batch.trackChildId("batch-1#0");
         batch.trackChildId("batch-1#1");
         batches.put("batch-1", batch);
@@ -309,6 +309,10 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         batchChildOwners.put("batch-1#1", "batch-1");
         downloads.put("batch-1#0", 101L);
         downloads.put("batch-1#1", 102L);
+
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenAnswer(
+            (invocation) -> downloadStatusCursor(DownloadManager.STATUS_SUCCESSFUL)
+        );
 
         Method failBatch = plugin.getClass().getDeclaredMethod("failBatch", String.class, String.class, Integer.class);
         failBatch.setAccessible(true);
@@ -319,7 +323,51 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     @Test
-    public void downloadRejectsUrlAndFilesTogether() {
+    public void failBatchRemovesChildWhenProgressLooksCompleteButDownloadStillRunning() throws Exception {
+        Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
+        Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
+        DownloadBatchState batch = new DownloadBatchState("batch-1", 1, 1L, "completed");
+        batch.updateFileProgress(0, 1f);
+        batch.trackChildId("batch-1#0");
+        batches.put("batch-1", batch);
+        batchChildOwners.put("batch-1#0", "batch-1");
+        downloads.put("batch-1#0", 101L);
+
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenAnswer(
+            (invocation) -> downloadStatusCursor(DownloadManager.STATUS_RUNNING)
+        );
+
+        Method failBatch = plugin.getClass().getDeclaredMethod("failBatch", String.class, String.class, Integer.class);
+        failBatch.setAccessible(true);
+        failBatch.invoke(plugin, "batch-1", "failed", 0);
+
+        verify(downloadManager).remove(101L);
+    }
+
+    @Test
+    public void stopBatchRemovesChildWhenProgressLooksCompleteButDownloadStillRunning() throws Exception {
+        Map<String, DownloadBatchState> batches = getBatchesMap(plugin);
+        Map<String, String> batchChildOwners = getBatchChildOwnersMap(plugin);
+        DownloadBatchState batch = new DownloadBatchState("batch-1", 1, 1L, "completed");
+        batch.updateFileProgress(0, 1f);
+        batch.trackChildId("batch-1#0");
+        batches.put("batch-1", batch);
+        batchChildOwners.put("batch-1#0", "batch-1");
+        downloads.put("batch-1#0", 101L);
+
+        when(downloadManager.query(any(DownloadManager.Query.class)))
+            .thenAnswer((invocation) -> downloadStatusCursor(DownloadManager.STATUS_RUNNING))
+            .thenReturn(null);
+
+        PluginCall call = mockPluginCall("batch-1");
+        plugin.stop(call);
+
+        verify(downloadManager).remove(101L);
+        verify(call, timeout(5000)).resolve(any());
+    }
+
+    @Test
+    public void downloadRejectsUrlAndFilesTogether() throws Exception {
         PluginCall call = mock(PluginCall.class);
         JSArray filesArray = mock(JSArray.class);
         when(call.getString("id")).thenReturn("mixed");
@@ -444,6 +492,12 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         plugin.checkStatus(call);
 
         verify(call, timeout(5000)).reject(eq("Download status could not be read"), any(Exception.class));
+    }
+
+    private static MatrixCursor downloadStatusCursor(int status) {
+        MatrixCursor cursor = new MatrixCursor(new String[] { DownloadManager.COLUMN_STATUS });
+        cursor.addRow(new Object[] { status });
+        return cursor;
     }
 
     private static PluginCall mockPluginCall(String id) {

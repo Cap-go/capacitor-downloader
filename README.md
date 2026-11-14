@@ -36,7 +36,37 @@ We build, improve and fix our plugins with heavy use of AI, so issues usually ge
 - **Status and files**: `checkStatus()` for a task and `getFileInfo()` for a downloaded file.
 - **Platforms**: iOS and Android. iOS uses a background `URLSession`. Android uses `DownloadManager` by default (same as earlier releases). **OkHttp** is opt in via `androidHttpEngine` for app-private destinations. Not available on web.
 - **Android private storage**: set `androidHttpEngine: 'auto'` or `'okhttp'` and use `cache/...` or `files/...` for internal storage. `notification: 'hidden'` hides DownloadManager progress UI; `downloadCompletedNotificationText` can still alert on success.
+- **Batch downloads (8.7.0)**: pass `files` on `download()` to let native code own a multi-file batch (overall plus per-file progress, one completion when all succeed). Up to 32 files per batch.
 - **Android notification copy (8.6.0)**: optional `title` and `description` on DownloadManager progress notifications (ignored on iOS, Web, and OkHttp).
+
+## Multi-file batch downloads
+
+For several large assets, start one batch instead of many independent downloads. The top-level `id` is the batch id. Each entry in `files` needs `url` and `destination`. Shared options such as `headers`, `network`, and `notification` apply to every file in the batch.
+
+```typescript
+import { CapacitorDownloader } from '@capgo/capacitor-downloader';
+
+await CapacitorDownloader.addListener('downloadProgress', (event) => {
+  console.log(event.id, event.progress, event.fileIndex, event.fileProgress);
+});
+
+await CapacitorDownloader.download({
+  id: 'offline-pack',
+  files: [
+    { url: 'https://example.com/a.zip', destination: 'pack/a.zip' },
+    { url: 'https://example.com/b.zip', destination: 'pack/b.zip' },
+  ],
+  notification: 'hidden',
+});
+```
+
+`downloadProgress` uses `progress` and `fileProgress` from 0 to 1 (same scale as single downloads and `checkStatus`). Events also include `fileIndex` while a batch is running. `downloadCompleted` fires once when every file succeeds. If any file fails, the plugin emits `downloadFailed` for the batch id (with `fileIndex` when known) and cancels the rest. Files that already finished successfully stay on disk; only remaining transfers are cancelled.
+
+**`stop()` on a batch:** On iOS, deletes paths recorded by `recordMovedDestination` for that batch (including files that finished before `stop()`). Batch failure alone does not remove those paths. On Android, removes active DownloadManager entries for in-flight children; completed batch files stay on disk.
+
+**Pause and resume:** iOS supports `pause()` and `resume()` on the batch id. Android rejects pause and resume for batches and single downloads (use `stop()`).
+
+**Process death:** On Android, batch state is memory-only and is lost when the process is killed (DownloadManager work may still finish, but the plugin does not rebuild batch progress). On iOS, batch metadata is persisted and restored when the plugin loads (`DownloadBatchStore` / `DownloadBatchCoordinator`).
 
 ## Android OkHttp engine (8.5.0)
 
@@ -187,14 +217,14 @@ Provides resumable downloads with progress tracking.
 ### download(...)
 
 ```typescript
-download(options: DownloadOptions) => Promise<DownloadTask>
+download(options: DownloadOptions | DownloadBatchOptions) => Promise<DownloadTask>
 ```
 
 Start a new download task.
 
-| Param         | Type                                                        | Description              |
-| ------------- | ----------------------------------------------------------- | ------------------------ |
-| **`options`** | <code><a href="#downloadoptions">DownloadOptions</a></code> | - Download configuration |
+| Param         | Type                                                                                                                    | Description              |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| **`options`** | <code><a href="#downloadoptions">DownloadOptions</a> \| <a href="#downloadbatchoptions">DownloadBatchOptions</a></code> | - Download configuration |
 
 **Returns:** <code>Promise&lt;<a href="#downloadtask">DownloadTask</a>&gt;</code>
 
@@ -209,6 +239,8 @@ pause(options: { id: string; }) => Promise<void>
 
 Pause an active download.
 Download can be resumed later from the same position.
+
+iOS supports pause and resume for single downloads and batches. Android rejects pause and resume for every download, including batches (use `stop()` instead).
 
 | Param         | Type                         | Description                               |
 | ------------- | ---------------------------- | ----------------------------------------- |
@@ -226,6 +258,8 @@ resume(options: { id: string; }) => Promise<void>
 Resume a paused download.
 Continues from where it was paused.
 
+iOS supports pause and resume for single downloads and batches. Android rejects pause and resume for every download, including batches.
+
 | Param         | Type                         | Description                               |
 | ------------- | ---------------------------- | ----------------------------------------- |
 | **`options`** | <code>{ id: string; }</code> | - Options containing the download task ID |
@@ -240,7 +274,12 @@ stop(options: { id: string; }) => Promise<void>
 ```
 
 Stop and cancel a download permanently.
-Downloaded data will be deleted.
+
+**Single downloads:** Cancels the transfer. Platform cleanup depends on the OS; the plugin does not guarantee file removal for singles.
+
+**Batch id on iOS:** Deletes each path recorded by `recordMovedDestination` for that batch. Batch failure alone does not delete finished files.
+
+**Batch id on Android:** Removes DownloadManager work for non-finished children. Completed batch files (marked complete or `STATUS_SUCCESSFUL` in DownloadManager) stay on disk.
 
 | Param         | Type                         | Description                               |
 | ------------- | ---------------------------- | ----------------------------------------- |
@@ -286,16 +325,18 @@ Get information about a downloaded file.
 ### addListener('downloadProgress', ...)
 
 ```typescript
-addListener(eventName: 'downloadProgress', listenerFunc: (progress: { id: string; progress: number; bytesWritten?: number | undefined; bytesTotal?: number | undefined; }) => void) => Promise<PluginListenerHandle>
+addListener(eventName: 'downloadProgress', listenerFunc: (progress: { id: string; progress: number; bytesWritten?: number | undefined; bytesTotal?: number | undefined; fileIndex?: number | undefined; fileProgress?: number | undefined; }) => void) => Promise<PluginListenerHandle>
 ```
 
 Listen for download progress updates.
 Fired periodically as download progresses.
 
-| Param              | Type                                                                                                              | Description                           |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| **`eventName`**    | <code>'downloadProgress'</code>                                                                                   | - Must be 'downloadProgress'          |
-| **`listenerFunc`** | <code>(progress: { id: string; progress: number; bytesWritten?: number; bytesTotal?: number; }) =&gt; void</code> | - Callback receiving progress updates |
+For batch downloads, `progress` and `fileProgress` use the same 0 to 1 scale as <a href="#downloadtask">DownloadTask</a>.
+
+| Param              | Type                                                                                                                                                         | Description                           |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
+| **`eventName`**    | <code>'downloadProgress'</code>                                                                                                                              | - Must be 'downloadProgress'          |
+| **`listenerFunc`** | <code>(progress: { id: string; progress: number; bytesWritten?: number; bytesTotal?: number; fileIndex?: number; fileProgress?: number; }) =&gt; void</code> | - Callback receiving progress updates |
 
 **Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
 
@@ -324,16 +365,16 @@ Fired when a download finishes successfully.
 ### addListener('downloadFailed', ...)
 
 ```typescript
-addListener(eventName: 'downloadFailed', listenerFunc: (error: { id: string; error: string; }) => void) => Promise<PluginListenerHandle>
+addListener(eventName: 'downloadFailed', listenerFunc: (error: { id: string; error: string; fileIndex?: number | undefined; }) => void) => Promise<PluginListenerHandle>
 ```
 
 Listen for download failures.
 Fired when a download encounters an error.
 
-| Param              | Type                                                            | Description                            |
-| ------------------ | --------------------------------------------------------------- | -------------------------------------- |
-| **`eventName`**    | <code>'downloadFailed'</code>                                   | - Must be 'downloadFailed'             |
-| **`listenerFunc`** | <code>(error: { id: string; error: string; }) =&gt; void</code> | - Callback receiving error information |
+| Param              | Type                                                                                | Description                            |
+| ------------------ | ----------------------------------------------------------------------------------- | -------------------------------------- |
+| **`eventName`**    | <code>'downloadFailed'</code>                                                       | - Must be 'downloadFailed'             |
+| **`listenerFunc`** | <code>(error: { id: string; error: string; fileIndex?: number; }) =&gt; void</code> | - Callback receiving error information |
 
 **Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
 
@@ -375,13 +416,13 @@ Represents the current state and progress of a download task.
 | Prop           | Type                                                                 | Description                             |
 | -------------- | -------------------------------------------------------------------- | --------------------------------------- |
 | **`id`**       | <code>string</code>                                                  | Unique identifier for the download task |
-| **`progress`** | <code>number</code>                                                  | Download progress from 0 to 100         |
+| **`progress`** | <code>number</code>                                                  | Download progress from 0 to 1           |
 | **`state`**    | <code>'PENDING' \| 'RUNNING' \| 'PAUSED' \| 'DONE' \| 'ERROR'</code> | Current state of the download           |
 
 
 #### DownloadOptions
 
-Configuration options for starting a download.
+Configuration options for starting a single-file download.
 
 | Prop                                    | Type                                                 | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Since |
 | --------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
@@ -396,6 +437,45 @@ Configuration options for starting a download.
 | **`description`**                       | <code>string</code>                                  | Description shown on the Android DownloadManager progress notification. When omitted or empty, the system uses its default. Ignored on iOS, Web, and the OkHttp Android download path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | 8.6.0 |
 | **`androidHttpEngine`**                 | <code>'auto' \| 'okhttp' \| 'downloadManager'</code> | Android HTTP stack used for the download. - Omitted: always DownloadManager with legacy destination resolution (same as releases before this option). - `'auto'`: OkHttp for app-private destinations (`cache/...`, `files/...`, or an absolute path under cache/data/files when extended roots apply); DownloadManager for legacy relative paths under app external storage and `public-downloads/...`. - `'okhttp'`: always use OkHttp for extended-root destinations. Rejects `public-downloads/...` paths. Transfers run in the app process and do not continue after the process is killed (unlike DownloadManager on those paths). - `'downloadManager'`: always use the system DownloadManager with legacy destination resolution. Ignored on iOS and Web.                            | 8.5.0 |
 | **`downloadCompletedNotificationText`** | <code>string</code>                                  | Optional localized text for a system notification when the download finishes. When set, iOS and Android may show a local notification after a successful download if the user granted notification permission. If permission is denied, the download still completes and no notification is shown. Tapping the notification reopens the app. Omitted or empty means no completion notification from the plugin (use `downloadCompleted` events while the app is open).                                                                                                                                                                                                                                                                                                                       | 8.5.0 |
+| **`files`**                             |                                                      | Multi-file batches use `files` instead. Omit for single-file downloads.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | 8.7.0 |
+
+
+#### DownloadBatchOptions
+
+Configuration options for a multi-file batch download.
+
+On Android, multi-file batches use the system DownloadManager only. Each file uses the same `androidHttpEngine` destination rules as a single download; `download()` rejects before enqueue if any file would use OkHttp.
+
+**Process death:** On Android, batch state lives in memory only and is lost when the host process is killed (DownloadManager work may still finish, but the plugin does not rebuild batch progress). On iOS, batch metadata is persisted in `DownloadBatchStore` (UserDefaults) and restored when the plugin initializes.
+
+When one file fails, remaining transfers are cancelled. Files that already finished successfully stay on disk (Android stops tracking completed children without calling DownloadManager.remove on them).
+
+**`stop({ id })` on a batch id:** On iOS, deletes every path stored via `recordMovedDestination` for that batch (files written before `stop()`). A later batch failure does not delete those paths; only `stop()` removes them. On Android, removes active DownloadManager entries for in-flight children. Finished children stay on disk (plugin marks them complete or `STATUS_SUCCESSFUL`), including files finished before `stop()`.
+
+| Prop                                    | Type                                                 | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Since |
+| --------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
+| **`id`**                                | <code>string</code>                                  | Unique identifier for this batch (shared by every file in `files`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |       |
+| **`files`**                             | <code>DownloadFileSpec[]</code>                      | Download multiple files as one native-owned batch. The batch shares the top-level `id`. Progress events use `progress` and `fileProgress` from 0 to 1 (same scale as <a href="#downloadtask">DownloadTask</a>). `downloadCompleted` fires once when every file succeeds. Any failure cancels the batch. At most 32 entries are allowed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | 8.7.0 |
+| **`url`**                               |                                                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |       |
+| **`destination`**                       |                                                      |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |       |
+| **`headers`**                           | <code>{ [key: string]: string; }</code>              | Optional HTTP headers to include in the request                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |       |
+| **`network`**                           | <code>'cellular' \| 'wifi-only'</code>               | Network type requirement for download                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |       |
+| **`priority`**                          | <code>'high' \| 'normal' \| 'low'</code>             | Download priority level                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |       |
+| **`notification`**                      | <code>'completed' \| 'progress' \| 'hidden'</code>   | Android DownloadManager notification visibility. - `'completed'` (default): show while downloading and keep the notification after completion. - `'progress'`: show while downloading, remove the notification when finished. - `'hidden'`: no DownloadManager progress notification; use plugin progress events instead. `downloadCompletedNotificationText` can still post a completion notification when the transfer succeeds. On the OkHttp Android path, notifications are not shown during the transfer. With `'completed'`, a single completion notification may be posted when the file finishes (Android 13+ requires runtime `POST_NOTIFICATIONS` in the host app). Ignored on iOS and Web.                                                                                                                                                               | 8.2.0 |
+| **`title`**                             | <code>string</code>                                  | Title shown on the Android DownloadManager progress notification. When omitted or empty, the system uses its default (typically the destination file name). Ignored on iOS, Web, and the OkHttp Android download path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 8.6.0 |
+| **`description`**                       | <code>string</code>                                  | Description shown on the Android DownloadManager progress notification. When omitted or empty, the system uses its default. Ignored on iOS, Web, and the OkHttp Android download path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | 8.6.0 |
+| **`androidHttpEngine`**                 | <code>'auto' \| 'okhttp' \| 'downloadManager'</code> | Android HTTP stack used for the download. - Omitted: always DownloadManager with legacy destination resolution (same as releases before this option). - `'auto'`: OkHttp for app-private destinations (`cache/...`, `files/...`, or an absolute path under cache/data/files when extended roots apply); DownloadManager for legacy relative paths under app external storage and `public-downloads/...`. - `'okhttp'`: always use OkHttp for extended-root destinations. Rejects `public-downloads/...` paths. Transfers run in the app process and do not continue after the process is killed (unlike DownloadManager on those paths). - `'downloadManager'`: always use the system DownloadManager with legacy destination resolution. Ignored on iOS and Web. On Android batches, each file uses these rules; the call is rejected if any file would use OkHttp. | 8.5.0 |
+| **`downloadCompletedNotificationText`** | <code>string</code>                                  | Optional localized text for a system notification when the download finishes. When set, iOS and Android may show a local notification after a successful download if the user granted notification permission. If permission is denied, the download still completes and no notification is shown. Tapping the notification reopens the app. Omitted or empty means no completion notification from the plugin (use `downloadCompleted` events while the app is open).                                                                                                                                                                                                                                                                                                                                                                                               | 8.5.0 |
+
+
+#### DownloadFileSpec
+
+One file entry inside a multi-file download batch.
+
+| Prop              | Type                | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`url`**         | <code>string</code> | URL of the file to download                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **`destination`** | <code>string</code> | Local file path where the download will be saved. On Android single-file downloads, relative paths without `androidHttpEngine` behave like earlier releases: every relative path, including `cache/...` and `files/...`, is stored under app external files via DownloadManager. When you set `androidHttpEngine` to `'auto'` or `'okhttp'` on a single download, optional roots apply: - `cache/...` saves under app cache (OkHttp with `'auto'`). - `files/...` saves under app-private internal storage (OkHttp with `'auto'`). - `public-downloads/...` saves to the public Downloads folder (DownloadManager). - Any other relative path saves under app external files (DownloadManager with `'auto'`). Multi-file batches on Android use the same destination rules as single downloads for the batch `androidHttpEngine` value (including extended roots when `'auto'` or `'okhttp'` is set). The batch is rejected only when a file would use OkHttp (for example `cache/...` or `files/...` with `'okhttp'`). Absolute paths and `file://` URIs are supported on iOS and on Android single downloads. |
 
 
 #### PluginListenerHandle

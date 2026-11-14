@@ -87,6 +87,110 @@ final class DownloadDestinationStoreTests: XCTestCase {
     }
 }
 
+final class DownloadBatchProgressTests: XCTestCase {
+    private var batchDefaults: UserDefaults!
+
+    override func setUp() {
+        batchDefaults = UserDefaults(suiteName: "CapacitorDownloaderPluginTests.batch")!
+        batchDefaults.removePersistentDomain(forName: "CapacitorDownloaderPluginTests.batch")
+    }
+
+    override func tearDown() {
+        batchDefaults.removePersistentDomain(forName: "CapacitorDownloaderPluginTests.batch")
+    }
+
+    func testOverallProgressAveragesFiles() {
+        let overall = DownloadBatchProgress.overallProgress(fileProgress: [1, 0.5, 0], fileCount: 3)
+        XCTAssertEqual(overall, 0.5, accuracy: 0.0001)
+    }
+
+    func testBatchCancellationNeedsResolvedPathNotWhitespaceDestination() {
+        let documents = URL(fileURLWithPath: "/var/mobile/Documents")
+        let childId = "bundle#0"
+        let whitespace = "   "
+        let resolvedPath = DownloadDestinationResolver.resolveDestinationURL(
+            destination: whitespace,
+            id: childId,
+            documentsDirectory: documents
+        ).path
+
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let generation = coordinator.startBatch(batchId: "bundle", fileCount: 1, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+
+        coordinator.recordMovedDestination(batchId: "bundle", generation: generation, fileIndex: 0, destination: resolvedPath)
+        XCTAssertEqual(coordinator.destinationsForCancellation(batchId: "bundle"), [resolvedPath])
+
+        let mistakenCleanupTarget = DownloadDestinationResolver.resolveDestinationURL(
+            destination: whitespace,
+            id: "cleanup",
+            documentsDirectory: documents
+        ).path
+        XCTAssertNotEqual(mistakenCleanupTarget, resolvedPath)
+
+        coordinator.removeBatch(batchId: "bundle")
+        store.clear()
+    }
+
+    func testLoadRestoresBackgroundTasksForMainAndWifiOnlySessions() {
+        let plugin = CapacitorDownloaderPlugin()
+        XCTAssertFalse(plugin.hasRegisteredTask(id: "restored-single"))
+
+        let downloadTask = plugin.mainBackgroundSessionForTests.downloadTask(with: URL(string: "https://example.com/file.bin")!)
+        downloadTask.taskDescription = "restored-single"
+        downloadTask.resume()
+
+        plugin.load()
+        XCTAssertTrue(plugin.restoredBackgroundSessionIdentifiers.contains(DownloadSessionIdentifiers.main))
+        XCTAssertTrue(plugin.restoredBackgroundSessionIdentifiers.contains(DownloadSessionIdentifiers.wifiOnly))
+        XCTAssertTrue(plugin.hasRegisteredTask(id: "restored-single"))
+    }
+
+    func testStaleChildGenerationDoesNotFailActiveBatch() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let firstGeneration = coordinator.startBatch(batchId: "bundle", fileCount: 1, singleDownloadIds: []) else {
+            XCTFail("expected first batch")
+            return
+        }
+        let staleTaskId = coordinator.fileTaskId(batchId: "bundle", generation: firstGeneration, fileIndex: 0)
+        coordinator.registerChildTask(batchId: "bundle", taskId: staleTaskId, fileIndex: 0)
+        coordinator.removeBatch(batchId: "bundle", unregisterChildren: false)
+
+        guard let secondGeneration = coordinator.startBatch(batchId: "bundle", fileCount: 1, singleDownloadIds: []) else {
+            XCTFail("expected second batch")
+            return
+        }
+        XCTAssertNotEqual(firstGeneration, secondGeneration)
+        XCTAssertNil(coordinator.activeChildParts(for: staleTaskId))
+        XCTAssertFalse(coordinator.beginFailure(batchId: "bundle", generation: firstGeneration))
+        XCTAssertTrue(coordinator.beginFailure(batchId: "bundle", generation: secondGeneration))
+        coordinator.removeBatch(batchId: "bundle")
+        store.clear()
+    }
+
+    func testBatchCoordinatorParsesRegisteredTaskId() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let generation = coordinator.startBatch(batchId: "bundle", fileCount: 3, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+        let taskId = coordinator.fileTaskId(batchId: "bundle", generation: generation, fileIndex: 2)
+        coordinator.registerChildTask(batchId: "bundle", taskId: taskId, fileIndex: 2)
+        let parts = coordinator.childParts(for: taskId)
+        XCTAssertEqual(parts?.batchId, "bundle")
+        XCTAssertEqual(parts?.generation, generation)
+        XCTAssertEqual(parts?.fileIndex, 2)
+        XCTAssertNil(coordinator.childParts(for: "report#1:0"))
+        coordinator.removeBatch(batchId: "bundle")
+        store.clear()
+    }
+}
+
 final class DownloadCompletedNotificationTextTests: XCTestCase {
     func testNormalizeRejectsBlank() {
         XCTAssertNil(DownloadCompletedNotificationText.normalize(nil))

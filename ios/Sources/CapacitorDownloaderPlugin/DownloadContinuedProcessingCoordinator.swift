@@ -39,6 +39,21 @@ final class DownloadContinuedProcessingCoordinator {
         guard #available(iOS 26.0, *) else {
             return
         }
+        reportContinuedProgress(downloadId: downloadId, fraction: fraction)
+    }
+
+    func finish(downloadId: String, success: Bool) {
+        lock.lock()
+        let taskAny = activeTasks.removeValue(forKey: downloadId)
+        totalUnitCounts.removeValue(forKey: downloadId)
+        lock.unlock()
+        if #available(iOS 26.0, *) {
+            finishContinuedTask(taskAny, success: success)
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private func reportContinuedProgress(downloadId: String, fraction: Double) {
         lock.lock()
         let task = activeTasks[downloadId] as? BGContinuedProcessingTask
         let totalUnitCount = totalUnitCounts[downloadId] ?? 1
@@ -50,14 +65,12 @@ final class DownloadContinuedProcessingCoordinator {
         task.progress.completedUnitCount = Int64(Double(totalUnitCount) * clamped)
     }
 
-    func finish(downloadId: String, success: Bool) {
-        lock.lock()
-        let task = activeTasks.removeValue(forKey: downloadId) as? BGContinuedProcessingTask
-        totalUnitCounts.removeValue(forKey: downloadId)
-        lock.unlock()
-        if #available(iOS 26.0, *), let task {
-            task.setTaskCompleted(success: success)
+    @available(iOS 26.0, *)
+    private func finishContinuedTask(_ taskAny: Any?, success: Bool) {
+        guard let task = taskAny as? BGContinuedProcessingTask else {
+            return
         }
+        task.setTaskCompleted(success: success)
     }
 
     @available(iOS 26.0, *)

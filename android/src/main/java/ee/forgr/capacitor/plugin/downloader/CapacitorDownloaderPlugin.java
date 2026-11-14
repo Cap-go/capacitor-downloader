@@ -786,7 +786,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
     private boolean isOkHttpDownload(long trackedDownloadId) {
         return trackedDownloadId == OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID;
-
+    }
 
     private void startProgressCheck(final String id, final long downloadId) {
         runProgressQuery(id, true, downloadId);

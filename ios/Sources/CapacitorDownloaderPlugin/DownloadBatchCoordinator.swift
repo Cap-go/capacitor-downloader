@@ -215,7 +215,6 @@ final class DownloadBatchCoordinator {
         batch.fileProgress[fileIndex] = clamped
         batches[batchId] = batch
         let overall = DownloadBatchProgress.overallProgress(fileProgress: batch.fileProgress, fileCount: batch.fileCount)
-        persistBatchesLocked()
         return (overall, clamped)
     }
 
@@ -230,7 +229,7 @@ final class DownloadBatchCoordinator {
         }
         if batch.fileCompleted[fileIndex] {
             if batch.completedCount >= batch.fileCount {
-                return .allSucceeded(batchId: batchId)
+                return .allSucceeded(batchId: batchId, generation: batch.generation)
             }
             return .inProgress(
                 overall: DownloadBatchProgress.overallProgress(fileProgress: batch.fileProgress, fileCount: batch.fileCount)
@@ -241,8 +240,9 @@ final class DownloadBatchCoordinator {
         batch.completedCount += 1
         batches[batchId] = batch
         if batch.completedCount >= batch.fileCount {
+            let generation = batch.generation
             removeBatchLocked(batchId: batchId, unregisterChildren: true)
-            return .allSucceeded(batchId: batchId)
+            return .allSucceeded(batchId: batchId, generation: generation)
         }
         persistBatchesLocked()
         return .inProgress(
@@ -264,7 +264,7 @@ final class DownloadBatchCoordinator {
 
     enum BatchCompletionState {
         case inProgress(overall: Float)
-        case allSucceeded(batchId: String)
+        case allSucceeded(batchId: String, generation: UInt64)
     }
 
     private func removeBatchLocked(batchId: String, unregisterChildren: Bool) {

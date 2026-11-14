@@ -252,6 +252,12 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
+        DownloadCompletedNotificationStore.shared.setText(
+            call.getString("downloadCompletedNotificationText"),
+            for: batchId,
+            generation: generation
+        )
+
         var stagedTasks: [(taskId: String, task: URLSessionDownloadTask)] = []
 
         for (index, entry) in parsed.enumerated() {
@@ -530,8 +536,11 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     )
                 }
                 switch batchCoordinator.markFileCompleted(batchId: batchParts.batchId, fileIndex: batchParts.fileIndex) {
-                case .allSucceeded(let batchId):
+                case .allSucceeded(let batchId, let generation):
                     notifyListeners("downloadCompleted", data: ["id": batchId])
+                    if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: batchId, generation: generation) {
+                        DownloadCompletedNotificationPresenter.presentIfAllowed(downloadId: batchId, body: completionText)
+                    }
                 case .inProgress(let overall):
                     notifyListeners(
                         "downloadProgress",

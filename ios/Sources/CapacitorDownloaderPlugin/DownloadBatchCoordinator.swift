@@ -19,9 +19,10 @@ final class DownloadBatchCoordinator {
     private var batchGenerations: [String: UInt64] = [:]
     private var registeredChildren: [String: String] = [:]
     private let batchesLock = NSLock()
-    private let store = DownloadBatchStore.shared
+    private let store: DownloadBatchStore
 
-    init() {
+    init(store: DownloadBatchStore = .shared) {
+        self.store = store
         restorePersistedBatches()
     }
 
@@ -89,7 +90,7 @@ final class DownloadBatchCoordinator {
         return generation
     }
 
-    func registerChildTask(batchId: String, taskId: String, fileIndex: Int, destination: String) {
+    func registerChildTask(batchId: String, taskId: String, fileIndex: Int) {
         batchesLock.lock()
         defer { batchesLock.unlock() }
         guard var batch = batches[batchId] else {
@@ -97,9 +98,14 @@ final class DownloadBatchCoordinator {
         }
         batch.childTaskIds.insert(taskId)
         registeredChildren[taskId] = batchId
-        batch.savedDestinations[fileIndex] = destination
         batches[batchId] = batch
         persistBatchesLocked()
+    }
+
+    func unregisterChildTask(_ taskId: String) {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        registeredChildren.removeValue(forKey: taskId)
     }
 
     func isBatch(batchId: String) -> Bool {
@@ -166,10 +172,10 @@ final class DownloadBatchCoordinator {
         persistBatchesLocked()
     }
 
-    func removeBatch(batchId: String) {
+    func removeBatch(batchId: String, unregisterChildren: Bool = true) {
         batchesLock.lock()
         defer { batchesLock.unlock() }
-        removeBatchLocked(batchId: batchId)
+        removeBatchLocked(batchId: batchId, unregisterChildren: unregisterChildren)
     }
 
     func destinationsForCancellation(batchId: String) -> [String] {
@@ -235,7 +241,7 @@ final class DownloadBatchCoordinator {
         batch.completedCount += 1
         batches[batchId] = batch
         if batch.completedCount >= batch.fileCount {
-            removeBatchLocked(batchId: batchId)
+            removeBatchLocked(batchId: batchId, unregisterChildren: true)
             return .allSucceeded(batchId: batchId)
         }
         persistBatchesLocked()
@@ -261,12 +267,14 @@ final class DownloadBatchCoordinator {
         case allSucceeded(batchId: String)
     }
 
-    private func removeBatchLocked(batchId: String) {
+    private func removeBatchLocked(batchId: String, unregisterChildren: Bool) {
         guard let batch = batches.removeValue(forKey: batchId) else {
             return
         }
-        for taskId in batch.childTaskIds {
-            registeredChildren.removeValue(forKey: taskId)
+        if unregisterChildren {
+            for taskId in batch.childTaskIds {
+                registeredChildren.removeValue(forKey: taskId)
+            }
         }
         persistBatchesLocked()
     }

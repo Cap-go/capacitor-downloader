@@ -34,7 +34,8 @@ We build, improve and fix our plugins with heavy use of AI, so issues usually ge
 - **Control**: `pause()`, `resume()` and `stop()` for each download ID.
 - **Progress events**: `downloadProgress`, `downloadCompleted` and `downloadFailed` listeners.
 - **Status and files**: `checkStatus()` for a task and `getFileInfo()` for a downloaded file.
-- **Platforms**: iOS and Android. iOS uses a background `URLSession`, Android uses `DownloadManager`. Not available on web.
+- **Platforms**: iOS and Android. iOS uses a background `URLSession`. Android uses `DownloadManager` by default (same as earlier releases). **OkHttp** is opt in via `androidHttpEngine` for app-private destinations. Not available on web.
+- **Android private storage**: set `androidHttpEngine: 'auto'` or `'okhttp'` and use `cache/...` or `files/...` for internal storage. `notification: 'hidden'` hides DownloadManager progress UI; `downloadCompletedNotificationText` can still alert on success.
 - **Batch downloads**: pass `files` on `download()` to let native code own a multi-file batch (overall plus per-file progress, one completion when all succeed).
 
 ## Multi-file batch downloads
@@ -59,6 +60,40 @@ await CapacitorDownloader.download({
 ```
 
 `downloadProgress` includes `progress` (overall, 0 to 1) plus `fileIndex` and `fileProgress` for the file that moved. `downloadCompleted` fires once when every file succeeds. If any file fails, the plugin emits `downloadFailed` for the batch id (with `fileIndex` when known) and cancels the rest. Call `stop({ id })` with the batch id to cancel the whole batch.
+
+## Android OkHttp engine (8.5.0)
+
+**Opt in:** set `androidHttpEngine` to `'auto'` or `'okhttp'` for downloads into app-private storage (offline packs, encrypted assets, cache). When the option is omitted, every destination uses `DownloadManager` and legacy app external file paths, including existing `cache/...` and `files/...` strings.
+
+```typescript
+await CapacitorDownloader.download({
+  id: 'offline-pack',
+  url: 'https://cdn.example.com/pack.zip',
+  destination: 'files/offline/pack.zip',
+  androidHttpEngine: 'auto', // OkHttp for files/... and cache/...
+  notification: 'hidden', // no system notification during transfer; listen to downloadProgress
+});
+```
+
+| `androidHttpEngine` | Behavior |
+| ------------------- | -------- |
+| Omitted | DownloadManager only, legacy destination paths (matches pre-option releases) |
+| `'auto'` | OkHttp for `cache/...`, `files/...`, and paths under internal cache/data/files; DownloadManager for external app storage and `public-downloads/...` |
+| `'okhttp'` | Always OkHttp; rejects `public-downloads/...` paths |
+| `'downloadManager'` | Always system DownloadManager with legacy destination paths |
+
+**Android `destination` prefixes**
+
+| Prefix | Storage when `androidHttpEngine` is `'auto'` or `'okhttp'` | Storage when option is omitted |
+| ------ | ----------------------------------------------------------- | ------------------------------ |
+| `cache/...` | App cache dir (OkHttp with `'auto'`) | App external files (DownloadManager) |
+| `files/...` | App-private files dir (OkHttp with `'auto'`) | App external files (DownloadManager) |
+| `public-downloads/...` | Public Downloads folder (DownloadManager) | App external files under `public-downloads/...` (DownloadManager) |
+| Other relative paths | App external files dir (DownloadManager) | App external files dir (DownloadManager) |
+
+**Notifications on OkHttp:** no notification during the transfer. Use `notification: 'hidden'` with `downloadProgress` events, or `'completed'` to post one completion-style notification when the file finishes (not on failure). DownloadManager paths still honor `completed`, `progress`, and `hidden` as before. `downloadCompletedNotificationText` is separate and can still post on success when set.
+
+Full guide: https://capgo.app/docs/plugins/downloader/getting-started/#android-okhttp-engine
 
 ## Download completed notifications
 
@@ -355,6 +390,9 @@ Represents the current state and progress of a download task.
 
 Configuration options for a single-file download.
 
+Also includes every field documented on {@link DownloadCommonOptions}
+(`id`, `headers`, `network`, `priority`, `notification`, `androidHttpEngine`, `downloadCompletedNotificationText`).
+
 | Prop              | Type                | Description                                      |
 | ----------------- | ------------------- | ------------------------------------------------ |
 | **`url`**         | <code>string</code> | URL of the file to download                      |
@@ -365,6 +403,9 @@ Configuration options for a single-file download.
 #### DownloadBatchOptions
 
 Configuration options for a multi-file batch download.
+
+Also includes every field documented on {@link DownloadCommonOptions}
+(`id`, `headers`, `network`, `priority`, `notification`, `androidHttpEngine`, `downloadCompletedNotificationText`).
 
 | Prop              | Type                            | Description                                                                                                                                                                                                                            | Since |
 | ----------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
@@ -377,10 +418,10 @@ Configuration options for a multi-file batch download.
 
 One file entry inside a multi-file download batch.
 
-| Prop              | Type                | Description                                      |
-| ----------------- | ------------------- | ------------------------------------------------ |
-| **`url`**         | <code>string</code> | URL of the file to download                      |
-| **`destination`** | <code>string</code> | Local file path where the download will be saved |
+| Prop              | Type                | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`url`**         | <code>string</code> | URL of the file to download                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **`destination`** | <code>string</code> | Local file path where the download will be saved. On Android, relative paths without `androidHttpEngine` behave like earlier releases: every relative path, including `cache/...` and `files/...`, is stored under app external files via DownloadManager. When you set `androidHttpEngine` to `'auto'` or `'okhttp'`, optional roots apply: - `cache/...` saves under app cache (OkHttp with `'auto'`). - `files/...` saves under app-private internal storage (OkHttp with `'auto'`). - `public-downloads/...` saves to the public Downloads folder (DownloadManager). - Any other relative path saves under app external files (DownloadManager with `'auto'`). Absolute paths and `file://` URIs are supported; `'auto'` picks OkHttp when the path is under cache, data, or files dirs. |
 
 
 #### PluginListenerHandle

@@ -21,7 +21,7 @@ public class DownloadBatchProgressTest {
 
     @Test
     public void markFileCompletedIsIdempotent() {
-        DownloadBatchState batch = new DownloadBatchState("bundle", 2);
+        DownloadBatchState batch = new DownloadBatchState("bundle", 2, 1L, "hidden");
         assertEquals(false, batch.markFileCompleted(0));
         assertEquals(false, batch.markFileCompleted(0));
         assertEquals(true, batch.markFileCompleted(1));

@@ -88,23 +88,37 @@ final class DownloadDestinationStoreTests: XCTestCase {
 }
 
 final class DownloadBatchProgressTests: XCTestCase {
+    private var batchDefaults: UserDefaults!
+
+    override func setUp() {
+        batchDefaults = UserDefaults(suiteName: "CapacitorDownloaderPluginTests.batch")!
+        batchDefaults.removePersistentDomain(forName: "CapacitorDownloaderPluginTests.batch")
+    }
+
+    override func tearDown() {
+        batchDefaults.removePersistentDomain(forName: "CapacitorDownloaderPluginTests.batch")
+    }
+
     func testOverallProgressAveragesFiles() {
         let overall = DownloadBatchProgress.overallProgress(fileProgress: [1, 0.5, 0], fileCount: 3)
         XCTAssertEqual(overall, 0.5, accuracy: 0.0001)
     }
 
     func testBatchCoordinatorParsesRegisteredTaskId() {
-        let coordinator = DownloadBatchCoordinator()
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
         guard let generation = coordinator.startBatch(batchId: "bundle", fileCount: 3, singleDownloadIds: []) else {
             XCTFail("expected batch to start")
             return
         }
         let taskId = coordinator.fileTaskId(batchId: "bundle", generation: generation, fileIndex: 2)
-        coordinator.registerChildTask(batchId: "bundle", taskId: taskId, fileIndex: 2, destination: "downloads/a.zip")
+        coordinator.registerChildTask(batchId: "bundle", taskId: taskId, fileIndex: 2)
         let parts = coordinator.childParts(for: taskId)
         XCTAssertEqual(parts?.batchId, "bundle")
         XCTAssertEqual(parts?.fileIndex, 2)
         XCTAssertNil(coordinator.childParts(for: "report#0"))
+        coordinator.removeBatch(batchId: "bundle")
+        store.clear()
     }
 }
 

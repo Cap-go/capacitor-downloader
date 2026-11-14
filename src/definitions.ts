@@ -18,7 +18,19 @@ export interface DownloadTask {
 export interface DownloadFileSpec {
   /** URL of the file to download */
   url: string;
-  /** Local file path where the download will be saved */
+  /**
+   * Local file path where the download will be saved.
+   *
+   * On Android, relative paths without `androidHttpEngine` behave like earlier releases: every relative path,
+   * including `cache/...` and `files/...`, is stored under app external files via DownloadManager.
+   *
+   * When you set `androidHttpEngine` to `'auto'` or `'okhttp'`, optional roots apply:
+   * - `cache/...` saves under app cache (OkHttp with `'auto'`).
+   * - `files/...` saves under app-private internal storage (OkHttp with `'auto'`).
+   * - `public-downloads/...` saves to the public Downloads folder (DownloadManager).
+   * - Any other relative path saves under app external files (DownloadManager with `'auto'`).
+   * Absolute paths and `file://` URIs are supported; `'auto'` picks OkHttp when the path is under cache, data, or files dirs.
+   */
   destination: string;
 }
 
@@ -39,13 +51,32 @@ export interface DownloadCommonOptions {
    *
    * - `'completed'` (default): show while downloading and keep the notification after completion.
    * - `'progress'`: show while downloading, remove the notification when finished.
-   * - `'hidden'`: no system notification; use plugin progress events instead.
+   * - `'hidden'`: no DownloadManager progress notification; use plugin progress events instead.
+   *   `downloadCompletedNotificationText` can still post a completion notification when the transfer succeeds.
    *
-   * Ignored on iOS and Web.
+   * On the OkHttp Android path, notifications are not shown during the transfer. With `'completed'`, a single
+   * completion notification may be posted when the file finishes (Android 13+ requires runtime
+   * `POST_NOTIFICATIONS` in the host app). Ignored on iOS and Web.
    *
    * @since 8.2.0
    */
   notification?: 'completed' | 'progress' | 'hidden';
+  /**
+   * Android HTTP stack used for the download.
+   *
+   * - Omitted: always DownloadManager with legacy destination resolution (same as releases before this option).
+   * - `'auto'`: OkHttp for app-private destinations (`cache/...`, `files/...`, or an absolute path under
+   *   cache/data/files when extended roots apply); DownloadManager for legacy relative paths under app external storage
+   *   and `public-downloads/...`.
+   * - `'okhttp'`: always use OkHttp for extended-root destinations. Rejects `public-downloads/...` paths. Transfers run
+   *   in the app process and do not continue after the process is killed (unlike DownloadManager on those paths).
+   * - `'downloadManager'`: always use the system DownloadManager with legacy destination resolution.
+   *
+   * Ignored on iOS and Web.
+   *
+   * @since 8.5.0
+   */
+  androidHttpEngine?: 'auto' | 'okhttp' | 'downloadManager';
   /**
    * Optional localized text for a system notification when the download finishes.
    *
@@ -56,13 +87,16 @@ export interface DownloadCommonOptions {
    * Omitted or empty means no completion notification from the plugin (use
    * `downloadCompleted` events while the app is open).
    *
-   * @since 8.4.0
+   * @since 8.5.0
    */
   downloadCompletedNotificationText?: string;
 }
 
 /**
  * Configuration options for a single-file download.
+ *
+ * Also includes every field documented on {@link DownloadCommonOptions}
+ * (`id`, `headers`, `network`, `priority`, `notification`, `androidHttpEngine`, `downloadCompletedNotificationText`).
  */
 export interface DownloadSingleOptions extends DownloadCommonOptions {
   /** URL of the file to download */
@@ -74,6 +108,9 @@ export interface DownloadSingleOptions extends DownloadCommonOptions {
 
 /**
  * Configuration options for a multi-file batch download.
+ *
+ * Also includes every field documented on {@link DownloadCommonOptions}
+ * (`id`, `headers`, `network`, `priority`, `notification`, `androidHttpEngine`, `downloadCompletedNotificationText`).
  */
 export interface DownloadBatchOptions extends DownloadCommonOptions {
   /**
@@ -107,8 +144,9 @@ export interface CapacitorDownloaderPlugin {
    * const task = await Downloader.download({
    *   id: 'my-download',
    *   url: 'https://example.com/file.pdf',
-   *   destination: 'downloads/file.pdf',
-   *   notification: 'hidden', // Android: no system notification; use downloadProgress events
+   *   destination: 'files/offline/package.zip',
+   *   androidHttpEngine: 'auto',
+   *   notification: 'hidden', // Android OkHttp: no notification during download; use downloadProgress events
    *   downloadCompletedNotificationText: 'Your file is ready', // opt-in completion alert
    * });
    *

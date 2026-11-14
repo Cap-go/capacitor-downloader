@@ -14,7 +14,9 @@ import static org.mockito.Mockito.when;
 
 import android.app.DownloadManager;
 import com.getcapacitor.PluginCall;
+import java.io.File;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -202,6 +204,44 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         assertEquals(Long.valueOf(99L), downloads.get("dup-id"));
     }
 
+    @Test(timeout = 5_000)
+    public void okHttpStartFailureDoesNotEvictReusedIdWithNewGeneration() throws Exception {
+        String id = "reuse-id";
+        File newDestination = new File(System.getProperty("java.io.tmpdir"), "okhttp-new-dest.bin");
+        downloads.put(id, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID);
+        getDownloadGenerationsMap(plugin).put(id, 2L);
+
+        @SuppressWarnings("unchecked")
+        Map<String, File> destinationFiles = (Map<String, File>) getField(plugin, "okHttpDestinationFiles").get(plugin);
+        destinationFiles.put(id, newDestination);
+
+        File staleDestination = new File(System.getProperty("java.io.tmpdir"), "okhttp-old-dest.bin");
+        Method method = CapacitorDownloaderPlugin.class.getDeclaredMethod(
+            "applyOkHttpStartFailureIfCurrent",
+            String.class,
+            long.class,
+            File.class,
+            String.class
+        );
+        method.setAccessible(true);
+        method.invoke(plugin, id, 1L, staleDestination, "stale transfer error");
+
+        assertEquals(Long.valueOf(OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID), downloads.get(id));
+        assertEquals(newDestination, destinationFiles.get(id));
+        assertEquals(Long.valueOf(2L), getDownloadGenerationsMap(plugin).get(id));
+    }
+
+    @Test
+    public void okHttpGenerationHelperRejectsStaleGeneration() throws Exception {
+        getDownloadGenerationsMap(plugin).put("reuse-id", 2L);
+
+        Method method = CapacitorDownloaderPlugin.class.getDeclaredMethod("isCurrentOkHttpGeneration", String.class, long.class);
+        method.setAccessible(true);
+
+        assertFalse((boolean) method.invoke(plugin, "reuse-id", 1L));
+        assertTrue((boolean) method.invoke(plugin, "reuse-id", 2L));
+    }
+
     @Test
     public void checkStatusRejectsWhenQueryThrows() throws Exception {
         downloads.put("test-id", 42L);
@@ -240,9 +280,13 @@ public class CapacitorDownloaderPluginConcurrencyTest {
     }
 
     private static void setField(Object target, String fieldName, Object value) throws Exception {
+        getField(target, fieldName).set(target, value);
+    }
+
+    private static Field getField(Object target, String fieldName) throws Exception {
         Field field = target.getClass().getDeclaredField(fieldName);
         field.setAccessible(true);
-        field.set(target, value);
+        return field;
     }
 
     private static DownloadCompletedNotificationStore getNotificationStore(CapacitorDownloaderPlugin plugin) throws Exception {

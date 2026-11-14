@@ -37,6 +37,8 @@ final class DownloadBatchState {
     }
 
     final String batchId;
+    final long generation;
+    final String notification;
     final int fileCount;
     final float[] fileProgress;
     final boolean[] fileCompleted;
@@ -45,8 +47,10 @@ final class DownloadBatchState {
     final AtomicBoolean cancelled = new AtomicBoolean(false);
     int completedCount;
 
-    DownloadBatchState(String batchId, int fileCount) {
+    DownloadBatchState(String batchId, int fileCount, long generation, String notification) {
         this.batchId = batchId;
+        this.generation = generation;
+        this.notification = notification;
         this.fileCount = fileCount;
         this.fileProgress = new float[fileCount];
         this.fileCompleted = new boolean[fileCount];

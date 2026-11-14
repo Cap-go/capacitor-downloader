@@ -8,7 +8,7 @@ import Capacitor
 
 @objc(CapacitorDownloaderPlugin)
 public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
-    private let pluginVersion: String = "8.4.1"
+    private let pluginVersion: String = "8.5.1"
     public let identifier = "CapacitorDownloaderPlugin"
     public let jsName = "CapacitorDownloader"
     public let pluginMethods: [CAPPluginMethod] = [
@@ -37,6 +37,23 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         downloadGenerations = DownloadIdGenerationStore.shared.allGenerations()
         taskGenerations = DownloadTaskGenerationStore.shared.allGenerations()
         tasksLock.unlock()
+        restoreBackgroundSessionTasks()
+    }
+
+    private func restoreBackgroundSessionTasks() {
+        session.getAllTasks { [weak self] tasks in
+            guard let self else {
+                return
+            }
+            for task in tasks {
+                guard let downloadTask = task as? URLSessionDownloadTask,
+                      let id = downloadTask.taskDescription,
+                      !id.isEmpty else {
+                    continue
+                }
+                self.setTask(downloadTask, for: id)
+            }
+        }
     }
 
     private func setTask(_ task: URLSessionDownloadTask, for id: String) {
@@ -240,7 +257,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         for (index, entry) in parsed.enumerated() {
             let taskId = batchCoordinator.fileTaskId(batchId: batchId, generation: generation, fileIndex: index)
             DownloadDestinationStore.shared.setDestination(entry.destination, for: taskId)
-            batchCoordinator.registerChildTask(batchId: batchId, taskId: taskId, fileIndex: index, destination: entry.destination)
+            batchCoordinator.registerChildTask(batchId: batchId, taskId: taskId, fileIndex: index)
 
             var request = URLRequest(url: entry.url)
             for (key, value) in headers {
@@ -336,7 +353,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
         cancelBatchTasks(batchId: batchId)
-        batchCoordinator.removeBatch(batchId: batchId)
+        batchCoordinator.removeBatch(batchId: batchId, unregisterChildren: false)
         notifyListeners(
             "downloadFailed",
             data: ["id": batchId, "fileIndex": fileIndex, "error": error]
@@ -354,7 +371,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             batchCoordinator.markCancelled(batchId: id)
             cancelBatchTasks(batchId: id)
             deleteDownloadedFiles(destinations: destinations)
-            batchCoordinator.removeBatch(batchId: id)
+            batchCoordinator.removeBatch(batchId: id, unregisterChildren: false)
             call.resolve()
             return
         }
@@ -454,6 +471,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             try? FileManager.default.removeItem(at: location)
             removeTask(for: id, completing: downloadTask)
             _ = DownloadDestinationStore.shared.takeDestination(for: id)
+            batchCoordinator.unregisterChildTask(id)
             return
         }
 
@@ -495,6 +513,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 guard batchCoordinator.isBatch(batchId: batchParts.batchId) else {
                     try? FileManager.default.removeItem(at: location)
                     removeTask(for: id, completing: downloadTask)
+                    batchCoordinator.unregisterChildTask(id)
                     return
                 }
             }
@@ -526,6 +545,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 case .none:
                     break
                 }
+                batchCoordinator.unregisterChildTask(id)
             } else {
                 notifyListeners("downloadCompleted", data: ["id": id])
                 if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: id, generation: generation) {
@@ -543,6 +563,9 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             }
         }
 
+        if batchCoordinator.childParts(for: id) != nil {
+            batchCoordinator.unregisterChildTask(id)
+        }
         clearTaskGeneration(for: downloadTask)
     }
 
@@ -570,6 +593,9 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             }
         }
 
+        if batchCoordinator.childParts(for: id) != nil {
+            batchCoordinator.unregisterChildTask(id)
+        }
         clearTaskGeneration(for: downloadTask)
     }
 

@@ -13,11 +13,9 @@ export interface DownloadTask {
 }
 
 /**
- * Configuration options for starting a download.
+ * One file entry inside a multi-file download batch.
  */
-export interface DownloadOptions {
-  /** Unique identifier for this download task */
-  id: string;
+export interface DownloadFileSpec {
   /** URL of the file to download */
   url: string;
   /**
@@ -34,6 +32,14 @@ export interface DownloadOptions {
    * Absolute paths and `file://` URIs are supported; `'auto'` picks OkHttp when the path is under cache, data, or files dirs.
    */
   destination: string;
+}
+
+/**
+ * Shared download options used by single and batch downloads.
+ */
+export interface DownloadCommonOptions {
+  /** Unique identifier for this download task (or the whole batch when `files` is set) */
+  id: string;
   /** Optional HTTP headers to include in the request */
   headers?: { [key: string]: string };
   /** Network type requirement for download */
@@ -104,6 +110,43 @@ export interface DownloadOptions {
 }
 
 /**
+ * Configuration options for a single-file download.
+ *
+ * Also includes every field documented on {@link DownloadCommonOptions}
+ * (`id`, `headers`, `network`, `priority`, `notification`, `title`, `description`, `androidHttpEngine`, `downloadCompletedNotificationText`).
+ */
+export interface DownloadSingleOptions extends DownloadCommonOptions {
+  /** URL of the file to download */
+  url: string;
+  /** Local file path where the download will be saved */
+  destination: string;
+  files?: never;
+}
+
+/**
+ * Configuration options for a multi-file batch download.
+ *
+ * Also includes every field documented on {@link DownloadCommonOptions}
+ * (`id`, `headers`, `network`, `priority`, `notification`, `title`, `description`, `androidHttpEngine`, `downloadCompletedNotificationText`).
+ */
+export interface DownloadBatchOptions extends DownloadCommonOptions {
+  /**
+   * Download multiple files as one native-owned batch.
+   *
+   * The batch shares the top-level `id`. Progress events include per-file and overall progress.
+   * `downloadCompleted` fires once when every file succeeds. Any failure cancels the batch.
+   *
+   * @since 8.4.0
+   */
+  files: DownloadFileSpec[];
+  url?: never;
+  destination?: never;
+}
+
+/** Options accepted by {@link CapacitorDownloaderPlugin.download}. */
+export type DownloadOptions = DownloadSingleOptions | DownloadBatchOptions;
+
+/**
  * Capacitor plugin for downloading files with background support.
  * Provides resumable downloads with progress tracking.
  */
@@ -122,6 +165,16 @@ export interface CapacitorDownloaderPlugin {
    *   androidHttpEngine: 'auto',
    *   notification: 'hidden', // Android OkHttp: no notification during download; use downloadProgress events
    *   downloadCompletedNotificationText: 'Your file is ready', // opt-in completion alert
+   * });
+   *
+   * // Multi-file batch (one completion event when all files finish):
+   * const batch = await Downloader.download({
+   *   id: 'update-bundle',
+   *   files: [
+   *     { url: 'https://example.com/a.zip', destination: 'updates/a.zip' },
+   *     { url: 'https://example.com/b.zip', destination: 'updates/b.zip' },
+   *   ],
+   *   notification: 'hidden',
    * });
    * ```
    */
@@ -193,6 +246,10 @@ export interface CapacitorDownloaderPlugin {
       bytesWritten?: number;
       /** Total bytes expected, or 0 when the server did not report a length */
       bytesTotal?: number;
+      /** Index of the file within a batch when `files` was used */
+      fileIndex?: number;
+      /** Progress of the file at `fileIndex` from 0 to 1 */
+      fileProgress?: number;
     }) => void,
   ): Promise<PluginListenerHandle>;
 
@@ -219,7 +276,7 @@ export interface CapacitorDownloaderPlugin {
    */
   addListener(
     eventName: 'downloadFailed',
-    listenerFunc: (error: { id: string; error: string }) => void,
+    listenerFunc: (error: { id: string; error: string; fileIndex?: number }) => void,
   ): Promise<PluginListenerHandle>;
 
   /**

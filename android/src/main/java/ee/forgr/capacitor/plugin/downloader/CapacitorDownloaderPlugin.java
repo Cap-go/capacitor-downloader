@@ -248,6 +248,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
             } else {
                 request.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_MOBILE | DownloadManager.Request.NETWORK_WIFI);
             }
+
+            DownloadManagerNotificationLabels.apply(request, call.getString("title"), call.getString("description"));
         } catch (RuntimeException e) {
             call.reject("Invalid download request", e);
             return;

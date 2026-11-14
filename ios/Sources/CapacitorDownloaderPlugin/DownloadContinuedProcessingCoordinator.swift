@@ -52,10 +52,10 @@ final class DownloadContinuedProcessingCoordinator {
 
     func finish(downloadId: String, success: Bool) {
         lock.lock()
-        let task = activeTasks.removeValue(forKey: downloadId) as? BGContinuedProcessingTask
+        let taskBox = activeTasks.removeValue(forKey: downloadId)
         totalUnitCounts.removeValue(forKey: downloadId)
         lock.unlock()
-        if #available(iOS 26.0, *), let task {
+        if #available(iOS 26.0, *), let task = taskBox as? BGContinuedProcessingTask {
             task.setTaskCompleted(success: success)
         }
     }

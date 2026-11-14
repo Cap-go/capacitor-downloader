@@ -310,9 +310,13 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         downloads.put("batch-1#0", 101L);
         downloads.put("batch-1#1", 102L);
 
-        when(downloadManager.query(any(DownloadManager.Query.class))).thenAnswer(
-            (invocation) -> downloadStatusCursor(DownloadManager.STATUS_SUCCESSFUL)
-        );
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenAnswer((invocation) -> {
+            long downloadId = extractQueryDownloadId(invocation.getArgument(0));
+            if (downloadId == 101L) {
+                return downloadStatusCursor(DownloadManager.STATUS_SUCCESSFUL);
+            }
+            return downloadStatusCursor(DownloadManager.STATUS_RUNNING);
+        });
 
         Method failBatch = plugin.getClass().getDeclaredMethod("failBatch", String.class, String.class, Integer.class);
         failBatch.setAccessible(true);
@@ -333,8 +337,8 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         batchChildOwners.put("batch-1#0", "batch-1");
         downloads.put("batch-1#0", 101L);
 
-        when(downloadManager.query(any(DownloadManager.Query.class))).thenAnswer(
-            (invocation) -> downloadStatusCursor(DownloadManager.STATUS_RUNNING)
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenAnswer((invocation) ->
+            downloadStatusCursor(DownloadManager.STATUS_RUNNING)
         );
 
         Method failBatch = plugin.getClass().getDeclaredMethod("failBatch", String.class, String.class, Integer.class);
@@ -355,14 +359,16 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         batchChildOwners.put("batch-1#0", "batch-1");
         downloads.put("batch-1#0", 101L);
 
-        when(downloadManager.query(any(DownloadManager.Query.class)))
-            .thenAnswer((invocation) -> downloadStatusCursor(DownloadManager.STATUS_RUNNING))
-            .thenReturn(null);
+        when(downloadManager.query(any(DownloadManager.Query.class))).thenAnswer((invocation) ->
+            downloadStatusCursor(DownloadManager.STATUS_RUNNING)
+        );
 
         PluginCall call = mockPluginCall("batch-1");
         plugin.stop(call);
 
-        verify(downloadManager).remove(101L);
+        verify(downloadManager).remove(
+            org.mockito.ArgumentMatchers.argThat((long[] ids) -> ids != null && ids.length == 1 && ids[0] == 101L)
+        );
         verify(call, timeout(5000)).resolve(any());
     }
 
@@ -498,6 +504,13 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         MatrixCursor cursor = new MatrixCursor(new String[] { DownloadManager.COLUMN_STATUS });
         cursor.addRow(new Object[] { status });
         return cursor;
+    }
+
+    private static long extractQueryDownloadId(DownloadManager.Query query) throws Exception {
+        Field field = DownloadManager.Query.class.getDeclaredField("mIds");
+        field.setAccessible(true);
+        long[] ids = (long[]) field.get(query);
+        return ids != null && ids.length > 0 ? ids[0] : -1L;
     }
 
     private static PluginCall mockPluginCall(String id) {

@@ -104,5 +104,4 @@ final class DownloadBatchState {
         }
         return fileCompleted[fileIndex];
     }
-
 }

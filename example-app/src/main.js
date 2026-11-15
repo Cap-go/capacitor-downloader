@@ -15,10 +15,11 @@ function reportHarnessError(error) {
   console.error('Maestro harness failed', error);
 }
 
-const isMaestroE2E =
-  import.meta.env.VITE_CAPGO_MAESTRO_BUILD === 'true' || window.__capgoMaestroIsE2E === true;
+async function bootstrap() {
+  const isMaestroE2E =
+    import.meta.env.VITE_CAPGO_MAESTRO_BUILD === 'true' || window.__capgoMaestroIsE2E === true;
 
-if (isMaestroE2E) {
+  if (isMaestroE2E) {
   document.getElementById('manual-panel')?.classList.add('hidden');
   if (Capacitor.isNativePlatform()) {
     try {
@@ -338,4 +339,7 @@ if (isMaestroE2E) {
       console.error('Capgo notifyAppReady failed', error);
     });
   }
+  }
 }
+
+void bootstrap();

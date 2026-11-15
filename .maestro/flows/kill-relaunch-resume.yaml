@@ -3,12 +3,12 @@ appId: app.capgo.downloader
 - runFlow: ../helpers/launch-harness.yaml
 - scrollUntilVisible:
     element:
-      id: e2e-flow-kill-relaunch-resume
+      text: kill-relaunch-resume
     direction: DOWN
     timeout: 45000
     centerElement: true
 - tapOn:
-    id: e2e-flow-kill-relaunch-resume
+    text: kill-relaunch-resume
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*PHASE:kill-relaunch-resume:downloading.*'

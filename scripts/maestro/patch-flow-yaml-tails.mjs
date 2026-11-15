@@ -87,12 +87,12 @@ for (const flowId of MAESTRO_E2E_FLOWS) {
 - runFlow: ../helpers/launch-harness.yaml
 - scrollUntilVisible:
     element:
-      id: e2e-flow-${flowId}
+      text: ${flowId}
     direction: DOWN
     timeout: 45000
     centerElement: true
 - tapOn:
-    id: e2e-flow-${flowId}
+    text: ${flowId}
     retryTapIfNoChange: true${markerTail}
 `;
 

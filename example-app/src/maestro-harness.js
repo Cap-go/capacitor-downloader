@@ -80,6 +80,10 @@ async function readDownloadStatus(id) {
     if ((completionCounts.get(id) ?? 0) > 0) {
       return { state: 'DONE', progress: 1 };
     }
+    const message = String(error?.message ?? error);
+    if (/not found/i.test(message)) {
+      return { state: 'ERROR', progress: 0 };
+    }
     throw error;
   }
 }

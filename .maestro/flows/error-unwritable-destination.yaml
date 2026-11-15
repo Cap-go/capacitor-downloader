@@ -3,12 +3,12 @@ appId: app.capgo.downloader
 - runFlow: ../helpers/launch-harness.yaml
 - scrollUntilVisible:
     element:
-      id: e2e-flow-error-unwritable-destination
+      text: error-unwritable-destination
     direction: DOWN
     timeout: 45000
     centerElement: true
 - tapOn:
-    id: e2e-flow-error-unwritable-destination
+    text: error-unwritable-destination
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: error-unwritable-destination:success.*'

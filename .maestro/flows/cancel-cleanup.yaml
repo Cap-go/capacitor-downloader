@@ -3,12 +3,12 @@ appId: app.capgo.downloader
 - runFlow: ../helpers/launch-harness.yaml
 - scrollUntilVisible:
     element:
-      id: e2e-flow-cancel-cleanup
+      text: cancel-cleanup
     direction: DOWN
     timeout: 45000
     centerElement: true
 - tapOn:
-    id: e2e-flow-cancel-cleanup
+    text: cancel-cleanup
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*STATE:cancel-me:(?!DONE).*'

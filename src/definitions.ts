@@ -93,18 +93,20 @@ export interface DownloadOptions {
    */
   notification?: 'completed' | 'progress' | 'hidden';
   /**
-   * Title shown on the Android DownloadManager progress notification.
+   * Title shown on the Android DownloadManager progress notification, and on iOS on the continued processing task
+   * when `iosContinuedProcessing` is set.
    *
    * When omitted or empty, the system uses its default (typically the destination file name).
-   * Ignored on iOS, Web, and the OkHttp Android download path.
+   * Ignored on Web and the OkHttp Android download path.
    *
    * @since 8.6.0
    */
   title?: string;
   /**
-   * Description shown on the Android DownloadManager progress notification.
+   * Description shown on the Android DownloadManager progress notification, and on iOS as the subtitle of the
+   * continued processing task when `iosContinuedProcessing` is set.
    *
-   * When omitted or empty, the system uses its default. Ignored on iOS, Web, and the OkHttp Android download path.
+   * When omitted or empty, the system uses its default. Ignored on Web and the OkHttp Android download path.
    *
    * @since 8.6.0
    */
@@ -139,19 +141,26 @@ export interface DownloadOptions {
    */
   downloadCompletedNotificationText?: string;
   /**
-   * iOS 26 and later: opt in to a `BGContinuedProcessingTask` so the system can show download progress while the
-   * device is locked. Falls back to the background URL session when the task does not launch in time. If the continued
-   * processing task expires, the active transfer is cancelled with `downloadFailed` and is not resumed automatically.
-   * Ignored on Android and Web. The host app must allow
-   * `$(PRODUCT_BUNDLE_IDENTIFIER).CapacitorDownloader.continuedProcessing.*` in
-   * `BGTaskSchedulerPermittedIdentifiers` (see plugin README).
+   * iOS 26 and later: run the download in a `BGContinuedProcessingTask`, which shows `title` and `description` with the
+   * download progress while the device is locked. Requires `title`. Falls back to the background URL session when the
+   * task does not launch in time. If the task expires, the download fails with `downloadFailed` and is not resumed
+   * automatically. The host app must allow `$(PRODUCT_BUNDLE_IDENTIFIER).CapacitorDownloader.continuedProcessing.*` in
+   * `BGTaskSchedulerPermittedIdentifiers` (see plugin README). Ignored on Android and Web.
    *
+   * @since 8.9.0
+   */
+  iosContinuedProcessing?: boolean;
+  /**
+   * Title of the iOS continued processing task.
+   *
+   * @deprecated Use `title` with `iosContinuedProcessing: true`.
    * @since 8.8.0
    */
   iosContinuedProcessingTitle?: string;
   /**
-   * Subtitle for the iOS continued processing task. Ignored when `iosContinuedProcessingTitle` is omitted.
+   * Subtitle of the iOS continued processing task.
    *
+   * @deprecated Use `description` with `iosContinuedProcessing: true`.
    * @since 8.8.0
    */
   iosContinuedProcessingSubtitle?: string;
@@ -216,18 +225,19 @@ export interface DownloadBatchOptions {
    */
   notification?: 'completed' | 'progress' | 'hidden';
   /**
-   * Title shown on the Android DownloadManager progress notification.
+   * Title shown on the Android progress notification of the batch, and on iOS on the continued processing task when
+   * `iosContinuedProcessing` is set.
    *
-   * When omitted or empty, the system uses its default (typically the destination file name).
-   * Ignored on iOS and Web.
+   * When omitted or empty, the system uses its default (typically the destination file name). Ignored on Web.
    *
    * @since 8.6.0
    */
   title?: string;
   /**
-   * Description shown on the Android DownloadManager progress notification.
+   * Description shown on the Android progress notification of the batch, and on iOS as the subtitle of the continued
+   * processing task when `iosContinuedProcessing` is set.
    *
-   * When omitted or empty, the system uses its default. Ignored on iOS and Web.
+   * When omitted or empty, the system uses its default. Ignored on Web.
    *
    * @since 8.6.0
    */
@@ -262,18 +272,12 @@ export interface DownloadBatchOptions {
    */
   downloadCompletedNotificationText?: string;
   /**
-   * iOS 26 and later: run the whole batch in one `BGContinuedProcessingTask`, see
-   * {@link DownloadOptions.iosContinuedProcessingTitle}. If the task expires, the batch fails with `downloadFailed`.
+   * iOS 26 and later: run the whole batch in one `BGContinuedProcessingTask` that shows `title` and `description`, see
+   * {@link DownloadOptions.iosContinuedProcessing}. If the task expires, the batch fails with `downloadFailed`.
    *
    * @since 8.9.0
    */
-  iosContinuedProcessingTitle?: string;
-  /**
-   * Subtitle for the iOS continued processing task of the batch. Ignored when `iosContinuedProcessingTitle` is omitted.
-   *
-   * @since 8.9.0
-   */
-  iosContinuedProcessingSubtitle?: string;
+  iosContinuedProcessing?: boolean;
 }
 
 /**

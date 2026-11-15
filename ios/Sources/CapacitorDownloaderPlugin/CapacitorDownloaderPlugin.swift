@@ -340,15 +340,21 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// The continued processing task to run the download in: `title` and `description` with `iosContinuedProcessing`,
+    /// or the deprecated `iosContinuedProcessingTitle` and `iosContinuedProcessingSubtitle` of 8.8.0.
     private func parseContinuedProcessingRequest(_ call: CAPPluginCall) -> DownloadContinuedProcessingCoordinator.Request? {
-        guard let title = call.getString("iosContinuedProcessingTitle")?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !title.isEmpty else {
+        let useShared = call.getBool("iosContinuedProcessing") == true
+        let title = Self.nonEmpty(useShared ? call.getString("title") : call.getString("iosContinuedProcessingTitle"))
+        guard let title else {
             return nil
         }
-        let subtitle = call.getString("iosContinuedProcessingSubtitle")?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedSubtitle = (subtitle?.isEmpty == false) ? subtitle : nil
-        return DownloadContinuedProcessingCoordinator.Request(title: title, subtitle: normalizedSubtitle)
+        let subtitle = Self.nonEmpty(useShared ? call.getString("description") : call.getString("iosContinuedProcessingSubtitle"))
+        return DownloadContinuedProcessingCoordinator.Request(title: title, subtitle: subtitle)
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
     }
 
     private func markContinuedProcessingFinished(downloadId: String, success: Bool) {

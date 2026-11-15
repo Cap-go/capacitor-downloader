@@ -165,6 +165,14 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         return Set(tasks.keys.filter { batchCoordinator.childParts(for: $0) == nil })
     }
 
+    private func normalizedTaskId(from call: CAPPluginCall) -> String? {
+        guard let rawId = call.getString("id") else {
+            return nil
+        }
+        let id = rawId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return id.isEmpty ? nil : id
+    }
+
     private func idForTask(_ task: URLSessionDownloadTask) -> String? {
         if let id = task.taskDescription, !id.isEmpty {
             return id
@@ -347,6 +355,11 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject("Each file entry requires url and destination")
                 return
             }
+            let probeId = "\(batchId)#\(parsed.count)"
+            guard destinationURL(for: probeId, storedDestination: destination) != nil else {
+                call.reject("Invalid destination for batch file")
+                return
+            }
             parsed.append((url, destination))
         }
 
@@ -406,7 +419,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func pause(_ call: CAPPluginCall) {
-        guard let id = call.getString("id") else {
+        guard let id = normalizedTaskId(from: call) else {
             call.reject("Task not found")
             return
         }
@@ -427,7 +440,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func resume(_ call: CAPPluginCall) {
-        guard let id = call.getString("id") else {
+        guard let id = normalizedTaskId(from: call) else {
             call.reject("Task not found")
             return
         }
@@ -478,7 +491,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func stop(_ call: CAPPluginCall) {
-        guard let id = call.getString("id") else {
+        guard let id = normalizedTaskId(from: call) else {
             call.reject("Task not found")
             return
         }
@@ -510,7 +523,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
 
     @objc func checkStatus(_ call: CAPPluginCall) {
-        guard let id = call.getString("id") else {
+        guard let id = normalizedTaskId(from: call) else {
             call.reject("Task not found")
             return
         }
@@ -596,11 +609,23 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         let generation = generation(for: downloadTask)
 
         guard let destinationURL = destinationURL(for: id, storedDestination: storedDestination) else {
-            if let generation {
-                DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+            if let batchParts = batchCoordinator.activeChildParts(for: id) {
+                failBatch(
+                    batchId: batchParts.batchId,
+                    generation: batchParts.generation,
+                    fileIndex: batchParts.fileIndex,
+                    error: "Unable to resolve destination"
+                )
+            } else {
+                if let generation {
+                    DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+                }
+                notifyListeners("downloadFailed", data: ["id": id, "error": "Unable to resolve destination"])
+                markContinuedProcessingFinished(downloadId: id, success: false)
             }
-            notifyListeners("downloadFailed", data: ["id": id, "error": "Unable to resolve destination"])
-            markContinuedProcessingFinished(downloadId: id, success: false)
+            removeTask(for: id, completing: downloadTask)
+            batchCoordinator.unregisterChildTask(id)
+            clearTaskGeneration(for: downloadTask)
             return
         }
 
@@ -709,6 +734,13 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard let downloadTask = task as? URLSessionDownloadTask,
               let id = idForTask(downloadTask) else {
+            return
+        }
+
+        tasksLock.lock()
+        let stillCurrent = tasks[id] === downloadTask
+        tasksLock.unlock()
+        guard stillCurrent else {
             return
         }
 

@@ -135,6 +135,13 @@ final class DownloadBackgroundSessionManager: NSObject {
         completionHandlers[identifier] = handler
         handlerLock.unlock()
         if shouldRun {
+            runBackgroundCompletionHandlerAfterFlushingPending(handler)
+        }
+    }
+
+    private func runBackgroundCompletionHandlerAfterFlushingPending(_ handler: @escaping () -> Void) {
+        delegateQueue.addOperation {
+            self.flushPendingEvents()
             DispatchQueue.main.async(execute: handler)
         }
     }
@@ -181,6 +188,16 @@ extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
             return
         }
         guard let staged = stageDownloadIfNeeded(session: session, downloadTask: downloadTask, location: location) else {
+            let copyError = NSError(
+                domain: "CapacitorDownloader",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "Failed to stage background download"]
+            )
+            sessionLock.lock()
+            pendingCompletions.append(
+                PendingCompletion(session: session, task: downloadTask, error: copyError)
+            )
+            sessionLock.unlock()
             return
         }
         sessionLock.lock()
@@ -228,7 +245,7 @@ extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
         }
         handlerLock.unlock()
         if let handler {
-            DispatchQueue.main.async(execute: handler)
+            runBackgroundCompletionHandlerAfterFlushingPending(handler)
         }
     }
 }

@@ -46,6 +46,7 @@ final class OkHttpDownloadProgressNotifier {
         synchronized (serviceLock) {
             entries.put(downloadId, new ProgressEntry(title, description, notificationMode, SystemClock.elapsedRealtime()));
             activeDownloads.incrementAndGet();
+            OkHttpDownloadForegroundService.notifyActiveDownloads(context, activeDownloads.get());
             OkHttpDownloadForegroundService.requestStart(context);
         }
         postProgress(downloadId, 0f, true);
@@ -93,6 +94,9 @@ final class OkHttpDownloadProgressNotifier {
 
     void shutdown() {
         synchronized (serviceLock) {
+            for (String downloadId : entries.keySet()) {
+                cancelNotification(downloadId);
+            }
             entries.clear();
             activeDownloads.set(0);
             lastForegroundNotification = null;
@@ -182,11 +186,7 @@ final class OkHttpDownloadProgressNotifier {
     }
 
     private void cancelNotification(String downloadId) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            notificationManager.cancel(notificationTagFor(downloadId), NOTIFICATION_ID);
-        } else {
-            notificationManager.cancel(NOTIFICATION_ID);
-        }
+        notificationManager.cancel(notificationTagFor(downloadId), NOTIFICATION_ID);
     }
 
     private String resolveTitle(ProgressEntry entry) {

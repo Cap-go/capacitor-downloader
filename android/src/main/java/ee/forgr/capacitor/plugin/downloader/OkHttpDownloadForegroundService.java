@@ -1,5 +1,6 @@
 package ee.forgr.capacitor.plugin.downloader;
 
+import android.app.ForegroundServiceStartNotAllowedException;
 import android.app.Notification;
 import android.app.Service;
 import android.content.Context;
@@ -19,9 +20,21 @@ public class OkHttpDownloadForegroundService extends Service {
     private static boolean foregroundEstablished;
     private static boolean stopWhenForegroundReady;
     private static int lastKnownActiveDownloads;
+    static volatile boolean throwOnStartForTests = false;
+    static volatile boolean throwStartNotAllowedForTests = false;
+
+    public static void setThrowStartNotAllowedForTests(boolean value) {
+        throwStartNotAllowedForTests = value;
+    }
 
     public static boolean requestStart(Context context) {
+        if (throwOnStartForTests) {
+            return false;
+        }
         try {
+            if (throwStartNotAllowedForTests) {
+                throw new ForegroundServiceStartNotAllowedException("test: background FGS start not allowed");
+            }
             Intent intent = new Intent(context, OkHttpDownloadForegroundService.class);
             androidx.core.content.ContextCompat.startForegroundService(context, intent);
             return true;
@@ -50,6 +63,8 @@ public class OkHttpDownloadForegroundService extends Service {
             foregroundEstablished = false;
             stopWhenForegroundReady = false;
             lastKnownActiveDownloads = 0;
+            throwOnStartForTests = false;
+            throwStartNotAllowedForTests = false;
         }
     }
 

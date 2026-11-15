@@ -203,7 +203,7 @@ final class DownloadBatchProgressTests: XCTestCase {
             destination: whitespace,
             id: "cleanup",
             documentsDirectory: documents
-        ).path
+        )?.path
         XCTAssertNotEqual(mistakenCleanupTarget, resolvedPath)
 
         coordinator.removeBatch(batchId: "bundle")

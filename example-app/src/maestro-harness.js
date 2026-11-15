@@ -119,6 +119,7 @@ function trackCompletions() {
   plugin.addListener('downloadCompleted', (payload) => {
     const next = (completionCounts.get(payload.id) ?? 0) + 1;
     completionCounts.set(payload.id, next);
+    markCompletedInStorage(payload.id);
     setSummary(`EVENT:downloadCompleted:id=${payload.id}:count=${next}`);
   });
   plugin.addListener('downloadFailed', (payload) => {
@@ -134,6 +135,14 @@ function trackCompletions() {
 function persistPending(flowId, payload) {
   localStorage.setItem(`${storagePrefix}pending_flow`, flowId);
   localStorage.setItem(`${storagePrefix}pending_payload`, JSON.stringify(payload));
+}
+
+function markCompletedInStorage(id) {
+  localStorage.setItem(`${storagePrefix}completed_${id}`, '1');
+}
+
+function hasCompletedInStorage(id) {
+  return localStorage.getItem(`${storagePrefix}completed_${id}`) === '1';
 }
 
 function readPending() {
@@ -173,7 +182,12 @@ const flows = {
       androidHttpEngine: 'downloadManager',
       notification: 'hidden',
     });
-    persistPending('background-complete', { id });
+    persistPending('background-complete', {
+      id,
+      url: fileUrl('/slow/98304'),
+      destination: 'downloads/maestro-bg.bin',
+      androidHttpEngine: 'downloadManager',
+    });
     setSummary(`PHASE:background-complete:downloading:id=${id}`);
   },
 
@@ -186,7 +200,12 @@ const flows = {
       androidHttpEngine: 'downloadManager',
       notification: 'hidden',
     });
-    persistPending('kill-relaunch-resume', { id });
+    persistPending('kill-relaunch-resume', {
+      id,
+      url: fileUrl('/slow/131072'),
+      destination: 'downloads/maestro-kill.bin',
+      androidHttpEngine: 'downloadManager',
+    });
     setSummary(`PHASE:kill-relaunch-resume:downloading:id=${id}`);
   },
 
@@ -199,21 +218,36 @@ const flows = {
       androidHttpEngine: 'downloadManager',
       notification: 'hidden',
     });
-    persistPending('low-memory-kill', { id });
+    persistPending('low-memory-kill', {
+      id,
+      url: fileUrl('/slow/131072'),
+      destination: 'downloads/maestro-lowmem.bin',
+      androidHttpEngine: 'downloadManager',
+    });
     setSummary(`PHASE:low-memory-kill:downloading:id=${id}`);
   },
 
   async 'network-drop-resume'() {
     const id = 'net-drop';
     const attemptKey = `attempt-${Date.now()}`;
-    await plugin.download({
+    const url = fileUrl(`/recoverable/131072?attemptKey=${encodeURIComponent(attemptKey)}`);
+    const options = {
       id,
-      url: fileUrl(`/recoverable/131072?attemptKey=${encodeURIComponent(attemptKey)}`),
+      url,
       destination: 'cache/maestro-net.bin',
       androidHttpEngine: 'auto',
       notification: 'hidden',
-    });
-    await waitForDone(id, 180_000);
+    };
+    await plugin.download(options);
+    let status = await waitForTerminal(id, 120_000);
+    if (status.state === 'ERROR') {
+      completionCounts.delete(id);
+      localStorage.removeItem(`${storagePrefix}completed_${id}`);
+      await plugin.download(options);
+      status = await waitForDone(id, 120_000);
+    } else if (status.state !== 'DONE') {
+      status = await waitForDone(id, 120_000);
+    }
     setMarker('network-drop-resume', true);
   },
 
@@ -358,6 +392,50 @@ const flows = {
   },
 };
 
+async function resumePendingDownload(flowId, payload) {
+  const { id } = payload;
+  if (hasCompletedInStorage(id) || (completionCounts.get(id) ?? 0) > 0) {
+    return;
+  }
+  try {
+    const status = await waitForDone(id, 90_000);
+    if (status.state !== 'DONE') {
+      throw new Error(`Pending flow ${flowId} failed with ${status.state}`);
+    }
+    return;
+  } catch (error) {
+    if (hasCompletedInStorage(id) || (completionCounts.get(id) ?? 0) > 0) {
+      return;
+    }
+    if (!payload.url || !payload.destination) {
+      throw error;
+    }
+    try {
+      await plugin.download({
+        id,
+        url: payload.url,
+        destination: payload.destination,
+        androidHttpEngine: payload.androidHttpEngine ?? 'auto',
+        notification: 'hidden',
+      });
+    } catch (downloadError) {
+      const message = String(downloadError?.message ?? downloadError);
+      if (!/already exists/i.test(message)) {
+        throw downloadError;
+      }
+      const status = await waitForDone(id, 180_000);
+      if (status.state !== 'DONE') {
+        throw new Error(`Pending flow ${flowId} failed with ${status.state}`);
+      }
+      return;
+    }
+    const status = await waitForDone(id, 180_000);
+    if (status.state !== 'DONE') {
+      throw new Error(`Pending flow ${flowId} failed with ${status.state}`);
+    }
+  }
+}
+
 async function resumePendingFlowIfNeeded() {
   const pending = readPending();
   if (!pending) {
@@ -367,10 +445,7 @@ async function resumePendingFlowIfNeeded() {
   if (!payload?.id) {
     return;
   }
-  const status = await waitForDone(payload.id, 240_000);
-  if (status.state !== 'DONE') {
-    throw new Error(`Pending flow ${flowId} failed with ${status.state}`);
-  }
+  await resumePendingDownload(flowId, payload);
   clearPending();
   setMarker(flowId, true, 'resumed');
 }

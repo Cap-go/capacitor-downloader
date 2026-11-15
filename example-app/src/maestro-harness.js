@@ -357,11 +357,12 @@ function installFlowButtons() {
 
 export async function initMaestroHarness() {
   if (import.meta.env.VITE_CAPGO_MAESTRO_BUILD !== 'true' && window.__capgoMaestroIsE2E !== true) {
+    document.getElementById('maestro-panel')?.classList.add('hidden');
     return;
   }
 
   document.getElementById('manual-panel')?.classList.add('hidden');
-  document.getElementById('maestro-panel')?.classList.remove('hidden');
+  await SplashScreen.hide().catch(() => undefined);
 
   trackCompletions();
   installFlowButtons();

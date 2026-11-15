@@ -4,6 +4,9 @@ appId: app.capgo.downloader
 - launchApp:
     clearState: true
 - extendedWaitUntil:
+    visible: '@capgo/capacitor-downloader'
+    timeout: 120000
+- extendedWaitUntil:
     visible: '.*Harness: ready.*'
     timeout: 120000
 - assertVisible: '.*Harness: ready.*'

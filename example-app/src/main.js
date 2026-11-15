@@ -5,6 +5,10 @@ import './style.css';
 import { CapacitorDownloader } from '@capgo/capacitor-downloader';
 import { initMaestroHarness } from './maestro-harness.js';
 
+const maestroHarnessReady = initMaestroHarness().catch((error) => {
+  console.error('Maestro harness failed', error);
+});
+
 const plugin = CapacitorDownloader;
 const state = {};
 state.lastDownloadId = undefined;

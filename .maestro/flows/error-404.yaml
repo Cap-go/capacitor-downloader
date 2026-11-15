@@ -3,12 +3,12 @@ appId: app.capgo.downloader
 - runFlow: ../helpers/launch-harness.yaml
 - scrollUntilVisible:
     element:
-      id: e2e-flow-error-404
+      text: error-404
     direction: DOWN
     timeout: 60000
     centerElement: true
 - tapOn:
-    id: e2e-flow-error-404
+    text: error-404
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: error-404:success.*'

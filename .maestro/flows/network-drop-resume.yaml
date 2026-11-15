@@ -3,12 +3,12 @@ appId: app.capgo.downloader
 - runFlow: ../helpers/launch-harness.yaml
 - scrollUntilVisible:
     element:
-      id: e2e-flow-network-drop-resume
+      text: network-drop-resume
     direction: DOWN
     timeout: 60000
     centerElement: true
 - tapOn:
-    id: e2e-flow-network-drop-resume
+    text: network-drop-resume
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: network-drop-resume:success.*'

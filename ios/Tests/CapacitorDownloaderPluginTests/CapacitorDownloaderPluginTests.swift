@@ -34,45 +34,59 @@ final class DownloadDestinationResolverTests: XCTestCase {
         XCTAssertEqual(url, documentsDirectory.appendingPathComponent("downloads/sample.zip"))
     }
 
-    func testFilesPrefixUsesApplicationSupport() {
+    func testFilesPrefixUsesDocumentsSubfolder() {
         let url = DownloadDestinationResolver.resolveDestinationURL(
             destination: "files/offline/map.zip",
             id: "download-1",
             documentsDirectory: documentsDirectory
         )
-        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            XCTFail("Missing application support directory")
-            return
-        }
-        XCTAssertEqual(url, support.appendingPathComponent("offline/map.zip"))
+        XCTAssertEqual(url, documentsDirectory.appendingPathComponent("files/offline/map.zip"))
     }
 
-    func testCachePrefixUsesCachesDirectory() {
+    func testCachePrefixUsesDocumentsCacheSubfolder() {
         let url = DownloadDestinationResolver.resolveDestinationURL(
             destination: "cache/temp.bin",
             id: "download-1",
             documentsDirectory: documentsDirectory
         )
-        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
-            XCTFail("Missing caches directory")
-            return
-        }
-        XCTAssertEqual(url, caches.appendingPathComponent("temp.bin"))
+        XCTAssertEqual(url, documentsDirectory.appendingPathComponent("cache/temp.bin"))
     }
 
-    func testFilesPrefixWithEmptyIdDoesNotResolveToStorageRoot() {
+    func testFilesPrefixWithEmptyRelativeReturnsNil() {
         let documents = URL(fileURLWithPath: "/var/mobile/Documents")
         let url = DownloadDestinationResolver.resolveDestinationURL(
             destination: "files/",
             id: "",
             documentsDirectory: documents
         )
-        XCTAssertEqual(url, documents.appendingPathComponent("files/"))
-        guard let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            XCTFail("Missing application support directory")
-            return
-        }
-        XCTAssertNotEqual(url.deletingLastPathComponent().path, support.path)
+        XCTAssertNil(url)
+    }
+
+    func testTraversalInFilesPrefixIsRejected() {
+        let url = DownloadDestinationResolver.resolveDestinationURL(
+            destination: "files/../secret.txt",
+            id: "download-1",
+            documentsDirectory: documentsDirectory
+        )
+        XCTAssertNil(url)
+    }
+
+    func testTraversalInCachePrefixIsRejected() {
+        let url = DownloadDestinationResolver.resolveDestinationURL(
+            destination: "cache/../../tmp/evil.bin",
+            id: "download-1",
+            documentsDirectory: documentsDirectory
+        )
+        XCTAssertNil(url)
+    }
+
+    func testTraversalInPrivatePrefixIsRejected() {
+        let url = DownloadDestinationResolver.resolveDestinationURL(
+            destination: "private/../../tmp/evil.bin",
+            id: "download-1",
+            documentsDirectory: documentsDirectory
+        )
+        XCTAssertNil(url)
     }
 
     func testPrivatePrefixUsesPluginSupportFolder() {
@@ -165,11 +179,15 @@ final class DownloadBatchProgressTests: XCTestCase {
         let documents = URL(fileURLWithPath: "/var/mobile/Documents")
         let childId = "bundle#0"
         let whitespace = "   "
-        let resolvedPath = DownloadDestinationResolver.resolveDestinationURL(
+        guard let resolved = DownloadDestinationResolver.resolveDestinationURL(
             destination: whitespace,
             id: childId,
             documentsDirectory: documents
-        ).path
+        ) else {
+            XCTFail("expected resolved destination")
+            return
+        }
+        let resolvedPath = resolved.path
 
         let store = DownloadBatchStore(defaults: batchDefaults)
         let coordinator = DownloadBatchCoordinator(store: store)
@@ -185,7 +203,7 @@ final class DownloadBatchProgressTests: XCTestCase {
             destination: whitespace,
             id: "cleanup",
             documentsDirectory: documents
-        ).path
+        )?.path
         XCTAssertNotEqual(mistakenCleanupTarget, resolvedPath)
 
         coordinator.removeBatch(batchId: "bundle")
@@ -196,13 +214,18 @@ final class DownloadBatchProgressTests: XCTestCase {
         let plugin = CapacitorDownloaderPlugin()
         XCTAssertFalse(plugin.hasRegisteredTask(id: "restored-single"))
 
-        let downloadTask = plugin.mainBackgroundSessionForTests.downloadTask(with: URL(string: "https://example.com/file.bin")!)
-        downloadTask.taskDescription = "restored-single"
-        downloadTask.resume()
-
         plugin.load()
         XCTAssertTrue(plugin.restoredBackgroundSessionIdentifiers.contains(DownloadSessionIdentifiers.main))
         XCTAssertTrue(plugin.restoredBackgroundSessionIdentifiers.contains(DownloadSessionIdentifiers.wifiOnly))
+
+        // Simulators cannot create background URLSession download tasks reliably; exercise rehydration directly.
+        let session = DownloadBackgroundSessionManager.shared.session(
+            allowsCellularAccess: true,
+            preferForegroundCapable: true
+        )
+        let downloadTask = session.downloadTask(with: URL(string: "https://example.com/file.bin")!)
+        downloadTask.taskDescription = "restored-single"
+        plugin.rehydrateBackgroundDownloadTasks([downloadTask])
         XCTAssertTrue(plugin.hasRegisteredTask(id: "restored-single"))
     }
 
@@ -416,6 +439,35 @@ final class DownloadBackgroundSessionManagerTests: XCTestCase {
         manager.storeBackgroundEventsCompletionHandler({ expectation.fulfill() }, for: DownloadSessionIdentifiers.main)
         manager.urlSessionDidFinishEvents(forBackgroundURLSession: manager.mainSession)
         wait(for: [expectation], timeout: 2)
+    }
+
+    func testBackgroundEventsCompletionHandlerRunsWhenStoredAfterFinishEvents() {
+        let manager = DownloadBackgroundSessionManager.shared
+        manager.warmUp()
+        let expectation = expectation(description: "late stored handler")
+        manager.urlSessionDidFinishEvents(forBackgroundURLSession: manager.mainSession)
+        manager.storeBackgroundEventsCompletionHandler({ expectation.fulfill() }, for: DownloadSessionIdentifiers.main)
+        wait(for: [expectation], timeout: 2)
+    }
+
+    func testCompletionTextRequiresMatchingGenerationAfterRestore() {
+        let idDefaults = UserDefaults(suiteName: "CapacitorDownloaderRelaunchGenerationTests")!
+        idDefaults.removePersistentDomain(forName: "CapacitorDownloaderRelaunchGenerationTests")
+        let textDefaults = UserDefaults(suiteName: "CapacitorDownloaderRelaunchTextTests")!
+        textDefaults.removePersistentDomain(forName: "CapacitorDownloaderRelaunchTextTests")
+
+        let idStore = DownloadIdGenerationStore(defaults: idDefaults)
+        idStore.setGeneration(4, forDownloadId: "episode")
+        let textStore = DownloadCompletedNotificationStore(defaults: textDefaults)
+        textStore.setText("Done", for: "episode", generation: 4)
+
+        let restoredGenerations = DownloadIdGenerationStore(defaults: idDefaults).allGenerations()
+        XCTAssertEqual(restoredGenerations["episode"], 4)
+        XCTAssertNil(textStore.takeText(for: "episode", generation: 3))
+        XCTAssertEqual(textStore.takeText(for: "episode", generation: 4), "Done")
+
+        idDefaults.removePersistentDomain(forName: "CapacitorDownloaderRelaunchGenerationTests")
+        textDefaults.removePersistentDomain(forName: "CapacitorDownloaderRelaunchTextTests")
     }
 
     func testSessionSelectionRespectsCellularPreference() {

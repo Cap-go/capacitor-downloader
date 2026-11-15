@@ -66,6 +66,7 @@ public class OkHttpDownloadForegroundService extends Service {
             lastKnownActiveDownloads = 0;
             throwOnStartForTests = false;
             throwStartNotAllowedForTests = false;
+            foregroundPromotionCountForTests = 0;
         }
     }
 

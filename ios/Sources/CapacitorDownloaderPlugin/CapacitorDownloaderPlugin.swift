@@ -31,7 +31,16 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private var pendingDownloadStarts = Set<String>()
     private let foregroundSessionLock = NSLock()
     internal private(set) var restoredBackgroundSessionIdentifiers: [String] = []
+    internal private(set) var didRestoreGenerationsBeforeDelegateRegistration = false
     static let batchMaxFiles = 32
+
+    private func registerDownloadDelegateIfGenerationsRestored() {
+        tasksLock.lock()
+        let generationsRestored = !downloadGenerations.isEmpty
+        tasksLock.unlock()
+        DownloadBackgroundSessionManager.shared.register(downloadDelegate: self)
+        didRestoreGenerationsBeforeDelegateRegistration = generationsRestored
+    }
 
     private func downloadSession(allowsCellularAccess: Bool, preferForegroundCapable: Bool) -> URLSession {
         DownloadBackgroundSessionManager.shared.session(
@@ -58,7 +67,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 return
             }
             self.rehydrateBackgroundDownloadTasks(tasks)
-            DownloadBackgroundSessionManager.shared.register(downloadDelegate: self)
+            self.registerDownloadDelegateIfGenerationsRestored()
         }
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
             let semaphore = DispatchSemaphore(value: 0)

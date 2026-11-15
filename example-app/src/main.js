@@ -5,7 +5,7 @@ import './style.css';
 import { CapacitorDownloader } from '@capgo/capacitor-downloader';
 import { initMaestroHarness } from './maestro-harness.js';
 
-const maestroHarnessReady = initMaestroHarness().catch((error) => {
+void initMaestroHarness().catch((error) => {
   console.error('Maestro harness failed', error);
 });
 
@@ -303,9 +303,6 @@ runButton.addEventListener('click', async () => {
 });
 
 populateActions();
-initMaestroHarness().catch((error) => {
-  console.error('Maestro harness failed', error);
-});
 
 if (Capacitor.isNativePlatform()) {
   CapacitorUpdater.notifyAppReady().catch((error) => {

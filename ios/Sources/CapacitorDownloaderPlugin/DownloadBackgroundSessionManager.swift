@@ -104,7 +104,6 @@ final class DownloadBackgroundSessionManager: NSObject {
 
         let foregroundConfig = URLSessionConfiguration.default
         foregroundConfig.allowsCellularAccess = true
-        foregroundConfig.identifier = DownloadSessionIdentifiers.foregroundCapable
         foregroundCapableSession = URLSession(configuration: foregroundConfig, delegate: self, delegateQueue: delegateQueue)
     }
 

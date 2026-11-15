@@ -7,8 +7,8 @@ enum DownloadTaskGenerationKey {
         "\(sessionIdentifier)\(separator)\(taskIdentifier)"
     }
 
-    static func storageKey(for task: URLSessionTask) -> String {
-        let sessionIdentifier = task.session.configuration.identifier ?? DownloadSessionIdentifiers.foregroundCapable
+    static func storageKey(session: URLSession, task: URLSessionTask) -> String {
+        let sessionIdentifier = session.configuration.identifier ?? DownloadSessionIdentifiers.foregroundCapable
         return storageKey(sessionIdentifier: sessionIdentifier, taskIdentifier: task.taskIdentifier)
     }
 
@@ -39,8 +39,8 @@ final class DownloadTaskGenerationStore {
         defaults.set(map, forKey: Self.userDefaultsKey)
     }
 
-    func setGeneration(_ generation: UInt64, forTask task: URLSessionTask) {
-        let sessionIdentifier = task.session.configuration.identifier ?? DownloadSessionIdentifiers.foregroundCapable
+    func setGeneration(_ generation: UInt64, forTask task: URLSessionTask, in session: URLSession) {
+        let sessionIdentifier = session.configuration.identifier ?? DownloadSessionIdentifiers.foregroundCapable
         setGeneration(generation, forSessionIdentifier: sessionIdentifier, taskIdentifier: task.taskIdentifier)
     }
 
@@ -54,8 +54,8 @@ final class DownloadTaskGenerationStore {
         defaults.set(map, forKey: Self.userDefaultsKey)
     }
 
-    func removeGeneration(forTask task: URLSessionTask) {
-        let sessionIdentifier = task.session.configuration.identifier ?? DownloadSessionIdentifiers.foregroundCapable
+    func removeGeneration(forTask task: URLSessionTask, in session: URLSession) {
+        let sessionIdentifier = session.configuration.identifier ?? DownloadSessionIdentifiers.foregroundCapable
         removeGeneration(forSessionIdentifier: sessionIdentifier, taskIdentifier: task.taskIdentifier)
     }
 

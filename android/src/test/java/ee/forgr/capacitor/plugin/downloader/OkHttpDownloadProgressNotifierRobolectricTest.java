@@ -67,6 +67,7 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
         int startId = service.onStartCommand(new Intent(), 0, 1);
         assertEquals(android.app.Service.START_NOT_STICKY, startId);
         assertEquals(0, OkHttpDownloadForegroundService.peekLastKnownActiveDownloadsForTests());
+        assertEquals(1, OkHttpDownloadForegroundService.peekForegroundPromotionCountForTests());
         service.onDestroy();
     }
 

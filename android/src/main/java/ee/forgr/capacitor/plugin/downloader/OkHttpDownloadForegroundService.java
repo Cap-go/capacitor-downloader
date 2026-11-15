@@ -21,6 +21,7 @@ public class OkHttpDownloadForegroundService extends Service {
     private static boolean foregroundEstablished;
     private static boolean stopWhenForegroundReady;
     private static int lastKnownActiveDownloads;
+    private static int foregroundPromotionCountForTests;
     static volatile boolean throwOnStartForTests = false;
     static volatile boolean throwStartNotAllowedForTests = false;
 
@@ -66,6 +67,7 @@ public class OkHttpDownloadForegroundService extends Service {
             lastKnownActiveDownloads = 0;
             throwOnStartForTests = false;
             throwStartNotAllowedForTests = false;
+            foregroundPromotionCountForTests = 0;
         }
     }
 
@@ -79,6 +81,11 @@ public class OkHttpDownloadForegroundService extends Service {
         synchronized (stateLock) {
             return lastKnownActiveDownloads;
         }
+    }
+
+    @VisibleForTesting
+    static int peekForegroundPromotionCountForTests() {
+        return foregroundPromotionCountForTests;
     }
 
     @Override
@@ -95,6 +102,7 @@ public class OkHttpDownloadForegroundService extends Service {
         ServiceCompat.startForeground(this, SERVICE_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
         synchronized (stateLock) {
             foregroundEstablished = true;
+            foregroundPromotionCountForTests += 1;
         }
         return START_NOT_STICKY;
     }

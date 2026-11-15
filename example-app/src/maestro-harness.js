@@ -1,6 +1,5 @@
 import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { SplashScreen } from '@capacitor/splash-screen';
 import { CapacitorDownloader } from '@capgo/capacitor-downloader';
 
 const plugin = CapacitorDownloader;
@@ -359,13 +358,6 @@ function installFlowButtons() {
 
 export async function initMaestroHarness() {
   harnessReady.textContent = 'Harness: booting';
-
-  const useHarnessOnly =
-    import.meta.env.VITE_CAPGO_MAESTRO_BUILD === 'true' || window.__capgoMaestroIsE2E === true;
-  if (useHarnessOnly) {
-    document.getElementById('manual-panel')?.classList.add('hidden');
-  }
-  void SplashScreen.hide().catch(() => undefined);
 
   installFlowButtons();
   harnessReady.textContent = 'Harness: ready';

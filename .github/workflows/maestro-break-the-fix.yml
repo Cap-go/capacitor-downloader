@@ -3,10 +3,23 @@ name: Maestro break-the-fix validation
 on:
   workflow_dispatch:
     inputs:
-      pr_number:
-        description: 'Optional PR number for traceability (comments are manual)'
-        required: false
-        type: string
+      scenario:
+        description: 'Regression scenario (or all matrix jobs)'
+        required: true
+        type: choice
+        options:
+          - all
+          - completion-once
+          - cancel-cleanup
+          - error-404
+      mode:
+        description: 'broken = expect Maestro FAIL, fixed = expect PASS'
+        required: true
+        type: choice
+        options:
+          - broken
+          - fixed
+          - both
 
 concurrency:
   group: maestro-break-the-fix-${{ github.ref }}
@@ -19,6 +32,9 @@ env:
 jobs:
   break_fix_android:
     name: break-fix android / ${{ matrix.regression }} / ${{ matrix.mode }}
+    if: >-
+      (inputs.scenario == 'all' || inputs.scenario == matrix.flow) &&
+      (inputs.mode == 'both' || inputs.mode == matrix.mode)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -68,6 +84,7 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -no-metrics
           script: >-
+            echo "BREAK_THE_FIX regression=${{ matrix.regression }} mode=${{ matrix.mode }} flow=${{ matrix.flow }}";
             bash ./scripts/maestro/run-break-fix-scenario.sh
             ${{ matrix.regression }}
             ${{ matrix.flow }}
@@ -75,9 +92,15 @@ jobs:
             ${{ matrix.mode }}
       - name: Verify expected outcome
         run: |
+          echo "BREAK_THE_FIX_RESULT regression=${{ matrix.regression }} mode=${{ matrix.mode }} maestro_exit=${{ steps.run.outcome }}"
           if [[ "${{ steps.run.outcome }}" != "${{ matrix.expect_outcome }}" ]]; then
             echo "Expected ${{ matrix.expect_outcome }} but got ${{ steps.run.outcome }}"
             exit 1
+          fi
+          if [[ "${{ matrix.mode }}" == "broken" ]]; then
+            echo "PASS: Maestro FAILED as expected with regression applied"
+          else
+            echo "PASS: Maestro PASSED with regression reverted"
           fi
       - name: Upload Maestro output
         if: always()
@@ -90,16 +113,20 @@ jobs:
 
   break_fix_ios:
     name: break-fix ios / ${{ matrix.regression }} / ${{ matrix.mode }}
+    if: >-
+      (inputs.scenario == 'all' || inputs.scenario == matrix.flow) &&
+      (inputs.mode == 'both' || inputs.mode == matrix.mode) &&
+      (matrix.platform == 'ios')
     runs-on: macOS-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { regression: completion-dedupe, flow: completion-once, mode: broken, expect_outcome: failure }
-          - { regression: completion-dedupe, flow: completion-once, mode: fixed, expect_outcome: success }
-          - { regression: error-404-map, flow: error-404, mode: broken, expect_outcome: failure }
-          - { regression: error-404-map, flow: error-404, mode: fixed, expect_outcome: success }
+          - { regression: completion-dedupe, flow: completion-once, platform: ios, mode: broken, expect_outcome: failure }
+          - { regression: completion-dedupe, flow: completion-once, platform: ios, mode: fixed, expect_outcome: success }
+          - { regression: error-404-map, flow: error-404, platform: ios, mode: broken, expect_outcome: failure }
+          - { regression: error-404-map, flow: error-404, platform: ios, mode: fixed, expect_outcome: success }
     steps:
       - uses: actions/checkout@v7
         with:
@@ -127,12 +154,20 @@ jobs:
         continue-on-error: true
         env:
           CAPGO_MAESTRO_IOS_SIMULATOR_ID: ${{ env.CAPGO_MAESTRO_IOS_SIMULATOR_ID }}
-        run: bash ./scripts/maestro/run-break-fix-scenario.sh ${{ matrix.regression }} ${{ matrix.flow }} ios ${{ matrix.mode }}
+        run: |
+          echo "BREAK_THE_FIX regression=${{ matrix.regression }} mode=${{ matrix.mode }} flow=${{ matrix.flow }}"
+          bash ./scripts/maestro/run-break-fix-scenario.sh ${{ matrix.regression }} ${{ matrix.flow }} ios ${{ matrix.mode }}
       - name: Verify expected outcome
         run: |
+          echo "BREAK_THE_FIX_RESULT regression=${{ matrix.regression }} mode=${{ matrix.mode }} maestro_exit=${{ steps.run.outcome }}"
           if [[ "${{ steps.run.outcome }}" != "${{ matrix.expect_outcome }}" ]]; then
             echo "Expected ${{ matrix.expect_outcome }} but got ${{ steps.run.outcome }}"
             exit 1
+          fi
+          if [[ "${{ matrix.mode }}" == "broken" ]]; then
+            echo "PASS: Maestro FAILED as expected with regression applied"
+          else
+            echo "PASS: Maestro PASSED with regression reverted"
           fi
       - name: Upload Maestro output
         if: always()

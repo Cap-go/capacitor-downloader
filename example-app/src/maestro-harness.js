@@ -365,12 +365,12 @@ export async function initMaestroHarness() {
   if (useHarnessOnly) {
     document.getElementById('manual-panel')?.classList.add('hidden');
   }
-  await SplashScreen.hide().catch(() => undefined);
+  void SplashScreen.hide().catch(() => undefined);
 
-  trackCompletions();
   installFlowButtons();
   harnessReady.textContent = 'Harness: ready';
   setSummary('Harness: ready');
+  trackCompletions();
 
   await resumePendingFlowIfNeeded();
 

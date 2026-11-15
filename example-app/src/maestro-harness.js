@@ -231,7 +231,7 @@ const flows = {
       await plugin.download({
         id,
         url: fileUrl('/bytes/1024'),
-        destination: '/dev/null/maestro-blocked.bin',
+        destination: '   ',
         androidHttpEngine: 'auto',
         notification: 'hidden',
       });

@@ -45,6 +45,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private final AtomicLong pendingDownloadSequence = new AtomicLong(0);
     private ExecutorService downloadManagerExecutor;
     private OkHttpDownloadExecutor okHttpDownloadExecutor;
+    private OkHttpDownloadProgressNotifier okHttpProgressNotifier;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private BroadcastReceiver downloadReceiver;
     private DownloadCompletedNotificationStore completedNotificationStore;
@@ -54,6 +55,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         downloadManager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
         downloadManagerExecutor = Executors.newCachedThreadPool();
         okHttpDownloadExecutor = new OkHttpDownloadExecutor(getContext());
+        okHttpProgressNotifier = new OkHttpDownloadProgressNotifier(getContext());
         completedNotificationStore = new DownloadCompletedNotificationStore(getContext());
         registerDownloadReceiver();
     }
@@ -238,6 +240,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 call.getObject("headers"),
                 call.getString("network"),
                 call.getString("notification"),
+                call.getString("title"),
+                call.getString("description"),
                 completionNotificationText
             );
             return;
@@ -761,6 +765,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
         JSObject headers,
         String network,
         String notification,
+        String title,
+        String description,
         String completionNotificationText
     ) {
         if (notification == null) {
@@ -818,6 +824,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 result.put("status", DownloadManager.STATUS_PENDING);
                 call.resolve(result);
 
+                okHttpProgressNotifier.started(id, title, description, notificationMode);
+
                 try {
                     okHttpDownloadExecutor.start(
                         okHttpReservation,
@@ -830,6 +838,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                 if (!isCurrentOkHttpDownload(downloadId) || !isCurrentOkHttpGeneration(downloadId, storedGeneration)) {
                                     return;
                                 }
+                                okHttpProgressNotifier.update(downloadId, progress);
                                 JSObject progressData = new JSObject();
                                 progressData.put("id", downloadId);
                                 progressData.put("progress", progress);
@@ -841,18 +850,23 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                     return;
                                 }
                                 if (cancelled) {
+                                    okHttpProgressNotifier.abandonDownload(downloadId);
                                     return;
                                 }
                                 if (success) {
+                                    okHttpProgressNotifier.finished(downloadId, true);
                                     JSObject completedData = new JSObject();
                                     completedData.put("id", downloadId);
                                     notifyListeners("downloadCompleted", completedData);
-                                    DownloadCompletionNotifier.notifyIfRequested(getContext(), downloadId, notificationMode, true);
+                                    if (!OkHttpDownloadProgressNotifier.shouldShowProgressForMode(notificationMode)) {
+                                        DownloadCompletionNotifier.notifyIfRequested(getContext(), downloadId, notificationMode, true);
+                                    }
                                     String completionText = completedNotificationStore.takeText(downloadId, storedGeneration);
                                     if (completionText != null) {
                                         DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), downloadId, completionText);
                                     }
                                 } else {
+                                    okHttpProgressNotifier.finished(downloadId, false);
                                     okHttpDestinationFiles.remove(downloadId, destinationFile);
                                     completedNotificationStore.remove(downloadId, storedGeneration);
                                     JSObject failedData = new JSObject();
@@ -864,6 +878,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     );
                 } catch (RuntimeException e) {
                     okHttpDownloadExecutor.abandonTransfer(okHttpReservation);
+                    okHttpProgressNotifier.abandonDownload(id);
                     applyOkHttpStartFailureIfCurrent(id, storedGeneration, destinationFile, e.getMessage());
                 }
             },
@@ -1076,6 +1091,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (isOkHttpDownload(downloadId)) {
             File destinationFile = okHttpDestinationFiles.remove(id);
             boolean cancelled = okHttpDownloadExecutor.cancel(id, destinationFile);
+            okHttpProgressNotifier.finished(id, false);
             okHttpDownloadExecutor.clearCompleted(id);
             if (stoppedGeneration != null) {
                 completedNotificationStore.remove(id, stoppedGeneration);
@@ -1405,6 +1421,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (downloadManagerExecutor != null) {
             downloadManagerExecutor.shutdown();
             downloadManagerExecutor = null;
+        }
+        if (okHttpProgressNotifier != null) {
+            okHttpProgressNotifier.shutdown();
         }
     }
 

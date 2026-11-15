@@ -23,60 +23,85 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private var tasks: [String: URLSessionDownloadTask] = [:]
     private var downloadGenerations: [String: UInt64] = [:]
-    private var taskGenerations: [Int: UInt64] = [:]
+    private var taskGenerations: [String: UInt64] = [:]
     private let tasksLock = NSLock()
     private let batchCoordinator = DownloadBatchCoordinator()
+    private let continuedProcessing = DownloadContinuedProcessingCoordinator()
+    private var foregroundSessionDownloadIds = Set<String>()
+    private var pendingDownloadStarts = Set<String>()
+    private let foregroundSessionLock = NSLock()
     internal private(set) var restoredBackgroundSessionIdentifiers: [String] = []
+    internal private(set) var didRestoreGenerationsBeforeDelegateRegistration = false
     static let batchMaxFiles = 32
 
-    private lazy var session: URLSession = {
-        let config = URLSessionConfiguration.background(withIdentifier: DownloadSessionIdentifiers.main)
-        config.sessionSendsLaunchEvents = true
-        config.allowsCellularAccess = true
-        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
-    }()
+    private func registerDownloadDelegateIfGenerationsRestored() {
+        tasksLock.lock()
+        let generationsRestored = !downloadGenerations.isEmpty
+        tasksLock.unlock()
+        DownloadBackgroundSessionManager.shared.register(downloadDelegate: self)
+        didRestoreGenerationsBeforeDelegateRegistration = generationsRestored
+    }
 
-    private lazy var wifiOnlySession: URLSession = {
-        let config = URLSessionConfiguration.background(withIdentifier: DownloadSessionIdentifiers.wifiOnly)
-        config.sessionSendsLaunchEvents = true
-        config.allowsCellularAccess = false
-        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
-    }()
+    private func downloadSession(allowsCellularAccess: Bool, preferForegroundCapable: Bool) -> URLSession {
+        DownloadBackgroundSessionManager.shared.session(
+            allowsCellularAccess: allowsCellularAccess,
+            preferForegroundCapable: preferForegroundCapable
+        )
+    }
 
-    private func downloadSession(allowsCellularAccess: Bool) -> URLSession {
-        allowsCellularAccess ? session : wifiOnlySession
+    private func sessionAssumedForStoredTask(downloadId: String) -> URLSession {
+        foregroundSessionLock.lock()
+        let useForeground = foregroundSessionDownloadIds.contains(downloadId)
+        foregroundSessionLock.unlock()
+        return downloadSession(allowsCellularAccess: true, preferForegroundCapable: useForeground)
     }
 
     public override func load() {
+        DownloadBackgroundSessionManager.shared.warmUp()
         tasksLock.lock()
         downloadGenerations = DownloadIdGenerationStore.shared.allGenerations()
         taskGenerations = DownloadTaskGenerationStore.shared.allGenerations()
         tasksLock.unlock()
-        restoredBackgroundSessionIdentifiers.removeAll(keepingCapacity: true)
-        restoreBackgroundSessionTasks(session)
-        restoreBackgroundSessionTasks(wifiOnlySession)
-    }
-
-    private func restoreBackgroundSessionTasks(_ urlSession: URLSession) {
-        let identifier = urlSession.configuration.identifier ?? ""
-        if !identifier.isEmpty {
-            restoredBackgroundSessionIdentifiers.append(identifier)
+        restoredBackgroundSessionIdentifiers = [
+            DownloadSessionIdentifiers.main,
+            DownloadSessionIdentifiers.wifiOnly
+        ]
+        continuedProcessing.onDownloadExpired = { [weak self] downloadId in
+            self?.cancelDownloadFromContinuedProcessingExpiry(downloadId)
         }
-        let applyRestored: ([URLSessionTask]) -> Void = { [weak self] tasks in
-            self?.rehydrateBackgroundDownloadTasks(tasks)
+        let finishLoad: ([URLSessionTask]) -> Void = { [weak self] tasks in
+            guard let self else {
+                return
+            }
+            self.rehydrateBackgroundDownloadTasks(tasks)
+            self.registerDownloadDelegateIfGenerationsRestored()
         }
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
             let semaphore = DispatchSemaphore(value: 0)
-            urlSession.getAllTasks { tasks in
-                applyRestored(tasks)
+            DownloadBackgroundSessionManager.shared.rehydrateTasks { tasks in
+                finishLoad(tasks)
                 semaphore.signal()
             }
             _ = semaphore.wait(timeout: .now() + 5)
         } else {
-            urlSession.getAllTasks { tasks in
-                applyRestored(tasks)
-            }
+            DownloadBackgroundSessionManager.shared.rehydrateTasks(completion: finishLoad)
         }
+    }
+
+    private func cancelDownloadFromContinuedProcessingExpiry(_ downloadId: String) {
+        guard let task = getTask(for: downloadId) else {
+            return
+        }
+        task.cancel()
+        removeTask(for: downloadId, completing: task, in: sessionAssumedForStoredTask(downloadId: downloadId))
+        DownloadDestinationStore.shared.removeDestination(for: downloadId)
+        if let generation = generation(for: downloadId) {
+            DownloadCompletedNotificationStore.shared.removeText(for: downloadId, generation: generation)
+        }
+        foregroundSessionLock.lock()
+        foregroundSessionDownloadIds.remove(downloadId)
+        foregroundSessionLock.unlock()
+        notifyListeners("downloadFailed", data: ["id": downloadId, "error": "Continued processing task expired"])
     }
 
     internal func rehydrateBackgroundDownloadTasks(_ tasks: [URLSessionTask]) {
@@ -106,13 +131,13 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         return tasks[id]
     }
 
-    private func removeTask(for id: String, completing task: URLSessionDownloadTask) {
+    private func removeTask(for id: String, completing task: URLSessionDownloadTask, in session: URLSession) {
         tasksLock.lock()
         defer { tasksLock.unlock() }
         if tasks[id] === task {
             tasks.removeValue(forKey: id)
         }
-        taskGenerations.removeValue(forKey: task.taskIdentifier)
+        taskGenerations.removeValue(forKey: DownloadTaskGenerationKey.storageKey(session: session, task: task))
     }
 
     private func nextGeneration(for id: String) -> UInt64 {
@@ -130,30 +155,40 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         return downloadGenerations[id]
     }
 
-    private func setTaskGeneration(_ generation: UInt64, for task: URLSessionDownloadTask) {
+    private func setTaskGeneration(_ generation: UInt64, for task: URLSessionDownloadTask, in session: URLSession) {
         tasksLock.lock()
         defer { tasksLock.unlock() }
-        taskGenerations[task.taskIdentifier] = generation
-        DownloadTaskGenerationStore.shared.setGeneration(generation, forTaskIdentifier: task.taskIdentifier)
+        let key = DownloadTaskGenerationKey.storageKey(session: session, task: task)
+        taskGenerations[key] = generation
+        DownloadTaskGenerationStore.shared.setGeneration(generation, forTask: task, in: session)
     }
 
-    private func generation(for task: URLSessionTask) -> UInt64? {
+    private func generation(for task: URLSessionTask, in session: URLSession) -> UInt64? {
         tasksLock.lock()
         defer { tasksLock.unlock() }
-        return taskGenerations[task.taskIdentifier]
+        return taskGenerations[DownloadTaskGenerationKey.storageKey(session: session, task: task)]
     }
 
-    private func clearTaskGeneration(for task: URLSessionTask) {
+    private func clearTaskGeneration(for task: URLSessionTask, in session: URLSession) {
         tasksLock.lock()
         defer { tasksLock.unlock() }
-        taskGenerations.removeValue(forKey: task.taskIdentifier)
-        DownloadTaskGenerationStore.shared.removeGeneration(forTaskIdentifier: task.taskIdentifier)
+        let key = DownloadTaskGenerationKey.storageKey(session: session, task: task)
+        taskGenerations.removeValue(forKey: key)
+        DownloadTaskGenerationStore.shared.removeGeneration(forTask: task, in: session)
     }
 
     private func singleDownloadIds() -> Set<String> {
         tasksLock.lock()
         defer { tasksLock.unlock() }
         return Set(tasks.keys.filter { batchCoordinator.childParts(for: $0) == nil })
+    }
+
+    private func normalizedTaskId(from call: CAPPluginCall) -> String? {
+        guard let rawId = call.getString("id") else {
+            return nil
+        }
+        let id = rawId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return id.isEmpty ? nil : id
     }
 
     private func idForTask(_ task: URLSessionDownloadTask) -> String? {
@@ -198,7 +233,12 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func download(_ call: CAPPluginCall) {
-        guard let id = call.getString("id") else {
+        guard let rawId = call.getString("id") else {
+            call.reject("Invalid parameters")
+            return
+        }
+        let id = rawId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !id.isEmpty else {
             call.reject("Invalid parameters")
             return
         }
@@ -242,6 +282,14 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
+        tasksLock.lock()
+        let reserved = pendingDownloadStarts.insert(id).inserted
+        tasksLock.unlock()
+        guard reserved else {
+            call.reject("Download already exists")
+            return
+        }
+
         let generation = nextGeneration(for: id)
         DownloadDestinationStore.shared.setDestination(destination, for: id)
         DownloadCompletedNotificationStore.shared.setText(
@@ -257,17 +305,53 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             }
         }
 
-        let task = session.downloadTask(with: request)
-        task.taskDescription = id
-        setTask(task, for: id)
-        setTaskGeneration(generation, for: task)
-        task.resume()
+        let wifiOnly = call.getString("network") == "wifi-only"
+        let continuedRequest = parseContinuedProcessingRequest(call)
 
-        call.resolve([
-            "id": id,
-            "state": "RUNNING",
-            "progress": 0
-        ])
+        continuedProcessing.beginIfPossible(downloadId: id, request: continuedRequest) { [weak self] useForeground in
+            guard let self else {
+                return
+            }
+            self.tasksLock.lock()
+            self.pendingDownloadStarts.remove(id)
+            self.tasksLock.unlock()
+            self.foregroundSessionLock.lock()
+            if useForeground {
+                self.foregroundSessionDownloadIds.insert(id)
+            }
+            self.foregroundSessionLock.unlock()
+
+            let activeSession = self.downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: useForeground)
+            let task = activeSession.downloadTask(with: request)
+            task.taskDescription = id
+            self.setTask(task, for: id)
+            self.setTaskGeneration(generation, for: task, in: activeSession)
+            task.resume()
+
+            call.resolve([
+                "id": id,
+                "state": "RUNNING",
+                "progress": 0
+            ])
+        }
+    }
+
+    private func parseContinuedProcessingRequest(_ call: CAPPluginCall) -> DownloadContinuedProcessingCoordinator.Request? {
+        guard let title = call.getString("iosContinuedProcessingTitle")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else {
+            return nil
+        }
+        let subtitle = call.getString("iosContinuedProcessingSubtitle")?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedSubtitle = (subtitle?.isEmpty == false) ? subtitle : nil
+        return DownloadContinuedProcessingCoordinator.Request(title: title, subtitle: normalizedSubtitle)
+    }
+
+    private func markContinuedProcessingFinished(downloadId: String, success: Bool) {
+        continuedProcessing.finish(downloadId: downloadId, success: success)
+        foregroundSessionLock.lock()
+        foregroundSessionDownloadIds.remove(downloadId)
+        foregroundSessionLock.unlock()
     }
 
     private func downloadBatch(_ call: CAPPluginCall, batchId: String, files: [[String: Any]]) {
@@ -279,7 +363,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         var parsed: [(url: URL, destination: String)] = []
         let headers = call.getObject("headers") as? [String: String] ?? [:]
         let wifiOnly = call.getString("network") == "wifi-only"
-        let batchSession = downloadSession(allowsCellularAccess: !wifiOnly)
+        let batchSession = downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: false)
 
         for fileObject in files {
             guard let urlString = fileObject["url"] as? String,
@@ -287,6 +371,11 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                   let destination = fileObject["destination"] as? String,
                   !destination.isEmpty else {
                 call.reject("Each file entry requires url and destination")
+                return
+            }
+            let probeId = "\(batchId)#\(parsed.count)"
+            guard destinationURL(for: probeId, storedDestination: destination) != nil else {
+                call.reject("Invalid destination for batch file")
                 return
             }
             parsed.append((url, destination))
@@ -341,14 +430,14 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         for taskId in taskIds {
             if let task = getTask(for: taskId) {
                 task.cancel()
-                removeTask(for: taskId, completing: task)
+                removeTask(for: taskId, completing: task, in: sessionAssumedForStoredTask(downloadId: taskId))
             }
             DownloadDestinationStore.shared.removeDestination(for: taskId)
         }
     }
 
     @objc func pause(_ call: CAPPluginCall) {
-        guard let id = call.getString("id") else {
+        guard let id = normalizedTaskId(from: call) else {
             call.reject("Task not found")
             return
         }
@@ -369,7 +458,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func resume(_ call: CAPPluginCall) {
-        guard let id = call.getString("id") else {
+        guard let id = normalizedTaskId(from: call) else {
             call.reject("Task not found")
             return
         }
@@ -404,7 +493,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     internal var mainBackgroundSessionForTests: URLSession {
-        session
+        DownloadBackgroundSessionManager.shared.mainSession
     }
 
     private func failBatch(batchId: String, generation: UInt64, fileIndex: Int, error: String) {
@@ -420,7 +509,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func stop(_ call: CAPPluginCall) {
-        guard let id = call.getString("id") else {
+        guard let id = normalizedTaskId(from: call) else {
             call.reject("Task not found")
             return
         }
@@ -441,8 +530,9 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         let generation = generation(for: id)
+        markContinuedProcessingFinished(downloadId: id, success: false)
         task.cancel()
-        removeTask(for: id, completing: task)
+        removeTask(for: id, completing: task, in: sessionAssumedForStoredTask(downloadId: id))
         DownloadDestinationStore.shared.removeDestination(for: id)
         if let generation {
             DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
@@ -452,7 +542,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
 
     @objc func checkStatus(_ call: CAPPluginCall) {
-        guard let id = call.getString("id") else {
+        guard let id = normalizedTaskId(from: call) else {
             call.reject("Task not found")
             return
         }
@@ -528,20 +618,33 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
         if let batchParts = batchCoordinator.childParts(for: id), batchCoordinator.isBatch(batchId: batchParts.batchId) == false {
             try? FileManager.default.removeItem(at: location)
-            removeTask(for: id, completing: downloadTask)
+            removeTask(for: id, completing: downloadTask, in: session)
             _ = DownloadDestinationStore.shared.takeDestination(for: id)
             batchCoordinator.unregisterChildTask(id)
             return
         }
 
         let storedDestination = DownloadDestinationStore.shared.takeDestination(for: id)
-        let generation = generation(for: downloadTask)
+        let generation = generation(for: downloadTask, in: session)
 
         guard let destinationURL = destinationURL(for: id, storedDestination: storedDestination) else {
-            if let generation {
-                DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+            if let batchParts = batchCoordinator.activeChildParts(for: id) {
+                failBatch(
+                    batchId: batchParts.batchId,
+                    generation: batchParts.generation,
+                    fileIndex: batchParts.fileIndex,
+                    error: "Unable to resolve destination"
+                )
+            } else {
+                if let generation {
+                    DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+                }
+                notifyListeners("downloadFailed", data: ["id": id, "error": "Unable to resolve destination"])
+                markContinuedProcessingFinished(downloadId: id, success: false)
             }
-            notifyListeners("downloadFailed", data: ["id": id, "error": "Unable to resolve destination"])
+            removeTask(for: id, completing: downloadTask, in: session)
+            batchCoordinator.unregisterChildTask(id)
+            clearTaskGeneration(for: downloadTask, in: session)
             return
         }
 
@@ -563,6 +666,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     "downloadFailed",
                     data: ["id": id, "error": "HTTP \(httpResponse.statusCode)"]
                 )
+                markContinuedProcessingFinished(downloadId: id, success: false)
             }
             return
         }
@@ -576,7 +680,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             if let batchParts = batchCoordinator.childParts(for: id) {
                 guard batchCoordinator.activeChildParts(for: id) != nil else {
                     try? FileManager.default.removeItem(at: location)
-                    removeTask(for: id, completing: downloadTask)
+                    removeTask(for: id, completing: downloadTask, in: session)
                     batchCoordinator.unregisterChildTask(id)
                     return
                 }
@@ -585,7 +689,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             try FileManager.default.moveItem(at: location, to: destinationURL)
 
             if let batchParts = batchCoordinator.activeChildParts(for: id) {
-                removeTask(for: id, completing: downloadTask)
+                removeTask(for: id, completing: downloadTask, in: session)
                 batchCoordinator.recordMovedDestination(
                     batchId: batchParts.batchId,
                     generation: batchParts.generation,
@@ -621,6 +725,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: id, generation: generation) {
                     DownloadCompletedNotificationPresenter.presentIfAllowed(downloadId: id, body: completionText)
                 }
+                markContinuedProcessingFinished(downloadId: id, success: true)
             }
         } catch {
             if let batchParts = batchCoordinator.activeChildParts(for: id) {
@@ -635,13 +740,14 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }
                 notifyListeners("downloadFailed", data: ["id": id, "error": error.localizedDescription])
+                markContinuedProcessingFinished(downloadId: id, success: false)
             }
         }
 
         if batchCoordinator.childParts(for: id) != nil {
             batchCoordinator.unregisterChildTask(id)
         }
-        clearTaskGeneration(for: downloadTask)
+        clearTaskGeneration(for: downloadTask, in: session)
     }
 
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
@@ -650,8 +756,15 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             return
         }
 
-        let generation = generation(for: downloadTask)
-        removeTask(for: id, completing: downloadTask)
+        tasksLock.lock()
+        let stillCurrent = tasks[id] === downloadTask
+        tasksLock.unlock()
+        guard stillCurrent else {
+            return
+        }
+
+        let generation = generation(for: downloadTask, in: session)
+        removeTask(for: id, completing: downloadTask, in: session)
 
         if error != nil {
             _ = DownloadDestinationStore.shared.takeDestination(for: id)
@@ -670,13 +783,14 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }
                 notifyListeners("downloadFailed", data: ["id": id, "error": error.localizedDescription])
+                markContinuedProcessingFinished(downloadId: id, success: false)
             }
         }
 
         if batchCoordinator.childParts(for: id) != nil {
             batchCoordinator.unregisterChildTask(id)
         }
-        clearTaskGeneration(for: downloadTask)
+        clearTaskGeneration(for: downloadTask, in: session)
     }
 
     public func urlSession(
@@ -716,6 +830,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             return
         }
 
+        continuedProcessing.reportProgress(downloadId: id, fraction: Double(progress))
         notifyListeners(
             "downloadProgress",
             data: [

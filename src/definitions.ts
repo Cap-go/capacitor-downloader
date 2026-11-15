@@ -33,7 +33,7 @@ export interface DownloadFileSpec {
    * - `public-downloads/...` saves to the public Downloads folder (DownloadManager).
    * - Any other relative path saves under app external files (DownloadManager with `'auto'`).
    *
-   * Multi-file batches on Android use the same destination rules as single downloads for the batch `androidHttpEngine` value (including extended roots when `'auto'` or `'okhttp'` is set). The batch is rejected only when a file would use OkHttp (for example `cache/...` or `files/...` with `'okhttp'`).
+   * Multi-file batches on Android use the same destination rules as single downloads for the batch `androidHttpEngine` value (including extended roots when `'auto'` or `'okhttp'` is set). Since 8.9.0 a batch can use OkHttp when every file resolves to it (for example `cache/...` or `files/...`); a batch that mixes engines is rejected.
    *
    * Absolute paths and `file://` URIs are supported on iOS and on Android single downloads.
    *
@@ -166,7 +166,7 @@ export interface DownloadOptions {
 /**
  * Configuration options for a multi-file batch download.
  *
- * On Android, multi-file batches use the system DownloadManager only. Each file uses the same `androidHttpEngine` destination rules as a single download; `download()` rejects before enqueue if any file would use OkHttp.
+ * On Android, each file uses the same `androidHttpEngine` destination rules as a single download. Since 8.9.0 a batch whose files all resolve to OkHttp runs through OkHttp, with one progress notification and foreground service for the whole batch when `notification` is `'progress'`; a batch that mixes engines is rejected.
  *
  * **Process death:** On Android, batch state lives in memory only and is lost when the host process is killed (DownloadManager work may still finish, but the plugin does not rebuild batch progress). On iOS, batch metadata is persisted in `DownloadBatchStore` (UserDefaults) and restored when the plugin initializes.
  *
@@ -196,7 +196,8 @@ export interface DownloadBatchOptions {
   /** Download priority level */
   priority?: 'high' | 'normal' | 'low';
   /**
-   * Android DownloadManager notification visibility for batch transfers only (batches reject OkHttp).
+   * Android notification visibility for batch transfers. On an OkHttp batch, `'progress'` shows one progress notification for the whole
+   * batch from a foreground service, so the batch keeps going while the app is in the background.
    *
    * - `'completed'` (default): show while downloading and keep the notification after completion.
    * - `'progress'`: show while downloading, remove the notification when finished.
@@ -236,7 +237,7 @@ export interface DownloadBatchOptions {
    *   in the app process and do not continue after the process is killed (unlike DownloadManager on those paths).
    * - `'downloadManager'`: always use the system DownloadManager with legacy destination resolution.
    *
-   * Ignored on iOS and Web. On Android batches, each file uses these rules; the call is rejected if any file would use OkHttp.
+   * Ignored on iOS and Web. On Android batches, each file uses these rules; the call is rejected if the files resolve to different engines.
    *
    * @since 8.5.0
    */
@@ -254,6 +255,19 @@ export interface DownloadBatchOptions {
    * @since 8.5.0
    */
   downloadCompletedNotificationText?: string;
+  /**
+   * iOS 26 and later: run the whole batch in one `BGContinuedProcessingTask`, see
+   * {@link DownloadOptions.iosContinuedProcessingTitle}. If the task expires, the batch fails with `downloadFailed`.
+   *
+   * @since 8.9.0
+   */
+  iosContinuedProcessingTitle?: string;
+  /**
+   * Subtitle for the iOS continued processing task of the batch. Ignored when `iosContinuedProcessingTitle` is omitted.
+   *
+   * @since 8.9.0
+   */
+  iosContinuedProcessingSubtitle?: string;
 }
 
 /**

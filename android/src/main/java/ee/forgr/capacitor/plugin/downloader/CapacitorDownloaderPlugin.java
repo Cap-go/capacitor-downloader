@@ -850,6 +850,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                     return;
                                 }
                                 if (cancelled) {
+                                    okHttpProgressNotifier.abandonDownload(downloadId);
                                     return;
                                 }
                                 if (success) {

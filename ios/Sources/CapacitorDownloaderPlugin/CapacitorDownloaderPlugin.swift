@@ -512,6 +512,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         let generation = generation(for: id)
+        markContinuedProcessingFinished(downloadId: id, success: false)
         task.cancel()
         removeTask(for: id, completing: task)
         DownloadDestinationStore.shared.removeDestination(for: id)

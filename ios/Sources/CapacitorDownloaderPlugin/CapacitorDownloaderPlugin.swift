@@ -31,7 +31,16 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private var pendingDownloadStarts = Set<String>()
     private let foregroundSessionLock = NSLock()
     internal private(set) var restoredBackgroundSessionIdentifiers: [String] = []
+    internal private(set) var didRestoreGenerationsBeforeDelegateRegistration = false
     static let batchMaxFiles = 32
+
+    private func registerDownloadDelegateIfGenerationsRestored() {
+        tasksLock.lock()
+        let generationsRestored = !downloadGenerations.isEmpty
+        tasksLock.unlock()
+        DownloadBackgroundSessionManager.shared.register(downloadDelegate: self)
+        didRestoreGenerationsBeforeDelegateRegistration = generationsRestored
+    }
 
     private func downloadSession(allowsCellularAccess: Bool, preferForegroundCapable: Bool) -> URLSession {
         DownloadBackgroundSessionManager.shared.session(
@@ -42,6 +51,10 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
     public override func load() {
         DownloadBackgroundSessionManager.shared.warmUp()
+        continuedProcessing.onDownloadExpired = { [weak self] downloadId in
+            self?.cancelDownloadFromContinuedProcessingExpiry(downloadId)
+        }
+        registerDownloadDelegateIfGenerationsRestored()
         tasksLock.lock()
         downloadGenerations = DownloadIdGenerationStore.shared.allGenerations()
         taskGenerations = DownloadTaskGenerationStore.shared.allGenerations()
@@ -50,15 +63,11 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             DownloadSessionIdentifiers.main,
             DownloadSessionIdentifiers.wifiOnly
         ]
-        continuedProcessing.onDownloadExpired = { [weak self] downloadId in
-            self?.cancelDownloadFromContinuedProcessingExpiry(downloadId)
-        }
         let finishLoad: ([URLSessionTask]) -> Void = { [weak self] tasks in
             guard let self else {
                 return
             }
             self.rehydrateBackgroundDownloadTasks(tasks)
-            DownloadBackgroundSessionManager.shared.register(downloadDelegate: self)
         }
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
             let semaphore = DispatchSemaphore(value: 0)

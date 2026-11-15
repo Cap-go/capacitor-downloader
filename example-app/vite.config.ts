@@ -19,6 +19,8 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       emptyOutDir: true,
+      // GitHub's API 30 emulator WebView is Chrome 83; avoid modern syntax (for example ||=).
+      target: 'chrome80',
       // Capacitor WebView loads bundled assets from a non-CORS file/localhost origin;
       // Vite's default crossorigin module scripts fail to evaluate there.
       modulePreload: false,

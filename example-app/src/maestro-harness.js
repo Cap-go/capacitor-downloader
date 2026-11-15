@@ -366,7 +366,6 @@ export async function initMaestroHarness() {
 
   trackCompletions();
   installFlowButtons();
-  await SplashScreen.hide().catch(() => undefined);
   harnessReady.textContent = 'Harness: ready';
   setSummary('Harness: ready');
 

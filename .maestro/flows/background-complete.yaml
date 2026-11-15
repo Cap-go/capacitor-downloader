@@ -22,3 +22,15 @@ appId: app.capgo.downloader
 - extendedWaitUntil:
     visible: '.*Marker: background-complete:success.*'
     timeout: 240000
+- extendedWaitUntil:
+    visible: '.*PHASE:background-complete:downloading.*'
+    timeout: 60000
+- pressKey: Home
+- extendedWaitUntil:
+    visible: '.*'
+    timeout: 10000
+- launchApp:
+    clearState: false
+- extendedWaitUntil:
+    visible: '.*Marker: background-complete:success.*'
+    timeout: 240000

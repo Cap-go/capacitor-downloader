@@ -13,3 +13,6 @@ appId: app.capgo.downloader
 - extendedWaitUntil:
     visible: '.*Marker: completion-once:success.*'
     timeout: 120000
+- extendedWaitUntil:
+    visible: '.*Marker: completion-once:success.*'
+    timeout: 120000

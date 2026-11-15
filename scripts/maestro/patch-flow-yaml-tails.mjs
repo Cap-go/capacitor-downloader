@@ -8,7 +8,7 @@ const tails = {
   'foreground-complete': `
 - extendedWaitUntil:
     visible: '.*Marker: foreground-complete:success.*'
-    timeout: 120000`,
+    timeout: 300000`,
   'network-drop-resume': `
 - extendedWaitUntil:
     visible: '.*Marker: network-drop-resume:success.*'

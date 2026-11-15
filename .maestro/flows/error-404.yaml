@@ -13,3 +13,6 @@ appId: app.capgo.downloader
 - extendedWaitUntil:
     visible: '.*Marker: error-404:success.*'
     timeout: 90000
+- extendedWaitUntil:
+    visible: '.*Marker: error-404:success.*'
+    timeout: 90000

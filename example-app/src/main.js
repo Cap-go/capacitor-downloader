@@ -304,7 +304,7 @@ runButton.addEventListener('click', async () => {
 
 populateActions();
 
-if (Capacitor.isNativePlatform()) {
+if (Capacitor.isNativePlatform() && import.meta.env.VITE_CAPGO_MAESTRO_BUILD !== 'true') {
   CapacitorUpdater.notifyAppReady().catch((error) => {
     console.error('Capgo notifyAppReady failed', error);
   });

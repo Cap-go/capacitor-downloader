@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.IBinder;
+import androidx.annotation.VisibleForTesting;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.ServiceCompat;
 
@@ -73,17 +74,27 @@ public class OkHttpDownloadForegroundService extends Service {
         return null;
     }
 
+    @VisibleForTesting
+    static int peekLastKnownActiveDownloadsForTests() {
+        synchronized (stateLock) {
+            return lastKnownActiveDownloads;
+        }
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Notification notification = OkHttpDownloadProgressNotifier.foregroundServiceNotification(this);
-        ServiceCompat.startForeground(this, SERVICE_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
         synchronized (stateLock) {
-            foregroundEstablished = true;
             boolean shouldStop = stopWhenForegroundReady || lastKnownActiveDownloads <= 0;
             stopWhenForegroundReady = false;
             if (shouldStop) {
                 stopSelf();
+                return START_NOT_STICKY;
             }
+        }
+        Notification notification = OkHttpDownloadProgressNotifier.foregroundServiceNotification(this);
+        ServiceCompat.startForeground(this, SERVICE_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+        synchronized (stateLock) {
+            foregroundEstablished = true;
         }
         return START_NOT_STICKY;
     }

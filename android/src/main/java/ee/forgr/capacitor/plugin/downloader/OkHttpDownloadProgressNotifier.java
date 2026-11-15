@@ -46,8 +46,9 @@ final class OkHttpDownloadProgressNotifier {
         synchronized (serviceLock) {
             entries.put(downloadId, new ProgressEntry(title, description, notificationMode, SystemClock.elapsedRealtime()));
             activeDownloads.incrementAndGet();
-            OkHttpDownloadForegroundService.notifyActiveDownloads(context, activeDownloads.get());
+            context.stopService(new Intent(context, OkHttpDownloadForegroundService.class));
             OkHttpDownloadForegroundService.requestStart(context);
+            OkHttpDownloadForegroundService.notifyActiveDownloads(context, activeDownloads.get());
         }
         postProgress(downloadId, 0f, true);
         return true;

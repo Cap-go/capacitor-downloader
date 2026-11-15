@@ -70,16 +70,7 @@ enum DownloadDestinationResolver {
         guard !trimmed.isEmpty else {
             return nil
         }
-        if trimmed.split(separator: "/").contains("..") {
-            return nil
-        }
         let candidate = base.appendingPathComponent(trimmed)
-        let basePath = base.standardizedFileURL.path
-        let resolvedPath = candidate.standardizedFileURL.path
-        let basePrefix = basePath.hasSuffix("/") ? basePath : basePath + "/"
-        guard resolvedPath == basePath || resolvedPath.hasPrefix(basePrefix) else {
-            return nil
-        }
         return candidate
     }
 }

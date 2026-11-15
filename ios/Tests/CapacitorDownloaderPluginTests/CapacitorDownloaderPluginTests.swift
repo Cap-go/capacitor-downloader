@@ -549,6 +549,10 @@ final class DownloadBackgroundSessionManagerTests: XCTestCase {
         }
         wait(for: [earlyFlushCompleted], timeout: 1)
 
+        let mainQueueDrained = expectation(description: "main queue drained")
+        DispatchQueue.main.async { mainQueueDrained.fulfill() }
+        wait(for: [mainQueueDrained], timeout: 1)
+
         let delegate = SynchronousFinishDelegate()
         XCTAssertEqual(delegate.finishCallCount, 0)
         XCTAssertEqual(appDelegateCallCount, 0, "AppDelegate handler must not run before register")

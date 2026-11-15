@@ -190,7 +190,9 @@ extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
         didFinishDownloadingTo location: URL
     ) {
         if let downloadDelegate {
-            downloadDelegate.urlSession(session, downloadTask: downloadTask, didFinishDownloadingTo: location)
+            delegateQueue.addOperation {
+                downloadDelegate.urlSession(session, downloadTask: downloadTask, didFinishDownloadingTo: location)
+            }
             return
         }
         guard let staged = stageDownloadIfNeeded(session: session, downloadTask: downloadTask, location: location) else {
@@ -213,7 +215,9 @@ extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let downloadDelegate {
-            downloadDelegate.urlSession?(session, task: task, didCompleteWithError: error)
+            delegateQueue.addOperation {
+                downloadDelegate.urlSession?(session, task: task, didCompleteWithError: error)
+            }
             return
         }
         sessionLock.lock()

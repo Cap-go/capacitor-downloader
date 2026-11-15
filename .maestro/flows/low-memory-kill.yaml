@@ -19,12 +19,3 @@ appId: app.capgo.downloader
 - extendedWaitUntil:
     visible: '.*Marker: low-memory-kill:success.*'
     timeout: 240000
-- extendedWaitUntil:
-    visible: '.*PHASE:low-memory-kill:downloading.*'
-    timeout: 60000
-- stopApp
-- launchApp:
-    clearState: false
-- extendedWaitUntil:
-    visible: '.*Marker: low-memory-kill:success.*'
-    timeout: 240000

@@ -13,6 +13,3 @@ appId: app.capgo.downloader
 - extendedWaitUntil:
     visible: '.*Marker: cancel-cleanup:success.*'
     timeout: 120000
-- extendedWaitUntil:
-    visible: '.*Marker: cancel-cleanup:success.*'
-    timeout: 120000

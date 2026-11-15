@@ -12,7 +12,4 @@ appId: app.capgo.downloader
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: foreground-complete:success.*'
-    timeout: 120000
-- extendedWaitUntil:
-    visible: '.*Marker: foreground-complete:success.*'
     timeout: 300000

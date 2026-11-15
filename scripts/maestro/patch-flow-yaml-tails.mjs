@@ -1,46 +1,23 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAESTRO_E2E_FLOWS } from './flows.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
 const tails = {
-  'foreground-complete': `
-- extendedWaitUntil:
-    visible: '.*Marker: foreground-complete:success.*'
-    timeout: 300000`,
-  'network-drop-resume': `
-- extendedWaitUntil:
-    visible: '.*Marker: network-drop-resume:success.*'
-    timeout: 180000`,
-  'error-bad-url': `
-- extendedWaitUntil:
-    visible: '.*Marker: error-bad-url:success.*'
-    timeout: 90000`,
-  'error-404': `
-- extendedWaitUntil:
-    visible: '.*Marker: error-404:success.*'
-    timeout: 90000`,
-  'error-5xx': `
-- extendedWaitUntil:
-    visible: '.*Marker: error-5xx:success.*'
-    timeout: 90000`,
-  'error-unwritable-destination': `
-- extendedWaitUntil:
-    visible: '.*Marker: error-unwritable-destination:success.*'
-    timeout: 90000`,
-  'cancel-cleanup': `
-- extendedWaitUntil:
-    visible: '.*Marker: cancel-cleanup:success.*'
-    timeout: 120000`,
-  'parallel-downloads': `
-- extendedWaitUntil:
-    visible: '.*Marker: parallel-downloads:success.*'
-    timeout: 180000`,
-  'completion-once': `
-- extendedWaitUntil:
-    visible: '.*Marker: completion-once:success.*'
-    timeout: 120000`,
+  'foreground-complete': `    timeout: 300000`,
+  'network-drop-resume': `    timeout: 180000`,
+  'error-bad-url': `    timeout: 90000`,
+  'error-404': `    timeout: 90000`,
+  'error-5xx': `    timeout: 90000`,
+  'error-unwritable-destination': `    timeout: 90000`,
+  'cancel-cleanup': `    timeout: 120000`,
+  'parallel-downloads': `    timeout: 180000`,
+  'completion-once': `    timeout: 120000`,
+};
+
+const multiStep = {
   'background-complete': `
 - extendedWaitUntil:
     visible: '.*PHASE:background-complete:downloading.*'
@@ -77,8 +54,26 @@ const tails = {
 };
 
 for (const flowId of MAESTRO_E2E_FLOWS) {
-  const flowPath = path.join(rootDir, '.maestro/flows', `${flowId}.yaml`);
-  const base = readFileSync(flowPath, 'utf8').trimEnd();
-  const tail = tails[flowId] ?? '';
-  writeFileSync(flowPath, `${base}${tail}\n`);
+  const markerTail = multiStep[flowId]
+    ? multiStep[flowId]
+    : `
+- extendedWaitUntil:
+    visible: '.*Marker: ${flowId}:success.*'
+${tails[flowId] ?? '    timeout: 120000'}`;
+
+  const content = `appId: app.capgo.downloader
+---
+- runFlow: ../helpers/launch-harness.yaml
+- scrollUntilVisible:
+    element:
+      text: ${flowId}
+    direction: DOWN
+    timeout: 60000
+    centerElement: true
+- tapOn:
+    text: ${flowId}
+    retryTapIfNoChange: true${markerTail}
+`;
+
+  writeFileSync(path.join(rootDir, '.maestro/flows', `${flowId}.yaml`), content);
 }

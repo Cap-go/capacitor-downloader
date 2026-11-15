@@ -210,6 +210,20 @@ final class DownloadBatchProgressTests: XCTestCase {
         store.clear()
     }
 
+    func testLoadRestoresGenerationsBeforeRegisteringDelegate() {
+        DownloadIdGenerationStore.shared.setGeneration(11, forDownloadId: "episode")
+        let plugin = CapacitorDownloaderPlugin()
+        plugin.load()
+        XCTAssertTrue(plugin.didRestoreGenerationsBeforeDelegateRegistration)
+    }
+
+    func testLoadRestoresGenerationsBeforeRegisteringDelegate() {
+        DownloadIdGenerationStore.shared.setGeneration(11, forDownloadId: "episode")
+        let plugin = CapacitorDownloaderPlugin()
+        plugin.load()
+        XCTAssertTrue(plugin.didRestoreGenerationsBeforeDelegateRegistration)
+    }
+
     func testLoadRestoresBackgroundTasksForMainAndWifiOnlySessions() {
         let plugin = CapacitorDownloaderPlugin()
         XCTAssertFalse(plugin.hasRegisteredTask(id: "restored-single"))

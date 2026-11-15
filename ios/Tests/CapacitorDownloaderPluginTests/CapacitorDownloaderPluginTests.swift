@@ -512,6 +512,12 @@ final class DownloadBackgroundSessionManagerTests: XCTestCase {
         manager.storeBackgroundEventsCompletionHandler({ appDelegateCompletion.fulfill() }, for: DownloadSessionIdentifiers.main)
         manager.urlSessionDidFinishEvents(forBackgroundURLSession: session)
 
+        let earlyFlushCompleted = expectation(description: "early flush on delegate queue")
+        manager.delegateQueueForTests.addOperation {
+            earlyFlushCompleted.fulfill()
+        }
+        wait(for: [earlyFlushCompleted], timeout: 1)
+
         let delegate = SynchronousFinishDelegate()
         XCTAssertEqual(delegate.finishCallCount, 0)
         XCTAssertGreaterThan(manager.pendingFinishCountForTests, 0, "early flush must not drop staged finishes")

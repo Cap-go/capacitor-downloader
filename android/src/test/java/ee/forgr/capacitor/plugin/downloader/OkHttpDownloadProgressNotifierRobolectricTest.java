@@ -4,10 +4,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Build;
 import com.getcapacitor.JSObject;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -44,6 +42,7 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
         notifier.shutdown();
         OkHttpDownloadForegroundService.setThrowStartNotAllowedForTests(false);
         OkHttpDownloadForegroundService.setThrowOnStartForegroundForTests(false);
+        OkHttpDownloadProgressNotifier.setSimulateNotificationPostSecurityExceptionForTests(false);
         OkHttpDownloadForegroundService.resetLifecycleStateForTests();
     }
 
@@ -92,11 +91,8 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
     }
 
     @Test
-    @Config(sdk = Build.VERSION_CODES.TIRAMISU)
     public void progressNotificationSecurityExceptionReleasesForegroundSlot() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            RuntimeEnvironment.getApplication().revokeSelfPermission(Manifest.permission.POST_NOTIFICATIONS);
-        }
+        OkHttpDownloadProgressNotifier.setSimulateNotificationPostSecurityExceptionForTests(true);
         assertTrue(notifier.started("no-post", "Title", null, "progress"));
         assertEquals(0, OkHttpDownloadForegroundService.peekLastKnownActiveDownloadsForTests());
     }

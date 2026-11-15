@@ -8,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.SystemClock;
+import androidx.annotation.VisibleForTesting;
 import androidx.core.app.NotificationCompat;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -107,6 +108,14 @@ final class OkHttpDownloadProgressNotifier {
 
     private static volatile Notification sharedForegroundNotification;
 
+    @VisibleForTesting
+    static volatile boolean simulateNotificationPostSecurityExceptionForTests = false;
+
+    @VisibleForTesting
+    static void setSimulateNotificationPostSecurityExceptionForTests(boolean value) {
+        simulateNotificationPostSecurityExceptionForTests = value;
+    }
+
     static Notification foregroundServiceNotification(Context context) {
         Notification pinned = sharedForegroundNotification;
         if (pinned != null) {
@@ -152,6 +161,9 @@ final class OkHttpDownloadProgressNotifier {
             .setContentIntent(launchIntent())
             .build();
         try {
+            if (simulateNotificationPostSecurityExceptionForTests) {
+                throw new SecurityException("test: POST_NOTIFICATIONS denied");
+            }
             notificationManager.notify(notificationTagFor(downloadId), NOTIFICATION_ID, notification);
             lastForegroundNotification = notification;
             sharedForegroundNotification = notification;

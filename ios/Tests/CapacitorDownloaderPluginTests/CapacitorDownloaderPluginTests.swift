@@ -448,7 +448,10 @@ final class DownloadBackgroundSessionManagerTests: XCTestCase {
         try? Data("payload".utf8).write(to: location)
         defer { try? FileManager.default.removeItem(at: location) }
 
-        let session = manager.foregroundCapableSession
+        guard let session = manager.foregroundCapableSession else {
+            XCTFail("foregroundCapableSession missing")
+            return
+        }
         let task = session.downloadTask(with: URL(string: "https://example.invalid/finish-sync")!)
         manager.urlSession(session, downloadTask: task, didFinishDownloadingTo: location)
 

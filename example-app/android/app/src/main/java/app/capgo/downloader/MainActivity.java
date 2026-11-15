@@ -1,6 +1,7 @@
 package app.capgo.downloader;
 
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.os.Bundle;
 
 import com.getcapacitor.Bridge;
@@ -44,7 +45,7 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void publishDebugMaestroFlag() {
-        if (!BuildConfig.DEBUG) {
+        if (!isDebuggableBuild()) {
             return;
         }
         Bridge bridge = getBridge();
@@ -52,5 +53,9 @@ public class MainActivity extends BridgeActivity {
             return;
         }
         bridge.eval(E2E_JS_FLAG, null);
+    }
+
+    private boolean isDebuggableBuild() {
+        return (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
     }
 }

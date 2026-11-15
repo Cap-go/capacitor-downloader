@@ -12,6 +12,7 @@ HOST_SERVER_PORT="${CAPGO_MAESTRO_PORT:-3192}"
 HOST_SERVER_URL="${CAPGO_MAESTRO_HOST_BASE_URL:-http://127.0.0.1:${HOST_SERVER_PORT}}"
 DEVICE_SERVER_URL="${CAPGO_MAESTRO_DEVICE_BASE_URL:-$HOST_SERVER_URL}"
 MAESTRO_TIMEOUT_SECONDS="${CAPGO_MAESTRO_TIMEOUT_SECONDS:-360}"
+MAESTRO_TEST_RETRIES="${CAPGO_MAESTRO_TEST_RETRIES:-2}"
 APP_ID="app.capgo.downloader"
 SIMULATOR_ID="${CAPGO_MAESTRO_IOS_SIMULATOR_ID:-$("$ROOT_DIR/scripts/maestro/select-ios-simulator.sh")}"
 APP_PATH="${CAPGO_MAESTRO_IOS_APP_PATH:-$ROOT_DIR/maestro-ios-app/App.app}"
@@ -67,10 +68,22 @@ xcrun simctl install "$SIMULATOR_ID" "$APP_PATH"
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 
-maestro test \
-  --config "$ROOT_DIR/.maestro/config.yaml" \
-  "$FLOW_PATH" \
-  --platform ios \
-  --udid "$SIMULATOR_ID" \
-  --format junit \
-  --output "$RESULTS_DIR/junit.xml"
+attempt=1
+while (( attempt <= MAESTRO_TEST_RETRIES )); do
+  echo "Maestro iOS flow ${FLOW_ID} attempt ${attempt}/${MAESTRO_TEST_RETRIES}"
+  if maestro test \
+    --config "$ROOT_DIR/.maestro/config.yaml" \
+    "$FLOW_PATH" \
+    --platform ios \
+    --udid "$SIMULATOR_ID" \
+    --format junit \
+    --output "$RESULTS_DIR/junit.xml" \
+    --debug-output "$RESULTS_DIR/debug" \
+    --flatten-debug-output; then
+    exit 0
+  fi
+  attempt=$((attempt + 1))
+  sleep 5
+done
+
+exit 1

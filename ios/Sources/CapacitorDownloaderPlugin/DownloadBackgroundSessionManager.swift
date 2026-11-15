@@ -63,13 +63,15 @@ final class DownloadBackgroundSessionManager: NSObject {
     }
 
     func register(downloadDelegate: URLSessionDownloadDelegate) {
-        delegateQueue.addOperation { [weak self] in
-            guard let self else {
-                return
-            }
+        let registerOnQueue = {
             self.downloadDelegate = downloadDelegate
             self.flushPendingEvents()
         }
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            registerOnQueue()
+            return
+        }
+        delegateQueue.addOperation(registerOnQueue)
     }
 
     private func flushPendingEvents() {

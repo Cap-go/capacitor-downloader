@@ -54,8 +54,7 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
         assertTrue(notifier.started("fast", "Title", null, "progress"));
         notifier.finished("fast", true);
 
-        OkHttpDownloadForegroundService service =
-            Robolectric.buildService(OkHttpDownloadForegroundService.class).create().get();
+        OkHttpDownloadForegroundService service = Robolectric.buildService(OkHttpDownloadForegroundService.class).create().get();
         int startId = service.onStartCommand(new Intent(), 0, 1);
         assertEquals(android.app.Service.START_NOT_STICKY, startId);
         service.onDestroy();
@@ -65,8 +64,7 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
     public void abandonDownloadReleasesForegroundSlot() {
         assertTrue(notifier.started("leak", "Title", null, "progress"));
         notifier.abandonDownload("leak");
-        OkHttpDownloadForegroundService service =
-            Robolectric.buildService(OkHttpDownloadForegroundService.class).create().get();
+        OkHttpDownloadForegroundService service = Robolectric.buildService(OkHttpDownloadForegroundService.class).create().get();
         service.onStartCommand(new Intent(), 0, 1);
         service.onDestroy();
     }

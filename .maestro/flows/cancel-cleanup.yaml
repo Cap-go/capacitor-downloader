@@ -11,5 +11,8 @@ appId: app.capgo.downloader
     id: e2e-flow-cancel-cleanup
     retryTapIfNoChange: true
 - extendedWaitUntil:
+    visible: '.*STATE:cancel-me:(?!DONE).*'
+    timeout: 90000
+- extendedWaitUntil:
     visible: '.*Marker: cancel-cleanup:success.*'
     timeout: 90000

@@ -11,5 +11,8 @@ appId: app.capgo.downloader
     id: e2e-flow-completion-once
     retryTapIfNoChange: true
 - extendedWaitUntil:
+    visible: '.*ASSERT:completion-count:id=once-only:count=1.*'
+    timeout: 90000
+- extendedWaitUntil:
     visible: '.*Marker: completion-once:success.*'
     timeout: 90000

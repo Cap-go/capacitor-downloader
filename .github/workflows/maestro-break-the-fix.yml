@@ -1,0 +1,144 @@
+name: Maestro break-the-fix validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Optional PR number for traceability (comments are manual)'
+        required: false
+        type: string
+
+concurrency:
+  group: maestro-break-the-fix-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: 1.4.2
+  MAESTRO_VERSION: cli-2.4.0
+
+jobs:
+  break_fix_android:
+    name: break-fix android / ${{ matrix.regression }} / ${{ matrix.mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { regression: completion-dedupe, flow: completion-once, mode: broken, expect_outcome: failure }
+          - { regression: completion-dedupe, flow: completion-once, mode: fixed, expect_outcome: success }
+          - { regression: cancel-cleanup, flow: cancel-cleanup, mode: broken, expect_outcome: failure }
+          - { regression: cancel-cleanup, flow: cancel-cleanup, mode: fixed, expect_outcome: success }
+          - { regression: error-404-map, flow: error-404, mode: broken, expect_outcome: failure }
+          - { regression: error-404-map, flow: error-404, mode: fixed, expect_outcome: success }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          dependency-cache-key: break-fix-android-${{ matrix.regression }}-${{ matrix.mode }}
+          dependency-cache-path: |
+            node_modules
+            example-app/node_modules
+          install-example: 'true'
+      - uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: '21'
+      - uses: ./.github/actions/setup-maestro
+        with:
+          maestro-version: ${{ env.MAESTRO_VERSION }}
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Clear Android SDK temp cache
+        run: bash ./.github/scripts/ensure-android-emulator-sdk.sh
+      - name: Run break-the-fix scenario
+        id: run
+        continue-on-error: true
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          profile: pixel_7
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -no-metrics
+          script: >-
+            bash ./scripts/maestro/run-break-fix-scenario.sh
+            ${{ matrix.regression }}
+            ${{ matrix.flow }}
+            android
+            ${{ matrix.mode }}
+      - name: Verify expected outcome
+        run: |
+          if [[ "${{ steps.run.outcome }}" != "${{ matrix.expect_outcome }}" ]]; then
+            echo "Expected ${{ matrix.expect_outcome }} but got ${{ steps.run.outcome }}"
+            exit 1
+          fi
+      - name: Upload Maestro output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: break-fix-android-${{ matrix.regression }}-${{ matrix.mode }}
+          path: |
+            maestro-results
+            .maestro-artifacts
+
+  break_fix_ios:
+    name: break-fix ios / ${{ matrix.regression }} / ${{ matrix.mode }}
+    runs-on: macOS-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { regression: completion-dedupe, flow: completion-once, mode: broken, expect_outcome: failure }
+          - { regression: completion-dedupe, flow: completion-once, mode: fixed, expect_outcome: success }
+          - { regression: error-404-map, flow: error-404, mode: broken, expect_outcome: failure }
+          - { regression: error-404-map, flow: error-404, mode: fixed, expect_outcome: success }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          dependency-cache-key: break-fix-ios-${{ matrix.regression }}-${{ matrix.mode }}
+          dependency-cache-path: |
+            node_modules
+            example-app/node_modules
+          install-example: 'true'
+      - name: Boot iOS simulator
+        run: |
+          simulator_id="$(./scripts/maestro/select-ios-simulator.sh)"
+          echo "CAPGO_MAESTRO_IOS_SIMULATOR_ID=$simulator_id" >> "$GITHUB_ENV"
+          xcrun simctl boot "$simulator_id" >/dev/null 2>&1 || true
+      - uses: ./.github/actions/setup-maestro
+        with:
+          maestro-version: ${{ env.MAESTRO_VERSION }}
+      - name: Wait for iOS simulator boot
+        run: xcrun simctl bootstatus "$CAPGO_MAESTRO_IOS_SIMULATOR_ID" -b
+      - name: Run break-the-fix scenario
+        id: run
+        continue-on-error: true
+        env:
+          CAPGO_MAESTRO_IOS_SIMULATOR_ID: ${{ env.CAPGO_MAESTRO_IOS_SIMULATOR_ID }}
+        run: bash ./scripts/maestro/run-break-fix-scenario.sh ${{ matrix.regression }} ${{ matrix.flow }} ios ${{ matrix.mode }}
+      - name: Verify expected outcome
+        run: |
+          if [[ "${{ steps.run.outcome }}" != "${{ matrix.expect_outcome }}" ]]; then
+            echo "Expected ${{ matrix.expect_outcome }} but got ${{ steps.run.outcome }}"
+            exit 1
+          fi
+      - name: Upload Maestro output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: break-fix-ios-${{ matrix.regression }}-${{ matrix.mode }}
+          path: |
+            maestro-results-ios
+            .maestro-artifacts

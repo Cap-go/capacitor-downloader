@@ -259,6 +259,7 @@ const flows = {
     await sleep(1_500);
     await plugin.stop({ id });
     const status = await plugin.checkStatus({ id });
+    setSummary(`STATE:${id}:${status.state}:${status.progress}`);
     if (status.state === 'DONE') {
       throw new Error('Download still DONE after stop');
     }

@@ -17,6 +17,21 @@ const markerTimeout = {
   'error-unwritable-destination': '60000',
 };
 
+const extraAssertions = {
+  'completion-once': `
+- extendedWaitUntil:
+    visible: '.*ASSERT:completion-count:id=once-only:count=1.*'
+    timeout: 90000`,
+  'cancel-cleanup': `
+- extendedWaitUntil:
+    visible: '.*STATE:cancel-me:(?!DONE).*'
+    timeout: 90000`,
+  'error-404': `
+- extendedWaitUntil:
+    visible: '.*(EVENT:downloadFailed:id=err-404:.*404|STATE:err-404:ERROR).*'
+    timeout: 60000`,
+};
+
 const multiStep = {
   'background-complete': `
 - extendedWaitUntil:
@@ -56,7 +71,7 @@ const multiStep = {
 for (const flowId of MAESTRO_E2E_FLOWS) {
   const markerTail = multiStep[flowId]
     ? multiStep[flowId]
-    : `
+  : `${extraAssertions[flowId] ?? ''}
 - extendedWaitUntil:
     visible: '.*Marker: ${flowId}:success.*'
     timeout: ${markerTimeout[flowId] ?? '90000'}`;

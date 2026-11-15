@@ -43,6 +43,8 @@ const multiStep = {
     timeout: 5000
 - launchApp:
     clearState: false
+    arguments:
+      isE2E: true
 - extendedWaitUntil:
     visible: '.*Marker: background-complete:success.*'
     timeout: 120000`,
@@ -53,6 +55,8 @@ const multiStep = {
 - stopApp
 - launchApp:
     clearState: false
+    arguments:
+      isE2E: true
 - extendedWaitUntil:
     visible: '.*Marker: kill-relaunch-resume:success.*'
     timeout: 120000`,
@@ -63,6 +67,8 @@ const multiStep = {
 - stopApp
 - launchApp:
     clearState: false
+    arguments:
+      isE2E: true
 - extendedWaitUntil:
     visible: '.*Marker: low-memory-kill:success.*'
     timeout: 120000`,

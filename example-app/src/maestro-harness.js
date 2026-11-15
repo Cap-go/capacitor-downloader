@@ -357,11 +357,27 @@ function installFlowButtons() {
   }
 }
 
+async function waitForMaestroHarnessEnabled(timeoutMs = 8_000) {
+  if (import.meta.env.VITE_CAPGO_MAESTRO_BUILD === 'true') {
+    return;
+  }
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (window.__capgoMaestroIsE2E === true) {
+      return;
+    }
+    await sleep(50);
+  }
+}
+
 export async function initMaestroHarness() {
+  await waitForMaestroHarnessEnabled();
   if (import.meta.env.VITE_CAPGO_MAESTRO_BUILD !== 'true' && window.__capgoMaestroIsE2E !== true) {
     document.getElementById('maestro-panel')?.classList.add('hidden');
     return;
   }
+
+  harnessReady.textContent = 'Harness: booting';
 
   document.getElementById('manual-panel')?.classList.add('hidden');
   await SplashScreen.hide().catch(() => undefined);

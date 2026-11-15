@@ -6,6 +6,15 @@ import { CapacitorDownloader } from '@capgo/capacitor-downloader';
 import { initMaestroHarness } from './maestro-harness.js';
 
 void initMaestroHarness().catch((error) => {
+  const message = String(error?.message ?? error);
+  const harnessReady = document.getElementById('harness-ready');
+  const e2eSummary = document.getElementById('e2e-summary');
+  if (harnessReady) {
+    harnessReady.textContent = `Harness: error ${message}`;
+  }
+  if (e2eSummary) {
+    e2eSummary.textContent = `Harness: error ${message}`;
+  }
   console.error('Maestro harness failed', error);
 });
 

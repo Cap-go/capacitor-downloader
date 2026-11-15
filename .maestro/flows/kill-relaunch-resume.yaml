@@ -16,6 +16,8 @@ appId: app.capgo.downloader
 - stopApp
 - launchApp:
     clearState: false
+    arguments:
+      isE2E: true
 - extendedWaitUntil:
     visible: '.*Marker: kill-relaunch-resume:success.*'
     timeout: 120000

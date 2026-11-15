@@ -4,7 +4,14 @@ import Foundation
 final class DownloadBackgroundSessionManager: NSObject {
     static let shared = DownloadBackgroundSessionManager()
 
+    /// When true, `register` always enqueues on `delegateQueue` (production path) even under XCTest.
+    internal static var forceProductionRegistrationQueueForTests = false
+
     private weak var downloadDelegate: URLSessionDownloadDelegate?
+
+    internal var hasRegisteredDownloadDelegateForTests: Bool {
+        downloadDelegate != nil
+    }
     private struct PendingFinish {
         let session: URLSession
         let downloadTask: URLSessionDownloadTask
@@ -67,7 +74,8 @@ final class DownloadBackgroundSessionManager: NSObject {
             self.downloadDelegate = downloadDelegate
             self.flushPendingEvents()
         }
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil,
+           !Self.forceProductionRegistrationQueueForTests {
             registerOnQueue()
             return
         }
@@ -182,9 +190,7 @@ extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
         didFinishDownloadingTo location: URL
     ) {
         if let downloadDelegate {
-            delegateQueue.addOperation {
-                downloadDelegate.urlSession(session, downloadTask: downloadTask, didFinishDownloadingTo: location)
-            }
+            downloadDelegate.urlSession(session, downloadTask: downloadTask, didFinishDownloadingTo: location)
             return
         }
         guard let staged = stageDownloadIfNeeded(session: session, downloadTask: downloadTask, location: location) else {
@@ -207,9 +213,7 @@ extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let downloadDelegate {
-            delegateQueue.addOperation {
-                downloadDelegate.urlSession?(session, task: task, didCompleteWithError: error)
-            }
+            downloadDelegate.urlSession?(session, task: task, didCompleteWithError: error)
             return
         }
         sessionLock.lock()

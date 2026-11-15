@@ -1,13 +1,12 @@
 package ee.forgr.capacitor.plugin.downloader;
 
-import android.app.ForegroundServiceStartNotAllowedException;
 import android.app.Notification;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.IBinder;
-import androidx.core.app.NotificationCompat;
+import androidx.annotation.VisibleForTesting;
 import androidx.core.app.ServiceCompat;
 
 /**
@@ -20,11 +19,17 @@ public class OkHttpDownloadForegroundService extends Service {
     private static boolean foregroundEstablished;
     private static boolean stopWhenForegroundReady;
     private static int lastKnownActiveDownloads;
+    private static int foregroundPromotionCountForTests;
     static volatile boolean throwOnStartForTests = false;
     static volatile boolean throwStartNotAllowedForTests = false;
+    static volatile boolean throwOnStartForegroundForTests = false;
 
     public static void setThrowStartNotAllowedForTests(boolean value) {
         throwStartNotAllowedForTests = value;
+    }
+
+    public static void setThrowOnStartForegroundForTests(boolean value) {
+        throwOnStartForegroundForTests = value;
     }
 
     public static boolean requestStart(Context context) {
@@ -33,7 +38,7 @@ public class OkHttpDownloadForegroundService extends Service {
         }
         try {
             if (throwStartNotAllowedForTests) {
-                throw new ForegroundServiceStartNotAllowedException("test: background FGS start not allowed");
+                throw new IllegalStateException("test: background FGS start not allowed");
             }
             Intent intent = new Intent(context, OkHttpDownloadForegroundService.class);
             androidx.core.content.ContextCompat.startForegroundService(context, intent);
@@ -65,6 +70,8 @@ public class OkHttpDownloadForegroundService extends Service {
             lastKnownActiveDownloads = 0;
             throwOnStartForTests = false;
             throwStartNotAllowedForTests = false;
+            throwOnStartForegroundForTests = false;
+            foregroundPromotionCountForTests = 0;
         }
     }
 
@@ -73,17 +80,37 @@ public class OkHttpDownloadForegroundService extends Service {
         return null;
     }
 
+    @VisibleForTesting
+    static int peekLastKnownActiveDownloadsForTests() {
+        synchronized (stateLock) {
+            return lastKnownActiveDownloads;
+        }
+    }
+
+    @VisibleForTesting
+    static int peekForegroundPromotionCountForTests() {
+        return foregroundPromotionCountForTests;
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Notification notification = OkHttpDownloadProgressNotifier.foregroundServiceNotification(this);
-        ServiceCompat.startForeground(this, SERVICE_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-        synchronized (stateLock) {
-            foregroundEstablished = true;
-            boolean shouldStop = stopWhenForegroundReady || lastKnownActiveDownloads <= 0;
-            stopWhenForegroundReady = false;
-            if (shouldStop) {
-                stopSelf();
+        try {
+            if (throwOnStartForegroundForTests) {
+                throw new RuntimeException("test: startForeground failed");
             }
+            ServiceCompat.startForeground(this, SERVICE_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+            synchronized (stateLock) {
+                foregroundEstablished = true;
+                foregroundPromotionCountForTests += 1;
+                boolean shouldStop = stopWhenForegroundReady || lastKnownActiveDownloads <= 0;
+                stopWhenForegroundReady = false;
+                if (shouldStop) {
+                    stopSelf();
+                }
+            }
+        } catch (RuntimeException ignored) {
+            stopSelf();
         }
         return START_NOT_STICKY;
     }

@@ -417,7 +417,64 @@ final class DownloadSessionIdentifiersTests: XCTestCase {
     }
 }
 
+private final class SynchronousFinishDelegate: NSObject, URLSessionDownloadDelegate {
+    var finishCallCount = 0
+    var locationExistedAtFinish = false
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        finishCallCount += 1
+        locationExistedAtFinish = FileManager.default.fileExists(atPath: location.path)
+    }
+}
+
 final class DownloadBackgroundSessionManagerTests: XCTestCase {
+    override func tearDown() {
+        DownloadBackgroundSessionManager.forceProductionRegistrationQueueForTests = false
+        super.tearDown()
+    }
+
+    func testRegisteredDelegateReceivesFinishSynchronouslyBeforeCallbackReturns() {
+        let manager = DownloadBackgroundSessionManager.shared
+        manager.warmUp()
+        let delegate = SynchronousFinishDelegate()
+        manager.register(downloadDelegate: delegate)
+
+        let location = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CapacitorDownloaderFinishSync-\(UUID().uuidString)")
+        try? Data("payload".utf8).write(to: location)
+        defer { try? FileManager.default.removeItem(at: location) }
+
+        let session = manager.foregroundCapableSession
+        let task = session.downloadTask(with: URL(string: "https://example.invalid/finish-sync")!)
+        manager.urlSession(session, downloadTask: task, didFinishDownloadingTo: location)
+
+        XCTAssertEqual(delegate.finishCallCount, 1)
+        XCTAssertTrue(delegate.locationExistedAtFinish)
+    }
+
+    func testRegisterUsesDelegateQueueInProductionPath() {
+        DownloadBackgroundSessionManager.forceProductionRegistrationQueueForTests = true
+        let manager = DownloadBackgroundSessionManager.shared
+        manager.warmUp()
+        let delegate = SynchronousFinishDelegate()
+        let registered = expectation(description: "async registration")
+        manager.register(downloadDelegate: delegate)
+        DispatchQueue.global(qos: .utility).async {
+            for _ in 0..<100 where !manager.hasRegisteredDownloadDelegateForTests {
+                usleep(10_000)
+            }
+            if manager.hasRegisteredDownloadDelegateForTests {
+                registered.fulfill()
+            }
+        }
+        wait(for: [registered], timeout: 2)
+        XCTAssertTrue(manager.hasRegisteredDownloadDelegateForTests)
+    }
+
     func testWarmUpCreatesDistinctBackgroundSessions() {
         let manager = DownloadBackgroundSessionManager.shared
         manager.warmUp()

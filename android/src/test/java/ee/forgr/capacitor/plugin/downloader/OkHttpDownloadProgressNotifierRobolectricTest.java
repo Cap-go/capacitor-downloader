@@ -4,8 +4,10 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import com.getcapacitor.JSObject;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -41,6 +43,7 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
     public void tearDown() {
         notifier.shutdown();
         OkHttpDownloadForegroundService.setThrowStartNotAllowedForTests(false);
+        OkHttpDownloadForegroundService.setThrowOnStartForegroundForTests(false);
         OkHttpDownloadForegroundService.resetLifecycleStateForTests();
     }
 
@@ -66,6 +69,8 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
         OkHttpDownloadForegroundService service = Robolectric.buildService(OkHttpDownloadForegroundService.class).create().get();
         int startId = service.onStartCommand(new Intent(), 0, 1);
         assertEquals(android.app.Service.START_NOT_STICKY, startId);
+        assertEquals(0, OkHttpDownloadForegroundService.peekLastKnownActiveDownloadsForTests());
+        assertEquals(1, OkHttpDownloadForegroundService.peekForegroundPromotionCountForTests());
         service.onDestroy();
     }
 
@@ -73,8 +78,36 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
     public void abandonDownloadReleasesForegroundSlot() {
         assertTrue(notifier.started("leak", "Title", null, "progress"));
         notifier.abandonDownload("leak");
+        assertEquals(0, OkHttpDownloadForegroundService.peekLastKnownActiveDownloadsForTests());
         OkHttpDownloadForegroundService service = Robolectric.buildService(OkHttpDownloadForegroundService.class).create().get();
         service.onStartCommand(new Intent(), 0, 1);
+        service.onDestroy();
+    }
+
+    @Test
+    public void shutdownReleasesForegroundSlot() {
+        assertTrue(notifier.started("busy", "Title", null, "progress"));
+        notifier.shutdown();
+        assertEquals(0, OkHttpDownloadForegroundService.peekLastKnownActiveDownloadsForTests());
+    }
+
+    @Test
+    @Config(sdk = Build.VERSION_CODES.TIRAMISU)
+    public void progressNotificationSecurityExceptionReleasesForegroundSlot() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            RuntimeEnvironment.getApplication().revokeSelfPermission(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        assertTrue(notifier.started("no-post", "Title", null, "progress"));
+        assertEquals(0, OkHttpDownloadForegroundService.peekLastKnownActiveDownloadsForTests());
+    }
+
+    @Test
+    public void onStartCommandSurvivesStartForegroundFailure() {
+        OkHttpDownloadForegroundService.setThrowOnStartForegroundForTests(true);
+        OkHttpDownloadForegroundService service = Robolectric.buildService(OkHttpDownloadForegroundService.class).create().get();
+        int startId = service.onStartCommand(new Intent(), 0, 1);
+        assertEquals(android.app.Service.START_NOT_STICKY, startId);
+        assertEquals(0, OkHttpDownloadForegroundService.peekForegroundPromotionCountForTests());
         service.onDestroy();
     }
 

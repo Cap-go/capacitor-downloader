@@ -193,18 +193,23 @@ const flows = {
 
   async 'kill-relaunch-resume'() {
     const id = 'kill-resume';
+    const isIos = Capacitor.getPlatform() === 'ios';
+    const slowBytes = isIos ? 65536 : 131072;
+    const destination = isIos ? 'cache/maestro-kill.bin' : 'downloads/maestro-kill.bin';
+    const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
+    const url = fileUrl(`/slow/${slowBytes}`);
     await plugin.download({
       id,
-      url: fileUrl('/slow/131072'),
-      destination: 'downloads/maestro-kill.bin',
-      androidHttpEngine: 'downloadManager',
+      url,
+      destination,
+      androidHttpEngine,
       notification: 'hidden',
     });
     persistPending('kill-relaunch-resume', {
       id,
-      url: fileUrl('/slow/131072'),
-      destination: 'downloads/maestro-kill.bin',
-      androidHttpEngine: 'downloadManager',
+      url,
+      destination,
+      androidHttpEngine,
     });
     setSummary(`PHASE:kill-relaunch-resume:downloading:id=${id}`);
   },
@@ -241,6 +246,11 @@ const flows = {
     await plugin.download(options);
     let status = await waitForTerminal(id, 120_000);
     if (status.state === 'ERROR') {
+      try {
+        await plugin.stop({ id });
+      } catch {
+        // no-op when the native task is already gone
+      }
       completionCounts.delete(id);
       localStorage.removeItem(`${storagePrefix}completed_${id}`);
       await plugin.download(options);

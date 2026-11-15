@@ -1,0 +1,9 @@
+appId: app.capgo.downloader
+---
+- stopApp
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: '.*Harness: ready.*'
+    timeout: 120000
+- assertVisible: '.*Harness: ready.*'

@@ -1,6 +1,12 @@
 # node files
 dist
 node_modules
+.maestro-artifacts
+.maestro-ios-derived-data
+maestro-results
+maestro-results-ios
+maestro-ios-app
+maestro-ios-app.tar.gz
 
 # iOS files
 Pods

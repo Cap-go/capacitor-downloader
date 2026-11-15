@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 
 import './style.css';
 import { CapacitorDownloader } from '@capgo/capacitor-downloader';
+import { initMaestroHarness } from './maestro-harness.js';
 
 const plugin = CapacitorDownloader;
 const state = {};
@@ -298,6 +299,9 @@ runButton.addEventListener('click', async () => {
 });
 
 populateActions();
+initMaestroHarness().catch((error) => {
+  console.error('Maestro harness failed', error);
+});
 
 if (Capacitor.isNativePlatform()) {
   CapacitorUpdater.notifyAppReady().catch((error) => {

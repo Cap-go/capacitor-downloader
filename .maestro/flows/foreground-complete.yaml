@@ -1,0 +1,15 @@
+appId: app.capgo.downloader
+---
+- runFlow: ../helpers/launch-harness.yaml
+- scrollUntilVisible:
+    element:
+      id: e2e-flow-foreground-complete
+    direction: DOWN
+    timeout: 60000
+    centerElement: true
+- tapOn:
+    id: e2e-flow-foreground-complete
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: '.*Marker: foreground-complete:success.*'
+    timeout: 120000

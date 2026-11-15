@@ -94,6 +94,14 @@ public class OkHttpDownloadForegroundService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        synchronized (stateLock) {
+            boolean shouldStop = stopWhenForegroundReady || lastKnownActiveDownloads <= 0;
+            stopWhenForegroundReady = false;
+            if (shouldStop) {
+                stopSelf();
+                return START_NOT_STICKY;
+            }
+        }
         Notification notification = OkHttpDownloadProgressNotifier.foregroundServiceNotification(this);
         try {
             if (throwOnStartForegroundForTests) {
@@ -103,11 +111,6 @@ public class OkHttpDownloadForegroundService extends Service {
             synchronized (stateLock) {
                 foregroundEstablished = true;
                 foregroundPromotionCountForTests += 1;
-                boolean shouldStop = stopWhenForegroundReady || lastKnownActiveDownloads <= 0;
-                stopWhenForegroundReady = false;
-                if (shouldStop) {
-                    stopSelf();
-                }
             }
         } catch (RuntimeException ignored) {
             stopSelf();

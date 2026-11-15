@@ -23,7 +23,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private var tasks: [String: URLSessionDownloadTask] = [:]
     private var downloadGenerations: [String: UInt64] = [:]
-    private var taskGenerations: [Int: UInt64] = [:]
+    private var taskGenerations: [String: UInt64] = [:]
     private let tasksLock = NSLock()
     private let batchCoordinator = DownloadBatchCoordinator()
     private let continuedProcessing = DownloadContinuedProcessingCoordinator()
@@ -130,7 +130,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         if tasks[id] === task {
             tasks.removeValue(forKey: id)
         }
-        taskGenerations.removeValue(forKey: task.taskIdentifier)
+        taskGenerations.removeValue(forKey: DownloadTaskGenerationKey.storageKey(for: task))
     }
 
     private func nextGeneration(for id: String) -> UInt64 {
@@ -151,21 +151,23 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private func setTaskGeneration(_ generation: UInt64, for task: URLSessionDownloadTask) {
         tasksLock.lock()
         defer { tasksLock.unlock() }
-        taskGenerations[task.taskIdentifier] = generation
-        DownloadTaskGenerationStore.shared.setGeneration(generation, forTaskIdentifier: task.taskIdentifier)
+        let key = DownloadTaskGenerationKey.storageKey(for: task)
+        taskGenerations[key] = generation
+        DownloadTaskGenerationStore.shared.setGeneration(generation, forTask: task)
     }
 
     private func generation(for task: URLSessionTask) -> UInt64? {
         tasksLock.lock()
         defer { tasksLock.unlock() }
-        return taskGenerations[task.taskIdentifier]
+        return taskGenerations[DownloadTaskGenerationKey.storageKey(for: task)]
     }
 
     private func clearTaskGeneration(for task: URLSessionTask) {
         tasksLock.lock()
         defer { tasksLock.unlock() }
-        taskGenerations.removeValue(forKey: task.taskIdentifier)
-        DownloadTaskGenerationStore.shared.removeGeneration(forTaskIdentifier: task.taskIdentifier)
+        let key = DownloadTaskGenerationKey.storageKey(for: task)
+        taskGenerations.removeValue(forKey: key)
+        DownloadTaskGenerationStore.shared.removeGeneration(forTask: task)
     }
 
     private func singleDownloadIds() -> Set<String> {

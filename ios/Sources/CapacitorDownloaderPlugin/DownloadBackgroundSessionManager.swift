@@ -7,6 +7,8 @@ final class DownloadBackgroundSessionManager: NSObject {
     /// When true, `register` always enqueues on `delegateQueue` (production path) even under XCTest.
     internal static var forceProductionRegistrationQueueForTests = false
 
+    internal static var deferredHandlerFallbackIntervalForTests: TimeInterval = 20
+
     private weak var downloadDelegate: URLSessionDownloadDelegate?
 
     internal var hasRegisteredDownloadDelegateForTests: Bool {
@@ -32,8 +34,17 @@ final class DownloadBackgroundSessionManager: NSObject {
         pendingCompletions = []
         sessionLock.unlock()
         flushHandlerLock.lock()
+        for entry in pendingFlushCompletionHandlers {
+            entry.fallbackWorkItem?.cancel()
+        }
         pendingFlushCompletionHandlers = []
         flushHandlerLock.unlock()
+    }
+
+    private struct DeferredBackgroundHandler {
+        let id: UUID
+        let handler: () -> Void
+        var fallbackWorkItem: DispatchWorkItem?
     }
     private struct PendingFinish {
         let session: URLSession
@@ -62,7 +73,7 @@ final class DownloadBackgroundSessionManager: NSObject {
     private var pendingBackgroundRelaunchHandlers: Set<String> = []
     private let handlerLock = NSLock()
     /// AppDelegate completion handlers deferred until a plugin delegate is registered and staged events flush.
-    private var pendingFlushCompletionHandlers: [() -> Void] = []
+    private var pendingFlushCompletionHandlers: [DeferredBackgroundHandler] = []
     private let flushHandlerLock = NSLock()
 
     private(set) var mainSession: URLSession!
@@ -77,6 +88,7 @@ final class DownloadBackgroundSessionManager: NSObject {
         if mainSession != nil {
             return
         }
+        removeStaleStagedDownloadsIfNeeded()
         let mainConfig = URLSessionConfiguration.background(withIdentifier: DownloadSessionIdentifiers.main)
         mainConfig.sessionSendsLaunchEvents = true
         mainConfig.allowsCellularAccess = true
@@ -92,7 +104,29 @@ final class DownloadBackgroundSessionManager: NSObject {
 
         let foregroundConfig = URLSessionConfiguration.default
         foregroundConfig.allowsCellularAccess = true
+        foregroundConfig.identifier = DownloadSessionIdentifiers.foregroundCapable
         foregroundCapableSession = URLSession(configuration: foregroundConfig, delegate: self, delegateQueue: delegateQueue)
+    }
+
+    private func removeStaleStagedDownloadsIfNeeded() {
+        sessionLock.lock()
+        let hasPending = !pendingFinishes.isEmpty
+        sessionLock.unlock()
+        guard !hasPending else {
+            return
+        }
+        let stagingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CapacitorDownloaderPending", isDirectory: true)
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: stagingDirectory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+        for url in urls {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     func register(downloadDelegate: URLSessionDownloadDelegate) {
@@ -136,9 +170,32 @@ final class DownloadBackgroundSessionManager: NSObject {
     }
 
     private func enqueueBackgroundCompletionHandlerUntilFlush(_ handler: @escaping () -> Void) {
+        let id = UUID()
+        var workItem: DispatchWorkItem!
+        workItem = DispatchWorkItem { [weak self] in
+            self?.takeAndRunDeferredBackgroundHandler(id: id)
+        }
+        let deferred = DeferredBackgroundHandler(id: id, handler: handler, fallbackWorkItem: workItem)
         flushHandlerLock.lock()
-        pendingFlushCompletionHandlers.append(handler)
+        pendingFlushCompletionHandlers.append(deferred)
         flushHandlerLock.unlock()
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.deferredHandlerFallbackIntervalForTests,
+            execute: workItem
+        )
+    }
+
+    private func takeAndRunDeferredBackgroundHandler(id: UUID) -> Bool {
+        flushHandlerLock.lock()
+        guard let index = pendingFlushCompletionHandlers.firstIndex(where: { $0.id == id }) else {
+            flushHandlerLock.unlock()
+            return false
+        }
+        let entry = pendingFlushCompletionHandlers.remove(at: index)
+        flushHandlerLock.unlock()
+        entry.fallbackWorkItem?.cancel()
+        DispatchQueue.main.async(execute: entry.handler)
+        return true
     }
 
     private func runPendingBackgroundCompletionHandlers() {
@@ -146,8 +203,9 @@ final class DownloadBackgroundSessionManager: NSObject {
         let handlers = pendingFlushCompletionHandlers
         pendingFlushCompletionHandlers = []
         flushHandlerLock.unlock()
-        for handler in handlers {
-            DispatchQueue.main.async(execute: handler)
+        for entry in handlers {
+            entry.fallbackWorkItem?.cancel()
+            DispatchQueue.main.async(execute: entry.handler)
         }
     }
 
@@ -186,7 +244,9 @@ final class DownloadBackgroundSessionManager: NSObject {
         if pendingBackgroundRelaunchHandlers.remove(identifier) != nil {
             shouldRun = true
         }
-        completionHandlers[identifier] = handler
+        if !shouldRun {
+            completionHandlers[identifier] = handler
+        }
         handlerLock.unlock()
         if shouldRun {
             runBackgroundCompletionHandlerAfterFlushingPending(handler)

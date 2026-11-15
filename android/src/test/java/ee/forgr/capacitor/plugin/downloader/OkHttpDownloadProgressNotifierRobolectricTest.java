@@ -3,6 +3,7 @@ package ee.forgr.capacitor.plugin.downloader;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.robolectric.Shadows.shadowOf;
 
 import android.content.Context;
 import android.content.Intent;
@@ -22,6 +23,7 @@ import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowService;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 34)
@@ -104,6 +106,8 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
         int startId = service.onStartCommand(new Intent(), 0, 1);
         assertEquals(android.app.Service.START_NOT_STICKY, startId);
         assertEquals(0, OkHttpDownloadForegroundService.peekForegroundPromotionCountForTests());
+        ShadowService shadowService = shadowOf(service);
+        assertTrue(shadowService.isStoppedBySelf());
         service.onDestroy();
     }
 

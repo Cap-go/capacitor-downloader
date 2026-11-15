@@ -392,10 +392,36 @@ final class DownloadTaskGenerationStoreTests: XCTestCase {
     }
 
     func testPersistAndRestoreGeneration() {
-        store.setGeneration(7, forTaskIdentifier: 42)
-        XCTAssertEqual(store.allGenerations()[42], 7)
-        store.removeGeneration(forTaskIdentifier: 42)
-        XCTAssertNil(store.allGenerations()[42])
+        store.setGeneration(7, forSessionIdentifier: DownloadSessionIdentifiers.main, taskIdentifier: 42)
+        let key = DownloadTaskGenerationKey.storageKey(sessionIdentifier: DownloadSessionIdentifiers.main, taskIdentifier: 42)
+        XCTAssertEqual(store.allGenerations()[key], 7)
+        store.removeGeneration(forSessionIdentifier: DownloadSessionIdentifiers.main, taskIdentifier: 42)
+        XCTAssertNil(store.allGenerations()[key])
+    }
+
+    func testSameTaskIdentifierAcrossSessionsDoesNotCollide() {
+        store.setGeneration(1, forSessionIdentifier: DownloadSessionIdentifiers.main, taskIdentifier: 9)
+        store.setGeneration(2, forSessionIdentifier: DownloadSessionIdentifiers.wifiOnly, taskIdentifier: 9)
+        store.setGeneration(3, forSessionIdentifier: DownloadSessionIdentifiers.foregroundCapable, taskIdentifier: 9)
+        let all = store.allGenerations()
+        XCTAssertEqual(
+            all[DownloadTaskGenerationKey.storageKey(sessionIdentifier: DownloadSessionIdentifiers.main, taskIdentifier: 9)],
+            1
+        )
+        XCTAssertEqual(
+            all[DownloadTaskGenerationKey.storageKey(sessionIdentifier: DownloadSessionIdentifiers.wifiOnly, taskIdentifier: 9)],
+            2
+        )
+        XCTAssertEqual(
+            all[DownloadTaskGenerationKey.storageKey(sessionIdentifier: DownloadSessionIdentifiers.foregroundCapable, taskIdentifier: 9)],
+            3
+        )
+    }
+
+    func testLegacyBareTaskIdentifierMapsToMainSession() {
+        defaults.set(["55": NSNumber(value: 4)], forKey: DownloadTaskGenerationStore.userDefaultsKey)
+        let key = DownloadTaskGenerationKey.storageKey(sessionIdentifier: DownloadSessionIdentifiers.main, taskIdentifier: 55)
+        XCTAssertEqual(store.allGenerations()[key], 4)
     }
 }
 
@@ -434,6 +460,7 @@ private final class SynchronousFinishDelegate: NSObject, URLSessionDownloadDeleg
 final class DownloadBackgroundSessionManagerTests: XCTestCase {
     override func tearDown() {
         DownloadBackgroundSessionManager.forceProductionRegistrationQueueForTests = false
+        DownloadBackgroundSessionManager.deferredHandlerFallbackIntervalForTests = 20
         DownloadBackgroundSessionManager.shared.resetSessionManagerStateForTests()
         super.tearDown()
     }
@@ -508,8 +535,12 @@ final class DownloadBackgroundSessionManagerTests: XCTestCase {
         manager.urlSession(session, downloadTask: task, didFinishDownloadingTo: tempURL)
         XCTAssertGreaterThan(manager.pendingFinishCountForTests, 0)
 
+        var appDelegateCallCount = 0
         let appDelegateCompletion = expectation(description: "AppDelegate completion deferred")
-        manager.storeBackgroundEventsCompletionHandler({ appDelegateCompletion.fulfill() }, for: DownloadSessionIdentifiers.main)
+        manager.storeBackgroundEventsCompletionHandler({
+            appDelegateCallCount += 1
+            appDelegateCompletion.fulfill()
+        }, for: DownloadSessionIdentifiers.main)
         manager.urlSessionDidFinishEvents(forBackgroundURLSession: session)
 
         let earlyFlushCompleted = expectation(description: "early flush on delegate queue")
@@ -520,6 +551,7 @@ final class DownloadBackgroundSessionManagerTests: XCTestCase {
 
         let delegate = SynchronousFinishDelegate()
         XCTAssertEqual(delegate.finishCallCount, 0)
+        XCTAssertEqual(appDelegateCallCount, 0, "AppDelegate handler must not run before register")
         XCTAssertGreaterThan(manager.pendingFinishCountForTests, 0, "early flush must not drop staged finishes")
 
         manager.register(downloadDelegate: delegate)
@@ -528,6 +560,101 @@ final class DownloadBackgroundSessionManagerTests: XCTestCase {
         XCTAssertTrue(delegate.locationExistedAtFinish)
         XCTAssertEqual(manager.pendingFinishCountForTests, 0)
         wait(for: [appDelegateCompletion], timeout: 1)
+        XCTAssertEqual(appDelegateCallCount, 1, "AppDelegate handler must run exactly once after register")
+    }
+
+    func testStoredHandlerRunsOnceAcrossRepeatedFinishEvents() {
+        let manager = DownloadBackgroundSessionManager.shared
+        manager.resetSessionManagerStateForTests()
+        manager.warmUp()
+        var handlerCallCount = 0
+        let handlerCalled = expectation(description: "handler called once")
+        manager.urlSessionDidFinishEvents(forBackgroundURLSession: manager.mainSession)
+        manager.storeBackgroundEventsCompletionHandler({
+            handlerCallCount += 1
+            handlerCalled.fulfill()
+        }, for: DownloadSessionIdentifiers.main)
+        let firstRound = expectation(description: "first handler flush")
+        manager.delegateQueueForTests.addOperation { firstRound.fulfill() }
+        wait(for: [handlerCalled, firstRound], timeout: 1)
+        XCTAssertEqual(handlerCallCount, 1)
+        let secondRound = expectation(description: "second finish events")
+        manager.urlSessionDidFinishEvents(forBackgroundURLSession: manager.mainSession)
+        manager.delegateQueueForTests.addOperation { secondRound.fulfill() }
+        wait(for: [secondRound], timeout: 1)
+        XCTAssertEqual(handlerCallCount, 1)
+    }
+
+    func testDeferredHandlerFallbackRunsOnceWhenPluginNeverRegisters() {
+        DownloadBackgroundSessionManager.deferredHandlerFallbackIntervalForTests = 0.05
+        let manager = DownloadBackgroundSessionManager.shared
+        manager.resetSessionManagerStateForTests()
+        manager.warmUp()
+
+        guard let session = manager.mainSession else {
+            XCTFail("mainSession missing")
+            return
+        }
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CapacitorDownloaderFallback-\(UUID().uuidString)")
+        try? Data("fallback".utf8).write(to: tempURL)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+        let task = session.downloadTask(with: URL(string: "https://example.invalid/fallback")!)
+        manager.urlSession(session, downloadTask: task, didFinishDownloadingTo: tempURL)
+
+        var fallbackCallCount = 0
+        let fallbackRan = expectation(description: "fallback handler")
+        manager.storeBackgroundEventsCompletionHandler({
+            fallbackCallCount += 1
+            fallbackRan.fulfill()
+        }, for: DownloadSessionIdentifiers.main)
+        manager.urlSessionDidFinishEvents(forBackgroundURLSession: session)
+        let earlyFlushCompleted = expectation(description: "early flush")
+        manager.delegateQueueForTests.addOperation { earlyFlushCompleted.fulfill() }
+        wait(for: [earlyFlushCompleted], timeout: 1)
+        XCTAssertGreaterThan(manager.pendingFinishCountForTests, 0)
+
+        wait(for: [fallbackRan], timeout: 1)
+        XCTAssertEqual(fallbackCallCount, 1)
+        XCTAssertGreaterThan(manager.pendingFinishCountForTests, 0, "staged events must survive fallback")
+    }
+
+    func testRegisterBeforeFallbackPreventsDoubleAppDelegateHandler() {
+        DownloadBackgroundSessionManager.deferredHandlerFallbackIntervalForTests = 0.2
+        let manager = DownloadBackgroundSessionManager.shared
+        manager.resetSessionManagerStateForTests()
+        manager.warmUp()
+
+        guard let session = manager.mainSession else {
+            XCTFail("mainSession missing")
+            return
+        }
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CapacitorDownloaderRegisterFirst-\(UUID().uuidString)")
+        try? Data("reg-first".utf8).write(to: tempURL)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+        let task = session.downloadTask(with: URL(string: "https://example.invalid/register-first")!)
+        manager.urlSession(session, downloadTask: task, didFinishDownloadingTo: tempURL)
+
+        var handlerCallCount = 0
+        let handlerCalled = expectation(description: "handler after register")
+        manager.storeBackgroundEventsCompletionHandler({
+            handlerCallCount += 1
+            handlerCalled.fulfill()
+        }, for: DownloadSessionIdentifiers.main)
+        manager.urlSessionDidFinishEvents(forBackgroundURLSession: session)
+        let earlyFlushCompleted = expectation(description: "early flush")
+        manager.delegateQueueForTests.addOperation { earlyFlushCompleted.fulfill() }
+        wait(for: [earlyFlushCompleted], timeout: 1)
+
+        manager.register(downloadDelegate: SynchronousFinishDelegate())
+        wait(for: [handlerCalled], timeout: 1)
+        XCTAssertEqual(handlerCallCount, 1)
+
+        let fallbackGrace = expectation(description: "fallback window elapsed")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            fallbackGrace.fulfill()
+        }
+        wait(for: [fallbackGrace], timeout: 1)
+        XCTAssertEqual(handlerCallCount, 1)
     }
 
     func testWarmUpCreatesDistinctBackgroundSessions() {

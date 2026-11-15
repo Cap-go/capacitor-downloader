@@ -3,6 +3,7 @@ import Foundation
 enum DownloadSessionIdentifiers {
     static let main = "CapacitorDownloader"
     static let wifiOnly = "CapacitorDownloader.wifiOnly"
+    static let foregroundCapable = "CapacitorDownloader.foreground"
     static let continuedProcessingSuffix = ".CapacitorDownloader.continuedProcessing."
 
     static func continuedProcessingTaskIdentifier() -> String {

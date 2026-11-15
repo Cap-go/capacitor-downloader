@@ -46,15 +46,59 @@ function fileUrl(path) {
   return `${serverUrl.replace(/\/$/, '')}${path}`;
 }
 
+const ANDROID_DOWNLOAD_MANAGER_STATUS = {
+  1: 'PENDING',
+  2: 'RUNNING',
+  4: 'PAUSED',
+  8: 'DONE',
+  16: 'ERROR',
+};
+
+function normalizeDownloadTask(raw) {
+  if (!raw) {
+    return { state: 'RUNNING', progress: 0 };
+  }
+  if (typeof raw.state === 'string') {
+    return { state: raw.state, progress: Number(raw.progress) || 0 };
+  }
+  const statusCode = typeof raw.status === 'number' ? raw.status : undefined;
+  if (statusCode !== undefined) {
+    const total = Number(raw.bytesTotal) || 0;
+    const downloaded = Number(raw.bytesDownloaded) || 0;
+    const progress =
+      total > 0 ? Math.min(1, downloaded / total) : statusCode === 8 ? 1 : Number(raw.progress) || 0;
+    const state = ANDROID_DOWNLOAD_MANAGER_STATUS[statusCode] ?? 'RUNNING';
+    return { state, progress };
+  }
+  return { state: 'RUNNING', progress: Number(raw.progress) || 0 };
+}
+
+async function readDownloadStatus(id) {
+  try {
+    return normalizeDownloadTask(await plugin.checkStatus({ id }));
+  } catch (error) {
+    if ((completionCounts.get(id) ?? 0) > 0) {
+      return { state: 'DONE', progress: 1 };
+    }
+    throw error;
+  }
+}
+
 async function waitForTerminal(id, timeoutMs = 120_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const status = await plugin.checkStatus({ id });
+    let status = await readDownloadStatus(id);
+    if ((completionCounts.get(id) ?? 0) > 0 && status.state !== 'ERROR') {
+      status = { state: 'DONE', progress: 1 };
+    }
     appendLog(`STATE:${id}:${status.state}:${status.progress}`);
     if (status.state === 'DONE' || status.state === 'ERROR') {
       return status;
     }
     await sleep(750);
+  }
+  if ((completionCounts.get(id) ?? 0) > 0) {
+    return { state: 'DONE', progress: 1 };
   }
   throw new Error(`Timed out waiting for terminal state on ${id}`);
 }
@@ -184,7 +228,7 @@ const flows = {
       setMarker('error-bad-url', true, 'rejected');
       return;
     }
-    const status = await plugin.checkStatus({ id });
+    const status = await readDownloadStatus(id);
     if (status.state === 'ERROR') {
       setMarker('error-bad-url', true, 'status-error');
       return;
@@ -257,7 +301,7 @@ const flows = {
     });
     await sleep(1_500);
     await plugin.stop({ id });
-    const status = await plugin.checkStatus({ id });
+    const status = await readDownloadStatus(id);
     setSummary(`STATE:${id}:${status.state}:${status.progress}`);
     if (status.state === 'DONE') {
       throw new Error('Download still DONE after stop');

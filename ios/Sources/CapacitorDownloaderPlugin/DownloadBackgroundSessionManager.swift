@@ -20,7 +20,7 @@ final class DownloadBackgroundSessionManager: NSObject {
 
     private var pendingFinishes: [PendingFinish] = []
     private var pendingCompletions: [PendingCompletion] = []
-    private let sessionLock = NSLock()
+    private let pendingLock = NSLock()
     private let delegateQueue: OperationQueue = {
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
@@ -29,7 +29,6 @@ final class DownloadBackgroundSessionManager: NSObject {
     }()
 
     private var completionHandlers: [String: () -> Void] = [:]
-    private var pendingBackgroundRelaunchHandlers: Set<String> = []
     private let handlerLock = NSLock()
 
     private(set) var mainSession: URLSession!
@@ -62,190 +61,151 @@ final class DownloadBackgroundSessionManager: NSObject {
         foregroundCapableSession = URLSession(configuration: foregroundConfig, delegate: self, delegateQueue: delegateQueue)
     }
 
-    func register(downloadDelegate: URLSessionDownloadDelegate) {
-        let registerOnQueue = {
-            self.downloadDelegate = downloadDelegate
-            self.flushPendingEvents()
-        }
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
-            registerOnQueue()
-            return
-        }
-        delegateQueue.addOperation(registerOnQueue)
-    }
+  func register(downloadDelegate: URLSessionDownloadDelegate) {
+    self.downloadDelegate = downloadDelegate
+    flushPendingEvents()
+  }
 
-    private func flushPendingEvents() {
-        sessionLock.lock()
-        let finishes = pendingFinishes
-        let completions = pendingCompletions
-        pendingFinishes = []
-        pendingCompletions = []
-        sessionLock.unlock()
+  private func flushPendingEvents() {
+    pendingLock.lock()
+    let finishes = pendingFinishes
+    let completions = pendingCompletions
+    pendingFinishes = []
+    pendingCompletions = []
+    pendingLock.unlock()
 
-        for finish in finishes {
-            downloadDelegate?.urlSession(
-                finish.session,
-                downloadTask: finish.downloadTask,
-                didFinishDownloadingTo: finish.location
-            )
-            if finish.removeStagedFile {
-                try? FileManager.default.removeItem(at: finish.location)
-            }
-        }
-        for completion in completions {
-            downloadDelegate?.urlSession?(completion.session, task: completion.task, didCompleteWithError: completion.error)
-        }
+    for finish in finishes {
+      downloadDelegate?.urlSession(
+        finish.session,
+        downloadTask: finish.downloadTask,
+        didFinishDownloadingTo: finish.location
+      )
+      if finish.removeStagedFile {
+        try? FileManager.default.removeItem(at: finish.location)
+      }
     }
+    for completion in completions {
+      downloadDelegate?.urlSession?(completion.session, task: completion.task, didCompleteWithError: completion.error)
+    }
+  }
 
-    private func stageDownloadIfNeeded(
-        session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        location: URL
-    ) -> PendingFinish? {
-        let stagingDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("CapacitorDownloaderPending", isDirectory: true)
-        try? FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
-        let stagedURL = stagingDirectory.appendingPathComponent(UUID().uuidString)
-        do {
-            try FileManager.default.copyItem(at: location, to: stagedURL)
-            return PendingFinish(
-                session: session,
-                downloadTask: downloadTask,
-                location: stagedURL,
-                removeStagedFile: true
-            )
-        } catch {
-            return nil
-        }
+  private func stageDownloadIfNeeded(
+    session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    location: URL
+  ) -> PendingFinish? {
+    let stagingDirectory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("CapacitorDownloaderPending", isDirectory: true)
+    try? FileManager.default.createDirectory(at: stagingDirectory, withIntermediateDirectories: true)
+    let stagedURL = stagingDirectory.appendingPathComponent(UUID().uuidString)
+    do {
+      try FileManager.default.copyItem(at: location, to: stagedURL)
+      return PendingFinish(
+        session: session,
+        downloadTask: downloadTask,
+        location: stagedURL,
+        removeStagedFile: true
+      )
+    } catch {
+      return nil
     }
+  }
 
-    func session(allowsCellularAccess: Bool, preferForegroundCapable: Bool) -> URLSession {
-        if preferForegroundCapable, allowsCellularAccess, foregroundCapableSession != nil {
-            return foregroundCapableSession
-        }
-        return allowsCellularAccess ? mainSession : wifiOnlySession
+  func session(allowsCellularAccess: Bool, preferForegroundCapable: Bool) -> URLSession {
+    if preferForegroundCapable, allowsCellularAccess, foregroundCapableSession != nil {
+      return foregroundCapableSession
     }
+    return allowsCellularAccess ? mainSession : wifiOnlySession
+  }
 
-    func storeBackgroundEventsCompletionHandler(_ handler: @escaping () -> Void, for identifier: String) {
-        var shouldRun = false
-        handlerLock.lock()
-        if pendingBackgroundRelaunchHandlers.remove(identifier) != nil {
-            shouldRun = true
-        }
-        completionHandlers[identifier] = handler
-        handlerLock.unlock()
-        if shouldRun {
-            runBackgroundCompletionHandlerAfterFlushingPending(handler)
-        }
-    }
+  func storeBackgroundEventsCompletionHandler(_ handler: @escaping () -> Void, for identifier: String) {
+    handlerLock.lock()
+    completionHandlers[identifier] = handler
+    handlerLock.unlock()
+  }
 
-    private func runBackgroundCompletionHandlerAfterFlushingPending(_ handler: @escaping () -> Void) {
-        delegateQueue.addOperation {
-            self.flushPendingEvents()
-            DispatchQueue.main.async(execute: handler)
-        }
+  func rehydrateTasks(completion: @escaping ([URLSessionTask]) -> Void) {
+    guard mainSession != nil, wifiOnlySession != nil else {
+      completion([])
+      return
     }
-
-    func rehydrateTasks(completion: @escaping ([URLSessionTask]) -> Void) {
-        guard mainSession != nil, wifiOnlySession != nil else {
-            completion([])
-            return
-        }
-        let group = DispatchGroup()
-        var collected: [URLSessionTask] = []
-        let collectLock = NSLock()
-        let collect: ([URLSessionTask]) -> Void = { tasks in
-            collectLock.lock()
-            collected.append(contentsOf: tasks)
-            collectLock.unlock()
-        }
-        group.enter()
-        mainSession.getAllTasks { tasks in
-            collect(tasks)
-            group.leave()
-        }
-        group.enter()
-        wifiOnlySession.getAllTasks { tasks in
-            collect(tasks)
-            group.leave()
-        }
-        group.notify(queue: .global(qos: .utility)) {
-            completion(collected)
-        }
+    let group = DispatchGroup()
+    var collected: [URLSessionTask] = []
+    let collectLock = NSLock()
+    let collect: ([URLSessionTask]) -> Void = { tasks in
+        collectLock.lock()
+        collected.append(contentsOf: tasks)
+        collectLock.unlock()
     }
+    group.enter()
+    mainSession.getAllTasks { tasks in
+      collect(tasks)
+      group.leave()
+    }
+    group.enter()
+    wifiOnlySession.getAllTasks { tasks in
+      collect(tasks)
+      group.leave()
+    }
+    group.notify(queue: .global(qos: .utility)) {
+      completion(collected)
+    }
+  }
 }
 
 extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
-    func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didFinishDownloadingTo location: URL
-    ) {
-        if let downloadDelegate {
-            delegateQueue.addOperation {
-                downloadDelegate.urlSession(session, downloadTask: downloadTask, didFinishDownloadingTo: location)
-            }
-            return
-        }
-        guard let staged = stageDownloadIfNeeded(session: session, downloadTask: downloadTask, location: location) else {
-            let copyError = NSError(
-                domain: "CapacitorDownloader",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "Failed to stage background download"]
-            )
-            sessionLock.lock()
-            pendingCompletions.append(
-                PendingCompletion(session: session, task: downloadTask, error: copyError)
-            )
-            sessionLock.unlock()
-            return
-        }
-        sessionLock.lock()
-        pendingFinishes.append(staged)
-        sessionLock.unlock()
+  func urlSession(
+    _ session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    didFinishDownloadingTo location: URL
+  ) {
+    if let downloadDelegate {
+      downloadDelegate.urlSession(session, downloadTask: downloadTask, didFinishDownloadingTo: location)
+      return
     }
+    guard let staged = stageDownloadIfNeeded(session: session, downloadTask: downloadTask, location: location) else {
+      return
+    }
+    pendingLock.lock()
+    pendingFinishes.append(staged)
+    pendingLock.unlock()
+  }
 
-    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let downloadDelegate {
-            delegateQueue.addOperation {
-                downloadDelegate.urlSession?(session, task: task, didCompleteWithError: error)
-            }
-            return
-        }
-        sessionLock.lock()
-        pendingCompletions.append(PendingCompletion(session: session, task: task, error: error))
-        sessionLock.unlock()
+  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    if let downloadDelegate {
+      downloadDelegate.urlSession?(session, task: task, didCompleteWithError: error)
+      return
     }
+    pendingLock.lock()
+    pendingCompletions.append(PendingCompletion(session: session, task: task, error: error))
+    pendingLock.unlock()
+  }
 
-    func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didWriteData bytesWritten: Int64,
-        totalBytesWritten: Int64,
-        totalBytesExpectedToWrite: Int64
-    ) {
-        downloadDelegate?.urlSession?(
-            session,
-            downloadTask: downloadTask,
-            didWriteData: bytesWritten,
-            totalBytesWritten: totalBytesWritten,
-            totalBytesExpectedToWrite: totalBytesExpectedToWrite
-        )
-    }
+  func urlSession(
+    _ session: URLSession,
+    downloadTask: URLSessionDownloadTask,
+    didWriteData bytesWritten: Int64,
+    totalBytesWritten: Int64,
+    totalBytesExpectedToWrite: Int64
+  ) {
+    downloadDelegate?.urlSession?(
+      session,
+      downloadTask: downloadTask,
+      didWriteData: bytesWritten,
+      totalBytesWritten: totalBytesWritten,
+      totalBytesExpectedToWrite: totalBytesExpectedToWrite
+    )
+  }
 
-    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
-        guard let identifier = session.configuration.identifier else {
-            return
-        }
-        var handler: (() -> Void)?
-        handlerLock.lock()
-        handler = completionHandlers.removeValue(forKey: identifier)
-        if handler == nil {
-            pendingBackgroundRelaunchHandlers.insert(identifier)
-        }
-        handlerLock.unlock()
-        if let handler {
-            runBackgroundCompletionHandlerAfterFlushingPending(handler)
-        }
+  func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+    guard let identifier = session.configuration.identifier else {
+      return
     }
+    handlerLock.lock()
+    let handler = completionHandlers.removeValue(forKey: identifier)
+    handlerLock.unlock()
+    DispatchQueue.main.async {
+      handler?()
+    }
+  }
 }

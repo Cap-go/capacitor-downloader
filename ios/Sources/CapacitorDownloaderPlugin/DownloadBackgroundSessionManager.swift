@@ -262,10 +262,6 @@ final class DownloadBackgroundSessionManager: NSObject {
     private func runBackgroundCompletionHandlerAfterFlushingPending(_ handler: @escaping () -> Void) {
         delegateQueue.addOperation {
             self.flushPendingEvents()
-            if self.downloadDelegate == nil, self.hasStagedSessionEvents() {
-                self.enqueueBackgroundCompletionHandlerUntilFlush(handler)
-                return
-            }
             DispatchQueue.main.async(execute: handler)
         }
     }

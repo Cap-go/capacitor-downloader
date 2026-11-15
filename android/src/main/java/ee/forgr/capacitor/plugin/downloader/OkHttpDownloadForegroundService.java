@@ -1,40 +1,24 @@
 package ee.forgr.capacitor.plugin.downloader;
 
-import android.app.ForegroundServiceStartNotAllowedException;
 import android.app.Notification;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.os.Build;
 import android.os.IBinder;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.ServiceCompat;
 
 /**
- * Optional dataSync foreground service for OkHttp {@code notification: 'progress'} downloads only.
+ * Keeps OkHttp transfers alive long enough to update ongoing progress notifications.
  */
 public class OkHttpDownloadForegroundService extends Service {
 
     private static final int SERVICE_NOTIFICATION_ID = 0x4f4b4854;
-    private static final Object stateLock = new Object();
-    private static boolean foregroundEstablished;
-    private static boolean stopWhenForegroundReady;
-    private static int lastKnownActiveDownloads;
-    static volatile boolean throwOnStartForTests = false;
-    static volatile boolean throwStartNotAllowedForTests = false;
 
-    public static void setThrowStartNotAllowedForTests(boolean value) {
-        throwStartNotAllowedForTests = value;
-    }
-
-    public static boolean requestStart(Context context) {
-        if (throwOnStartForTests) {
-            return false;
-        }
+    public static boolean start(Context context) {
         try {
-            if (throwStartNotAllowedForTests) {
-                throw new ForegroundServiceStartNotAllowedException("test: background FGS start not allowed");
-            }
             Intent intent = new Intent(context, OkHttpDownloadForegroundService.class);
             androidx.core.content.ContextCompat.startForegroundService(context, intent);
             return true;
@@ -43,29 +27,8 @@ public class OkHttpDownloadForegroundService extends Service {
         }
     }
 
-    public static void notifyActiveDownloads(Context context, int activeDownloads) {
-        synchronized (stateLock) {
-            lastKnownActiveDownloads = activeDownloads;
-            if (activeDownloads > 0) {
-                stopWhenForegroundReady = false;
-                return;
-            }
-            if (!foregroundEstablished) {
-                stopWhenForegroundReady = true;
-                return;
-            }
-        }
+    public static void stop(Context context) {
         context.stopService(new Intent(context, OkHttpDownloadForegroundService.class));
-    }
-
-    public static void resetLifecycleStateForTests() {
-        synchronized (stateLock) {
-            foregroundEstablished = false;
-            stopWhenForegroundReady = false;
-            lastKnownActiveDownloads = 0;
-            throwOnStartForTests = false;
-            throwStartNotAllowedForTests = false;
-        }
     }
 
     @Override
@@ -75,16 +38,14 @@ public class OkHttpDownloadForegroundService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Notification notification = OkHttpDownloadProgressNotifier.foregroundServiceNotification(this);
+        Notification notification = new NotificationCompat.Builder(this, OkHttpDownloadProgressNotifier.CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle("Downloading")
+            .setOngoing(true)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setSilent(true)
+            .build();
         ServiceCompat.startForeground(this, SERVICE_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-        synchronized (stateLock) {
-            foregroundEstablished = true;
-            boolean shouldStop = stopWhenForegroundReady || lastKnownActiveDownloads <= 0;
-            stopWhenForegroundReady = false;
-            if (shouldStop) {
-                stopSelf();
-            }
-        }
         return START_NOT_STICKY;
     }
 
@@ -96,10 +57,6 @@ public class OkHttpDownloadForegroundService extends Service {
 
     @Override
     public void onDestroy() {
-        synchronized (stateLock) {
-            foregroundEstablished = false;
-            stopWhenForegroundReady = false;
-        }
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE);
         super.onDestroy();
     }

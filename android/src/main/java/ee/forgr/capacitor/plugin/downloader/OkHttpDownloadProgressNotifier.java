@@ -86,7 +86,6 @@ final class OkHttpDownloadProgressNotifier {
     void abandonDownload(String downloadId) {
         synchronized (serviceLock) {
             if (entries.remove(downloadId) != null) {
-                releaseOneActiveDownload();
                 cancelNotification(downloadId);
                 scheduleForegroundStopIfIdle();
             }
@@ -175,7 +174,6 @@ final class OkHttpDownloadProgressNotifier {
     private void handleNotificationPostFailure(String downloadId) {
         synchronized (serviceLock) {
             if (entries.remove(downloadId) != null) {
-                releaseOneActiveDownload();
                 scheduleForegroundStopIfIdle();
             }
         }

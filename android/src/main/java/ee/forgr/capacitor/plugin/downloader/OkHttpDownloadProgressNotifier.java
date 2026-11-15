@@ -13,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Ongoing progress notifications for OkHttp downloads when {@code notification} is {@code progress}.
+ * Ongoing progress notifications for OkHttp downloads (DownloadManager already shows its own).
  */
 final class OkHttpDownloadProgressNotifier {
 
@@ -27,7 +27,6 @@ final class OkHttpDownloadProgressNotifier {
     private final ConcurrentHashMap<String, ProgressEntry> entries = new ConcurrentHashMap<>();
     private final AtomicInteger activeDownloads = new AtomicInteger(0);
     private final Object serviceLock = new Object();
-    private volatile Notification lastForegroundNotification;
 
     OkHttpDownloadProgressNotifier(Context context) {
         this.context = context.getApplicationContext();
@@ -35,10 +34,6 @@ final class OkHttpDownloadProgressNotifier {
         ensureChannel();
     }
 
-    /**
-     * Registers progress tracking. Always returns true: a foreground service or notification failure
-     * must not block the download (8.7.0 behavior for default {@code completed}).
-     */
     boolean started(String downloadId, String title, String description, String notificationMode) {
         if (!shouldShowProgress(notificationMode)) {
             return true;
@@ -46,8 +41,11 @@ final class OkHttpDownloadProgressNotifier {
         synchronized (serviceLock) {
             entries.put(downloadId, new ProgressEntry(title, description, notificationMode, SystemClock.elapsedRealtime()));
             activeDownloads.incrementAndGet();
-            OkHttpDownloadForegroundService.notifyActiveDownloads(context, activeDownloads.get());
-            OkHttpDownloadForegroundService.requestStart(context);
+            if (!OkHttpDownloadForegroundService.start(context)) {
+                entries.remove(downloadId);
+                activeDownloads.updateAndGet((value) -> Math.max(0, value - 1));
+                return false;
+            }
         }
         postProgress(downloadId, 0f, true);
         return true;
@@ -72,62 +70,16 @@ final class OkHttpDownloadProgressNotifier {
             if (entry == null) {
                 return;
             }
-            releaseOneActiveDownload();
+            activeDownloads.updateAndGet((value) -> Math.max(0, value - 1));
             if (!success || "progress".equals(entry.notificationMode)) {
                 cancelNotification(downloadId);
             } else if (success) {
                 postCompleted(downloadId, entry);
             }
-            scheduleForegroundStopIfIdle();
-        }
-    }
-
-    void abandonDownload(String downloadId) {
-        synchronized (serviceLock) {
-            if (entries.remove(downloadId) != null) {
-                releaseOneActiveDownload();
-                cancelNotification(downloadId);
-                scheduleForegroundStopIfIdle();
+            if (activeDownloads.get() <= 0) {
+                OkHttpDownloadForegroundService.stop(context);
             }
         }
-    }
-
-    void shutdown() {
-        synchronized (serviceLock) {
-            for (String downloadId : entries.keySet()) {
-                cancelNotification(downloadId);
-            }
-            entries.clear();
-            activeDownloads.set(0);
-            lastForegroundNotification = null;
-            sharedForegroundNotification = null;
-            OkHttpDownloadForegroundService.notifyActiveDownloads(context, 0);
-        }
-    }
-
-    private static volatile Notification sharedForegroundNotification;
-
-    static Notification foregroundServiceNotification(Context context) {
-        Notification pinned = sharedForegroundNotification;
-        if (pinned != null) {
-            return pinned;
-        }
-        ensureChannelStatic(context);
-        return new NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setOngoing(true)
-            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .setSilent(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build();
-    }
-
-    private void releaseOneActiveDownload() {
-        activeDownloads.updateAndGet((value) -> Math.max(0, value - 1));
-    }
-
-    private void scheduleForegroundStopIfIdle() {
-        OkHttpDownloadForegroundService.notifyActiveDownloads(context, activeDownloads.get());
     }
 
     private void postProgress(String downloadId, float progress, boolean force) {
@@ -153,19 +105,8 @@ final class OkHttpDownloadProgressNotifier {
             .build();
         try {
             notificationManager.notify(notificationTagFor(downloadId), NOTIFICATION_ID, notification);
-            lastForegroundNotification = notification;
-            sharedForegroundNotification = notification;
         } catch (SecurityException ignored) {
-            handleNotificationPostFailure(downloadId);
-        }
-    }
-
-    private void handleNotificationPostFailure(String downloadId) {
-        synchronized (serviceLock) {
-            if (entries.remove(downloadId) != null) {
-                releaseOneActiveDownload();
-                scheduleForegroundStopIfIdle();
-            }
+            entries.remove(downloadId);
         }
     }
 
@@ -186,7 +127,11 @@ final class OkHttpDownloadProgressNotifier {
     }
 
     private void cancelNotification(String downloadId) {
-        notificationManager.cancel(notificationTagFor(downloadId), NOTIFICATION_ID);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            notificationManager.cancel(notificationTagFor(downloadId), NOTIFICATION_ID);
+        } else {
+            notificationManager.cancel(NOTIFICATION_ID);
+        }
     }
 
     private String resolveTitle(ProgressEntry entry) {
@@ -197,7 +142,7 @@ final class OkHttpDownloadProgressNotifier {
     }
 
     static boolean shouldShowProgressForMode(String notificationMode) {
-        return "progress".equals(notificationMode);
+        return notificationMode == null || "completed".equals(notificationMode) || "progress".equals(notificationMode);
     }
 
     static String notificationTagForDownload(String downloadId) {
@@ -225,15 +170,7 @@ final class OkHttpDownloadProgressNotifier {
     }
 
     private void ensureChannel() {
-        ensureChannelStatic(context);
-    }
-
-    private static void ensureChannelStatic(Context context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            return;
-        }
-        NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-        if (notificationManager == null) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || notificationManager == null) {
             return;
         }
         NotificationChannel channel = new NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW);

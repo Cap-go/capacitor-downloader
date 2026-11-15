@@ -33,6 +33,7 @@ function run(cmd, args, cwd) {
 }
 
 run('bun', ['run', 'build'], rootDir);
+run('bun', ['install'], exampleDir);
 run('bun', ['run', 'build'], exampleDir);
 run('bunx', ['cap', 'sync', platform], exampleDir);
 

@@ -312,7 +312,7 @@ const flows = {
       await plugin.download({
         id,
         url: fileUrl('/bytes/1024'),
-        destination: '   ',
+        destination: '',
         androidHttpEngine: 'auto',
         notification: 'hidden',
       });

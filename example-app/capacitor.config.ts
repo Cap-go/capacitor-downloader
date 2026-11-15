@@ -14,9 +14,9 @@ const config: CapacitorConfig = {
     },
     CapacitorUpdater: {
       appId: 'app.capgo.downloader',
-      autoUpdate: true,
+      autoUpdate: !isMaestroBuild,
       autoSplashscreen: false,
-      directUpdate: 'always',
+      directUpdate: isMaestroBuild ? 'never' : 'always',
       version: pkg.version,
     },
   },

@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.IBinder;
+import androidx.annotation.VisibleForTesting;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.ServiceCompat;
 
@@ -56,6 +57,13 @@ public class OkHttpDownloadForegroundService extends Service {
             }
         }
         context.stopService(new Intent(context, OkHttpDownloadForegroundService.class));
+    }
+
+    @VisibleForTesting
+    static int peekLastKnownActiveDownloadsForTests() {
+        synchronized (stateLock) {
+            return lastKnownActiveDownloads;
+        }
     }
 
     public static void resetLifecycleStateForTests() {

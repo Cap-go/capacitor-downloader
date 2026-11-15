@@ -85,9 +85,7 @@ final class OkHttpDownloadProgressNotifier {
     void abandonDownload(String downloadId) {
         synchronized (serviceLock) {
             if (entries.remove(downloadId) != null) {
-                releaseOneActiveDownload();
                 cancelNotification(downloadId);
-                scheduleForegroundStopIfIdle();
             }
         }
     }
@@ -98,10 +96,8 @@ final class OkHttpDownloadProgressNotifier {
                 cancelNotification(downloadId);
             }
             entries.clear();
-            activeDownloads.set(0);
             lastForegroundNotification = null;
             sharedForegroundNotification = null;
-            OkHttpDownloadForegroundService.notifyActiveDownloads(context, 0);
         }
     }
 
@@ -156,7 +152,7 @@ final class OkHttpDownloadProgressNotifier {
             lastForegroundNotification = notification;
             sharedForegroundNotification = notification;
         } catch (SecurityException ignored) {
-            handleNotificationPostFailure(downloadId);
+            // proof break: do not release foreground accounting after notification post failure
         }
     }
 

@@ -12,6 +12,29 @@ final class DownloadBackgroundSessionManager: NSObject {
     internal var hasRegisteredDownloadDelegateForTests: Bool {
         downloadDelegate != nil
     }
+
+    internal var delegateQueueForTests: OperationQueue {
+        delegateQueue
+    }
+
+    internal var pendingFinishCountForTests: Int {
+        sessionLock.lock()
+        let count = pendingFinishes.count
+        sessionLock.unlock()
+        return count
+    }
+
+    /// Resets delegate and pending queues (unit tests only).
+    internal func resetSessionManagerStateForTests() {
+        downloadDelegate = nil
+        sessionLock.lock()
+        pendingFinishes = []
+        pendingCompletions = []
+        sessionLock.unlock()
+        flushHandlerLock.lock()
+        pendingFlushCompletionHandlers = []
+        flushHandlerLock.unlock()
+    }
     private struct PendingFinish {
         let session: URLSession
         let downloadTask: URLSessionDownloadTask
@@ -38,6 +61,9 @@ final class DownloadBackgroundSessionManager: NSObject {
     private var completionHandlers: [String: () -> Void] = [:]
     private var pendingBackgroundRelaunchHandlers: Set<String> = []
     private let handlerLock = NSLock()
+    /// AppDelegate completion handlers deferred until a plugin delegate is registered and staged events flush.
+    private var pendingFlushCompletionHandlers: [() -> Void] = []
+    private let flushHandlerLock = NSLock()
 
     private(set) var mainSession: URLSession!
     private(set) var wifiOnlySession: URLSession!
@@ -73,6 +99,7 @@ final class DownloadBackgroundSessionManager: NSObject {
         let registerOnQueue = {
             self.downloadDelegate = downloadDelegate
             self.flushPendingEvents()
+            self.runPendingBackgroundCompletionHandlers()
         }
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil,
            !Self.forceProductionRegistrationQueueForTests {
@@ -83,6 +110,9 @@ final class DownloadBackgroundSessionManager: NSObject {
     }
 
     private func flushPendingEvents() {
+        guard downloadDelegate != nil else {
+            return
+        }
         sessionLock.lock()
         let finishes = pendingFinishes
         let completions = pendingCompletions
@@ -102,6 +132,22 @@ final class DownloadBackgroundSessionManager: NSObject {
         }
         for completion in completions {
             downloadDelegate?.urlSession?(completion.session, task: completion.task, didCompleteWithError: completion.error)
+        }
+    }
+
+    private func enqueueBackgroundCompletionHandlerUntilFlush(_ handler: @escaping () -> Void) {
+        flushHandlerLock.lock()
+        pendingFlushCompletionHandlers.append(handler)
+        flushHandlerLock.unlock()
+    }
+
+    private func runPendingBackgroundCompletionHandlers() {
+        flushHandlerLock.lock()
+        let handlers = pendingFlushCompletionHandlers
+        pendingFlushCompletionHandlers = []
+        flushHandlerLock.unlock()
+        for handler in handlers {
+            DispatchQueue.main.async(execute: handler)
         }
     }
 
@@ -147,9 +193,20 @@ final class DownloadBackgroundSessionManager: NSObject {
         }
     }
 
+    private func hasStagedSessionEvents() -> Bool {
+        sessionLock.lock()
+        let hasPending = !pendingFinishes.isEmpty || !pendingCompletions.isEmpty
+        sessionLock.unlock()
+        return hasPending
+    }
+
     private func runBackgroundCompletionHandlerAfterFlushingPending(_ handler: @escaping () -> Void) {
         delegateQueue.addOperation {
             self.flushPendingEvents()
+            if self.downloadDelegate == nil, self.hasStagedSessionEvents() {
+                self.enqueueBackgroundCompletionHandlerUntilFlush(handler)
+                return
+            }
             DispatchQueue.main.async(execute: handler)
         }
     }

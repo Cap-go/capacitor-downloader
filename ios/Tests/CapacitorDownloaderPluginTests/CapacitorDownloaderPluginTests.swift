@@ -434,6 +434,7 @@ private final class SynchronousFinishDelegate: NSObject, URLSessionDownloadDeleg
 final class DownloadBackgroundSessionManagerTests: XCTestCase {
     override func tearDown() {
         DownloadBackgroundSessionManager.forceProductionRegistrationQueueForTests = false
+        DownloadBackgroundSessionManager.shared.resetSessionManagerStateForTests()
         super.tearDown()
     }
 
@@ -462,20 +463,65 @@ final class DownloadBackgroundSessionManagerTests: XCTestCase {
     func testRegisterUsesDelegateQueueInProductionPath() {
         DownloadBackgroundSessionManager.forceProductionRegistrationQueueForTests = true
         let manager = DownloadBackgroundSessionManager.shared
+        manager.resetSessionManagerStateForTests()
         manager.warmUp()
-        let delegate = SynchronousFinishDelegate()
-        let registered = expectation(description: "async registration")
-        manager.register(downloadDelegate: delegate)
-        DispatchQueue.global(qos: .utility).async {
-            for _ in 0..<100 where !manager.hasRegisteredDownloadDelegateForTests {
-                usleep(10_000)
-            }
-            if manager.hasRegisteredDownloadDelegateForTests {
-                registered.fulfill()
-            }
+
+        let queueEntered = expectation(description: "delegate queue blocked")
+        let releaseQueue = DispatchSemaphore(value: 0)
+        manager.delegateQueueForTests.addOperation {
+            queueEntered.fulfill()
+            releaseQueue.wait()
         }
-        wait(for: [registered], timeout: 2)
+        wait(for: [queueEntered], timeout: 1)
+
+        let delegate = SynchronousFinishDelegate()
+        manager.register(downloadDelegate: delegate)
+        XCTAssertFalse(
+            manager.hasRegisteredDownloadDelegateForTests,
+            "register must enqueue on delegateQueue, not run on the caller"
+        )
+
+        releaseQueue.signal()
+        let registrationFinished = expectation(description: "registration finished")
+        manager.delegateQueueForTests.addOperation {
+            registrationFinished.fulfill()
+        }
+        wait(for: [registrationFinished], timeout: 1)
         XCTAssertTrue(manager.hasRegisteredDownloadDelegateForTests)
+    }
+
+    func testStagedFinishSurvivesEarlyFlushUntilRegister() {
+        let manager = DownloadBackgroundSessionManager.shared
+        manager.resetSessionManagerStateForTests()
+        manager.warmUp()
+
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CapacitorDownloaderStaged-\(UUID().uuidString)")
+        try? Data("staged-payload".utf8).write(to: tempURL)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        guard let session = manager.mainSession else {
+            XCTFail("mainSession missing")
+            return
+        }
+        let task = session.downloadTask(with: URL(string: "https://example.invalid/staged-finish")!)
+        manager.urlSession(session, downloadTask: task, didFinishDownloadingTo: tempURL)
+        XCTAssertGreaterThan(manager.pendingFinishCountForTests, 0)
+
+        let appDelegateCompletion = expectation(description: "AppDelegate completion deferred")
+        manager.storeBackgroundEventsCompletionHandler({ appDelegateCompletion.fulfill() }, for: DownloadSessionIdentifiers.main)
+        manager.urlSessionDidFinishEvents(forBackgroundURLSession: session)
+
+        let delegate = SynchronousFinishDelegate()
+        XCTAssertEqual(delegate.finishCallCount, 0)
+        XCTAssertGreaterThan(manager.pendingFinishCountForTests, 0, "early flush must not drop staged finishes")
+
+        manager.register(downloadDelegate: delegate)
+
+        XCTAssertEqual(delegate.finishCallCount, 1)
+        XCTAssertTrue(delegate.locationExistedAtFinish)
+        XCTAssertEqual(manager.pendingFinishCountForTests, 0)
+        wait(for: [appDelegateCompletion], timeout: 1)
     }
 
     func testWarmUpCreatesDistinctBackgroundSessions() {

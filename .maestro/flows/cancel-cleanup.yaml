@@ -5,11 +5,11 @@ appId: app.capgo.downloader
     element:
       text: cancel-cleanup
     direction: DOWN
-    timeout: 60000
+    timeout: 45000
     centerElement: true
 - tapOn:
     text: cancel-cleanup
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: cancel-cleanup:success.*'
-    timeout: 120000
+    timeout: 90000

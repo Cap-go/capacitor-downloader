@@ -5,11 +5,11 @@ appId: app.capgo.downloader
     element:
       text: error-404
     direction: DOWN
-    timeout: 60000
+    timeout: 45000
     centerElement: true
 - tapOn:
     text: error-404
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: error-404:success.*'
-    timeout: 90000
+    timeout: 60000

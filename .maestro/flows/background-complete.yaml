@@ -5,20 +5,20 @@ appId: app.capgo.downloader
     element:
       text: background-complete
     direction: DOWN
-    timeout: 60000
+    timeout: 45000
     centerElement: true
 - tapOn:
     text: background-complete
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*PHASE:background-complete:downloading.*'
-    timeout: 60000
+    timeout: 45000
 - pressKey: Home
 - extendedWaitUntil:
     visible: '.*'
-    timeout: 10000
+    timeout: 5000
 - launchApp:
     clearState: false
 - extendedWaitUntil:
     visible: '.*Marker: background-complete:success.*'
-    timeout: 240000
+    timeout: 120000

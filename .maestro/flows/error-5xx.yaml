@@ -5,11 +5,11 @@ appId: app.capgo.downloader
     element:
       text: error-5xx
     direction: DOWN
-    timeout: 60000
+    timeout: 45000
     centerElement: true
 - tapOn:
     text: error-5xx
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: error-5xx:success.*'
-    timeout: 90000
+    timeout: 60000

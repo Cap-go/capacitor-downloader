@@ -109,7 +109,7 @@ const flows = {
     await plugin.download({
       id,
       url: fileUrl('/bytes/65536'),
-      destination: 'cache/maestro-fg.bin',
+      destination: 'downloads/maestro-fg.bin',
       androidHttpEngine: 'auto',
       notification: 'hidden',
     });
@@ -121,7 +121,7 @@ const flows = {
     const id = 'bg-complete';
     await plugin.download({
       id,
-      url: fileUrl('/slow/196608'),
+      url: fileUrl('/slow/98304'),
       destination: 'downloads/maestro-bg.bin',
       androidHttpEngine: 'downloadManager',
       notification: 'hidden',
@@ -134,7 +134,7 @@ const flows = {
     const id = 'kill-resume';
     await plugin.download({
       id,
-      url: fileUrl('/slow/262144'),
+      url: fileUrl('/slow/131072'),
       destination: 'downloads/maestro-kill.bin',
       androidHttpEngine: 'downloadManager',
       notification: 'hidden',
@@ -147,7 +147,7 @@ const flows = {
     const id = 'low-mem';
     await plugin.download({
       id,
-      url: fileUrl('/slow/262144'),
+      url: fileUrl('/slow/131072'),
       destination: 'downloads/maestro-lowmem.bin',
       androidHttpEngine: 'downloadManager',
       notification: 'hidden',

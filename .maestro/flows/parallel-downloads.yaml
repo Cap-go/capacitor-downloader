@@ -5,11 +5,11 @@ appId: app.capgo.downloader
     element:
       text: parallel-downloads
     direction: DOWN
-    timeout: 60000
+    timeout: 45000
     centerElement: true
 - tapOn:
     text: parallel-downloads
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: parallel-downloads:success.*'
-    timeout: 180000
+    timeout: 120000

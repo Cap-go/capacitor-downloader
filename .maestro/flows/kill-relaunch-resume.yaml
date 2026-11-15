@@ -5,17 +5,17 @@ appId: app.capgo.downloader
     element:
       text: kill-relaunch-resume
     direction: DOWN
-    timeout: 60000
+    timeout: 45000
     centerElement: true
 - tapOn:
     text: kill-relaunch-resume
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*PHASE:kill-relaunch-resume:downloading.*'
-    timeout: 60000
+    timeout: 45000
 - stopApp
 - launchApp:
     clearState: false
 - extendedWaitUntil:
     visible: '.*Marker: kill-relaunch-resume:success.*'
-    timeout: 240000
+    timeout: 120000

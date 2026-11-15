@@ -196,14 +196,20 @@ export interface DownloadBatchOptions {
   /** Download priority level */
   priority?: 'high' | 'normal' | 'low';
   /**
-   * Android notification visibility for batch transfers. On an OkHttp batch, `'progress'` shows one progress notification for the whole
-   * batch from a foreground service, so the batch keeps going while the app is in the background.
+   * Android notification visibility for batch transfers.
    *
+   * DownloadManager batches:
    * - `'completed'` (default): show while downloading and keep the notification after completion.
    * - `'progress'`: show while downloading, remove the notification when finished.
    * - `'hidden'`: no DownloadManager progress notification; use plugin progress events instead.
-   *   `downloadCompletedNotificationText` can still post a completion notification when the transfer succeeds.
    *
+   * OkHttp batches:
+   * - `'completed'` (default): no notification during the transfer, one completion notification when the whole batch succeeds.
+   * - `'progress'`: one ongoing progress notification for the whole batch, from an optional foreground service that keeps the
+   *   batch going while the app is in the background. If the service cannot start, the transfers continue without it.
+   * - `'hidden'`: no notification; use plugin progress events instead.
+   *
+   * `downloadCompletedNotificationText` can still post a completion notification when the batch succeeds.
    * Ignored on iOS and Web.
    *
    * @since 8.2.0

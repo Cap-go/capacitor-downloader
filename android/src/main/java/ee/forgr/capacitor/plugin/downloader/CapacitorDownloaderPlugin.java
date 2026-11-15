@@ -407,6 +407,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     resolvedDestination.preferOkHttpInAutoMode
                 );
                 boolean okHttp = httpEngine == AndroidHttpEngineSelector.Engine.OKHTTP;
+                if (okHttp && extendedDestinationRoots && destination.trim().startsWith("public-downloads/")) {
+                    rollbackBatch(batchState);
+                    call.reject("OkHttp cannot write to public-downloads/ paths. Use androidHttpEngine 'auto' or 'downloadManager'.");
+                    return;
+                }
                 if (!fileRequests.isEmpty() && fileRequests.get(0).okHttp != okHttp) {
                     rollbackBatch(batchState);
                     call.reject("All files of a batch must resolve to the same Android HTTP engine");
@@ -643,7 +648,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 );
             } catch (RuntimeException e) {
                 okHttpDownloadExecutor.abandonTransfer(reservation);
-                handler.post(() -> failOkHttpBatch(batch, e.getMessage(), fileRequest.index));
+                handler.post(() -> {
+                    if (ownsBatch(batchId, batch)) {
+                        failOkHttpBatch(batch, e.getMessage(), fileRequest.index);
+                    }
+                });
             }
         };
 
@@ -663,6 +672,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
         completeBatchFile(batch.batchId, fileIndex, 0, 0);
         if (!ownsBatch(batch.batchId, batch) && okHttpBatches.remove(batch.batchId) != null) {
             okHttpProgressNotifier.finished(batch.batchId, true);
+            String notificationMode = batch.notification != null ? batch.notification : "completed";
+            if (!OkHttpDownloadProgressNotifier.shouldShowProgressForMode(notificationMode)) {
+                DownloadCompletionNotifier.notifyIfRequested(getContext(), batch.batchId, notificationMode, true);
+            }
         }
     }
 
@@ -676,11 +689,17 @@ public class CapacitorDownloaderPlugin extends Plugin {
         failBatch(batch.batchId, error, fileIndex);
     }
 
-    /** Cancels the transfers of a batch that did not finish yet, keeping the files that already completed. */
+    /**
+     * Cancels the transfers of a batch that did not finish yet, keeping the files that already completed, including
+     * one whose file is in place while its completion callback is still queued.
+     */
     private void cancelOkHttpBatchFiles(DownloadBatchState batch, List<BatchFileRequest> fileRequests) {
         for (BatchFileRequest fileRequest : fileRequests) {
-            if (!batch.isFileCompleted(fileRequest.index)) {
-                okHttpDownloadExecutor.cancel(DownloadBatchState.fileTaskId(batch.batchId, fileRequest.index), null);
+            String childId = DownloadBatchState.fileTaskId(batch.batchId, fileRequest.index);
+            OkHttpDownloadExecutor.ActiveDownload active = okHttpDownloadExecutor.getActive(childId);
+            boolean committed = active != null && active.state == OkHttpDownloadExecutor.State.DONE;
+            if (!batch.isFileCompleted(fileRequest.index) && !committed) {
+                okHttpDownloadExecutor.cancel(childId, null);
             }
         }
     }

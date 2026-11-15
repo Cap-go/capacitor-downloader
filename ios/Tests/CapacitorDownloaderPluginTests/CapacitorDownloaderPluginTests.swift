@@ -214,13 +214,18 @@ final class DownloadBatchProgressTests: XCTestCase {
         let plugin = CapacitorDownloaderPlugin()
         XCTAssertFalse(plugin.hasRegisteredTask(id: "restored-single"))
 
-        let downloadTask = plugin.mainBackgroundSessionForTests.downloadTask(with: URL(string: "https://example.com/file.bin")!)
-        downloadTask.taskDescription = "restored-single"
-        downloadTask.resume()
-
         plugin.load()
         XCTAssertTrue(plugin.restoredBackgroundSessionIdentifiers.contains(DownloadSessionIdentifiers.main))
         XCTAssertTrue(plugin.restoredBackgroundSessionIdentifiers.contains(DownloadSessionIdentifiers.wifiOnly))
+
+        // Simulators cannot create background URLSession download tasks reliably; exercise rehydration directly.
+        let session = DownloadBackgroundSessionManager.shared.session(
+            allowsCellularAccess: true,
+            preferForegroundCapable: true
+        )
+        let downloadTask = session.downloadTask(with: URL(string: "https://example.com/file.bin")!)
+        downloadTask.taskDescription = "restored-single"
+        plugin.rehydrateBackgroundDownloadTasks([downloadTask])
         XCTAssertTrue(plugin.hasRegisteredTask(id: "restored-single"))
     }
 

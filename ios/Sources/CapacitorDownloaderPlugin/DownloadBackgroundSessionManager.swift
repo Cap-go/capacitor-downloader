@@ -110,9 +110,6 @@ final class DownloadBackgroundSessionManager: NSObject {
     }
 
     private func flushPendingEvents() {
-        guard downloadDelegate != nil else {
-            return
-        }
         sessionLock.lock()
         let finishes = pendingFinishes
         let completions = pendingCompletions

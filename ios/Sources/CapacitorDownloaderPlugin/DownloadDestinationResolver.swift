@@ -5,7 +5,7 @@ enum DownloadDestinationResolver {
         destination: String?,
         id: String,
         documentsDirectory: URL
-    ) -> URL? {
+    ) -> URL {
         let trimmedDestination = destination?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let destination = trimmedDestination, !destination.isEmpty else {
             return documentsDirectory.appendingPathComponent(id)
@@ -19,39 +19,44 @@ enum DownloadDestinationResolver {
             return URL(fileURLWithPath: destination)
         }
 
-        if destination.hasPrefix("files/") || destination.hasPrefix("cache/") || destination.hasPrefix("private/") {
-            guard let privateURL = resolvePrivateRelativeDestination(destination, fallbackId: id, documentsDirectory: documentsDirectory) else {
-                return nil
-            }
+        if let privateURL = resolvePrivateRelativeDestination(destination, fallbackId: id) {
             return privateURL
         }
 
         return documentsDirectory.appendingPathComponent(destination)
     }
 
-    /// Optional roots: `files/` and `cache/` stay under Documents (8.7.0). `private/` is iOS-only under Application Support.
-    static func resolvePrivateRelativeDestination(_ destination: String, fallbackId: String, documentsDirectory: URL) -> URL? {
+    /// Maps optional roots to app-private directories (not user-visible Documents).
+    static func resolvePrivateRelativeDestination(_ destination: String, fallbackId: String) -> URL? {
+        let fileManager = FileManager.default
+
         if destination.hasPrefix("files/") {
             let relative = String(destination.dropFirst("files/".count))
+            guard let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+                return nil
+            }
             let path = relative.isEmpty ? fallbackId : relative
             guard !path.isEmpty else {
                 return nil
             }
-            return childURL(base: documentsDirectory.appendingPathComponent("files", isDirectory: true), relative: path)
+            return base.appendingPathComponent(path)
         }
 
         if destination.hasPrefix("cache/") {
             let relative = String(destination.dropFirst("cache/".count))
+            guard let base = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+                return nil
+            }
             let path = relative.isEmpty ? fallbackId : relative
             guard !path.isEmpty else {
                 return nil
             }
-            return childURL(base: documentsDirectory.appendingPathComponent("cache", isDirectory: true), relative: path)
+            return base.appendingPathComponent(path)
         }
 
         if destination.hasPrefix("private/") {
             let relative = String(destination.dropFirst("private/".count))
-            guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            guard let base = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
                 return nil
             }
             let privateRoot = base.appendingPathComponent("CapacitorDownloader", isDirectory: true)
@@ -59,27 +64,9 @@ enum DownloadDestinationResolver {
             guard !path.isEmpty else {
                 return nil
             }
-            return childURL(base: privateRoot, relative: path)
+            return privateRoot.appendingPathComponent(path)
         }
 
         return nil
-    }
-
-    static func childURL(base: URL, relative: String) -> URL? {
-        let trimmed = relative.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return nil
-        }
-        if trimmed.split(separator: "/").contains("..") {
-            return nil
-        }
-        let candidate = base.appendingPathComponent(trimmed)
-        let basePath = base.standardizedFileURL.path
-        let resolvedPath = candidate.standardizedFileURL.path
-        let basePrefix = basePath.hasSuffix("/") ? basePath : basePath + "/"
-        guard resolvedPath == basePath || resolvedPath.hasPrefix(basePrefix) else {
-            return nil
-        }
-        return candidate
     }
 }

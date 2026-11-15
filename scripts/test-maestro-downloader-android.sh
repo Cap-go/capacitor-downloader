@@ -13,10 +13,10 @@ RESULTS_DIR="$ROOT_DIR/maestro-results"
 HOST_SERVER_PORT="${CAPGO_MAESTRO_PORT:-3192}"
 HOST_SERVER_URL="${CAPGO_MAESTRO_HOST_BASE_URL:-http://127.0.0.1:${HOST_SERVER_PORT}}"
 DEVICE_SERVER_URL="${CAPGO_MAESTRO_DEVICE_BASE_URL:-http://127.0.0.1:${HOST_SERVER_PORT}}"
-MAESTRO_TIMEOUT_SECONDS="${CAPGO_MAESTRO_TIMEOUT_SECONDS:-300}"
+MAESTRO_TIMEOUT_SECONDS="${CAPGO_MAESTRO_TIMEOUT_SECONDS:-480}"
 MAESTRO_TEST_RETRIES="${CAPGO_MAESTRO_TEST_RETRIES:-2}"
 APP_ID="app.capgo.downloader"
-APP_ACTIVITY="app.capgo.downloader/.MainActivity"
+EMULATOR_BOOT_TIMEOUT_SECONDS="${CAPGO_MAESTRO_EMULATOR_BOOT_TIMEOUT_SECONDS:-180}"
 SERVER_PID=""
 
 cleanup() {
@@ -28,6 +28,21 @@ cleanup() {
 }
 
 trap cleanup EXIT
+
+wait_for_emulator_boot() {
+  timeout "${EMULATOR_BOOT_TIMEOUT_SECONDS}s" adb wait-for-device
+  local deadline=$((SECONDS + EMULATOR_BOOT_TIMEOUT_SECONDS))
+  while (( SECONDS < deadline )); do
+    local booted
+    booted="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+    if [[ "$booted" == "1" ]]; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Emulator boot timed out" >&2
+  return 1
+}
 
 wait_for_server() {
   for _ in $(seq 1 40); do
@@ -42,12 +57,8 @@ wait_for_server() {
 }
 
 configure_server_routing() {
-  case "$DEVICE_SERVER_URL" in
-    http://127.0.0.1:*|http://localhost:*)
-      adb reverse --remove "tcp:${HOST_SERVER_PORT}" >/dev/null 2>&1 || true
-      adb reverse "tcp:${HOST_SERVER_PORT}" "tcp:${HOST_SERVER_PORT}" >/dev/null
-      ;;
-  esac
+  adb reverse --remove "tcp:${HOST_SERVER_PORT}" >/dev/null 2>&1 || true
+  adb reverse "tcp:${HOST_SERVER_PORT}" "tcp:${HOST_SERVER_PORT}" >/dev/null
 }
 
 if ! command -v adb >/dev/null 2>&1 || ! command -v maestro >/dev/null 2>&1; then
@@ -61,10 +72,10 @@ export CAPGO_MAESTRO_DEVICE_BASE_URL="$DEVICE_SERVER_URL"
 mkdir -p "$ROOT_DIR/.maestro-artifacts"
 start_fake_download_server "$ROOT_DIR/.maestro-artifacts/fake-download-server.log"
 wait_for_server
-configure_server_routing
 
-adb wait-for-device
+wait_for_emulator_boot
 disable_android_emulator_animations
+configure_server_routing
 
 if [[ ! -f "$APK_PATH" ]]; then
   echo "Missing APK at $APK_PATH" >&2
@@ -73,7 +84,6 @@ fi
 
 adb uninstall "$APP_ID" >/dev/null 2>&1 || true
 adb install -r "$APK_PATH" >/dev/null
-adb shell am start -S -W -n "$APP_ACTIVITY" >/dev/null 2>&1 || true
 
 DEVICE_ID="${CAPGO_MAESTRO_ANDROID_DEVICE_ID:-$(adb get-serialno | tr -d '\r')}"
 rm -rf "$RESULTS_DIR"
@@ -86,7 +96,7 @@ while (( attempt <= MAESTRO_TEST_RETRIES )); do
     exit 0
   fi
   attempt=$((attempt + 1))
-  sleep 3
+  sleep 5
 done
 
 exit 1

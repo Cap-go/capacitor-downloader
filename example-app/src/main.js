@@ -20,6 +20,14 @@ const isMaestroE2E =
 
 if (isMaestroE2E) {
   document.getElementById('manual-panel')?.classList.add('hidden');
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const { CapacitorUpdater } = await import('@capgo/capacitor-updater');
+      await CapacitorUpdater.notifyAppReady();
+    } catch (error) {
+      console.warn('Capgo notifyAppReady failed in Maestro harness', error);
+    }
+  }
   const { initMaestroHarness } = await import('./maestro-harness.js');
   try {
     await initMaestroHarness();

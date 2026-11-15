@@ -824,16 +824,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 result.put("status", DownloadManager.STATUS_PENDING);
                 call.resolve(result);
 
-                if (!okHttpProgressNotifier.started(id, title, description, notificationMode)) {
-                    okHttpDownloadExecutor.abandonTransfer(okHttpReservation);
-                    applyOkHttpStartFailureIfCurrent(
-                        id,
-                        storedGeneration,
-                        destinationFile,
-                        "Unable to start download notification service"
-                    );
-                    return;
-                }
+                okHttpProgressNotifier.started(id, title, description, notificationMode);
 
                 try {
                     okHttpDownloadExecutor.start(
@@ -886,6 +877,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     );
                 } catch (RuntimeException e) {
                     okHttpDownloadExecutor.abandonTransfer(okHttpReservation);
+                    okHttpProgressNotifier.abandonDownload(id);
                     applyOkHttpStartFailureIfCurrent(id, storedGeneration, destinationFile, e.getMessage());
                 }
             },
@@ -1428,6 +1420,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (downloadManagerExecutor != null) {
             downloadManagerExecutor.shutdown();
             downloadManagerExecutor = null;
+        }
+        if (okHttpProgressNotifier != null) {
+            okHttpProgressNotifier.shutdown();
         }
     }
 

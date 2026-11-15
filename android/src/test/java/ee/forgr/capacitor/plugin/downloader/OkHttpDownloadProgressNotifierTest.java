@@ -9,9 +9,9 @@ import org.junit.Test;
 public class OkHttpDownloadProgressNotifierTest {
 
     @Test
-    public void shouldShowProgressUnlessHidden() {
-        assertTrue(OkHttpDownloadProgressNotifier.shouldShowProgressForMode(null));
-        assertTrue(OkHttpDownloadProgressNotifier.shouldShowProgressForMode("completed"));
+    public void progressModeOptsIntoOngoingNotifications() {
+        assertFalse(OkHttpDownloadProgressNotifier.shouldShowProgressForMode(null));
+        assertFalse(OkHttpDownloadProgressNotifier.shouldShowProgressForMode("completed"));
         assertTrue(OkHttpDownloadProgressNotifier.shouldShowProgressForMode("progress"));
         assertFalse(OkHttpDownloadProgressNotifier.shouldShowProgressForMode("hidden"));
     }

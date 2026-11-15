@@ -37,11 +37,11 @@ export interface DownloadFileSpec {
    *
    * Absolute paths and `file://` URIs are supported on iOS and on Android single downloads.
    *
-   * On iOS, optional private roots keep large offline assets out of synced Documents:
-   * - `files/...` writes under Application Support.
-   * - `cache/...` writes under Caches.
-   * - `private/...` writes under Application Support/CapacitorDownloader/.
-   * Any other relative path still uses the app Documents directory (same as earlier releases).
+   * On iOS (since 8.8.0), optional roots:
+   * - `files/...` and `cache/...` stay under Documents as in 8.7.0 (`Documents/files/...`, `Documents/cache/...`).
+   * - `private/...` (iOS only) writes under Application Support/CapacitorDownloader/.
+   * Path segments containing `..` are rejected. On Android, `private/` is not special (treated as a relative path under app storage).
+   * Any other relative path still uses the app Documents directory.
    */
   destination: string;
 }
@@ -67,7 +67,7 @@ export interface DownloadOptions {
    * - Any other relative path saves under app external files (DownloadManager with `'auto'`).
    * Absolute paths and `file://` URIs are supported; `'auto'` picks OkHttp when the path is under cache, data, or files dirs.
    *
-   * On iOS, optional private roots match batch entries: `files/...`, `cache/...`, and `private/...` (see {@link DownloadFileSpec.destination}).
+   * On iOS, optional roots match batch entries (see {@link DownloadFileSpec.destination}).
    */
   destination: string;
   /** Optional HTTP headers to include in the request */
@@ -84,9 +84,10 @@ export interface DownloadOptions {
    * - `'hidden'`: no DownloadManager progress notification; use plugin progress events instead.
    *   `downloadCompletedNotificationText` can still post a completion notification when the transfer succeeds.
    *
-   * On the OkHttp Android path, ongoing progress notifications are shown when this is `'completed'` or `'progress'`
-   * (Android 13+ requires runtime `POST_NOTIFICATIONS` in the host app). Use `'hidden'` to rely on
-   * `downloadProgress` events only. Ignored on iOS and Web.
+   * On the OkHttp Android path, `'completed'` (default) keeps 8.7.0 behavior: no ongoing notification and no foreground
+   * service. Set `'progress'` to opt in to ongoing progress notifications and an optional `dataSync` foreground service
+   * (API 24+; may be blocked in the background on Android 12+). Downloads continue if the service cannot start.
+   * Android 13+ requires runtime `POST_NOTIFICATIONS` when notifications are shown. Ignored on iOS and Web.
    *
    * @since 8.2.0
    */
@@ -139,8 +140,9 @@ export interface DownloadOptions {
   downloadCompletedNotificationText?: string;
   /**
    * iOS 26 and later: opt in to a `BGContinuedProcessingTask` so the system can show download progress while the
-   * device is locked. Falls back to the background URL session when the task does not launch in time. Ignored on
-   * Android and Web. The host app must allow
+   * device is locked. Falls back to the background URL session when the task does not launch in time. If the continued
+   * processing task expires, the active transfer is cancelled with `downloadFailed` and is not resumed automatically.
+   * Ignored on Android and Web. The host app must allow
    * `$(PRODUCT_BUNDLE_IDENTIFIER).CapacitorDownloader.continuedProcessing.*` in
    * `BGTaskSchedulerPermittedIdentifiers` (see plugin README).
    *
@@ -194,16 +196,14 @@ export interface DownloadBatchOptions {
   /** Download priority level */
   priority?: 'high' | 'normal' | 'low';
   /**
-   * Android DownloadManager notification visibility.
+   * Android DownloadManager notification visibility for batch transfers only (batches reject OkHttp).
    *
    * - `'completed'` (default): show while downloading and keep the notification after completion.
    * - `'progress'`: show while downloading, remove the notification when finished.
    * - `'hidden'`: no DownloadManager progress notification; use plugin progress events instead.
    *   `downloadCompletedNotificationText` can still post a completion notification when the transfer succeeds.
    *
-   * On the OkHttp Android path, ongoing progress notifications are shown when this is `'completed'` or `'progress'`
-   * (Android 13+ requires runtime `POST_NOTIFICATIONS` in the host app). Use `'hidden'` to rely on
-   * `downloadProgress` events only. Ignored on iOS and Web.
+   * Ignored on iOS and Web.
    *
    * @since 8.2.0
    */
@@ -212,7 +212,7 @@ export interface DownloadBatchOptions {
    * Title shown on the Android DownloadManager progress notification.
    *
    * When omitted or empty, the system uses its default (typically the destination file name).
-   * Ignored on iOS, Web, and the OkHttp Android download path.
+   * Ignored on iOS and Web.
    *
    * @since 8.6.0
    */
@@ -220,7 +220,7 @@ export interface DownloadBatchOptions {
   /**
    * Description shown on the Android DownloadManager progress notification.
    *
-   * When omitted or empty, the system uses its default. Ignored on iOS, Web, and the OkHttp Android download path.
+   * When omitted or empty, the system uses its default. Ignored on iOS and Web.
    *
    * @since 8.6.0
    */

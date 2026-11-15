@@ -1,6 +1,7 @@
 import Foundation
 
-/// Host `AppDelegate` hooks for background URL session completion. Optional if bootstrap runs at launch.
+/// Host `AppDelegate` must forward `application(_:handleEventsForBackgroundURLSession:completionHandler:)` here.
+/// Bootstrap warmup alone does not deliver background URL session completion events.
 @objc(CapacitorDownloaderLifecycle)
 public class CapacitorDownloaderLifecycle: NSObject {
   @objc public static func warmUpBackgroundSessions() {

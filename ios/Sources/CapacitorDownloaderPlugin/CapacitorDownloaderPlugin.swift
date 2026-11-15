@@ -42,7 +42,6 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
     public override func load() {
         DownloadBackgroundSessionManager.shared.warmUp()
-        DownloadBackgroundSessionManager.shared.register(downloadDelegate: self)
         tasksLock.lock()
         downloadGenerations = DownloadIdGenerationStore.shared.allGenerations()
         taskGenerations = DownloadTaskGenerationStore.shared.allGenerations()
@@ -51,21 +50,25 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             DownloadSessionIdentifiers.main,
             DownloadSessionIdentifiers.wifiOnly
         ]
-        let applyRestored: ([URLSessionTask]) -> Void = { [weak self] tasks in
-            self?.rehydrateBackgroundDownloadTasks(tasks)
+        continuedProcessing.onDownloadExpired = { [weak self] downloadId in
+            self?.cancelDownloadFromContinuedProcessingExpiry(downloadId)
+        }
+        let finishLoad: ([URLSessionTask]) -> Void = { [weak self] tasks in
+            guard let self else {
+                return
+            }
+            self.rehydrateBackgroundDownloadTasks(tasks)
+            DownloadBackgroundSessionManager.shared.register(downloadDelegate: self)
         }
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
             let semaphore = DispatchSemaphore(value: 0)
             DownloadBackgroundSessionManager.shared.rehydrateTasks { tasks in
-                applyRestored(tasks)
+                finishLoad(tasks)
                 semaphore.signal()
             }
             _ = semaphore.wait(timeout: .now() + 5)
         } else {
-            DownloadBackgroundSessionManager.shared.rehydrateTasks(completion: applyRestored)
-        }
-        continuedProcessing.onDownloadExpired = { [weak self] downloadId in
-            self?.cancelDownloadFromContinuedProcessingExpiry(downloadId)
+            DownloadBackgroundSessionManager.shared.rehydrateTasks(completion: finishLoad)
         }
     }
 

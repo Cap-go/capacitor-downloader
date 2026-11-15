@@ -3,12 +3,12 @@ appId: app.capgo.downloader
 - runFlow: ../helpers/launch-harness.yaml
 - scrollUntilVisible:
     element:
-      text: error-5xx
+      id: e2e-flow-error-5xx
     direction: DOWN
     timeout: 45000
     centerElement: true
 - tapOn:
-    text: error-5xx
+    id: e2e-flow-error-5xx
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: error-5xx:success.*'

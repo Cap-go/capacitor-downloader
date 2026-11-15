@@ -6,10 +6,10 @@ import { MAESTRO_E2E_FLOWS } from './flows.mjs';
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 const markerTimeout = {
-  'foreground-complete': '120000',
-  'network-drop-resume': '120000',
-  'parallel-downloads': '120000',
-  'completion-once': '120000',
+  'foreground-complete': '90000',
+  'network-drop-resume': '90000',
+  'parallel-downloads': '90000',
+  'completion-once': '90000',
   'cancel-cleanup': '90000',
   'error-bad-url': '60000',
   'error-404': '60000',
@@ -66,12 +66,12 @@ for (const flowId of MAESTRO_E2E_FLOWS) {
 - runFlow: ../helpers/launch-harness.yaml
 - scrollUntilVisible:
     element:
-      text: ${flowId}
+      id: e2e-flow-${flowId}
     direction: DOWN
     timeout: 45000
     centerElement: true
 - tapOn:
-    text: ${flowId}
+    id: e2e-flow-${flowId}
     retryTapIfNoChange: true${markerTail}
 `;
 

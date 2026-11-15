@@ -3,13 +3,13 @@ appId: app.capgo.downloader
 - runFlow: ../helpers/launch-harness.yaml
 - scrollUntilVisible:
     element:
-      text: parallel-downloads
+      id: e2e-flow-parallel-downloads
     direction: DOWN
     timeout: 45000
     centerElement: true
 - tapOn:
-    text: parallel-downloads
+    id: e2e-flow-parallel-downloads
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: parallel-downloads:success.*'
-    timeout: 120000
+    timeout: 90000

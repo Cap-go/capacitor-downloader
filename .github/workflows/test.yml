@@ -258,7 +258,7 @@ jobs:
             CAPGO_MAESTRO_SKIP_BUILD=1
             CAPGO_MAESTRO_DEVICE_BASE_URL=http://10.0.2.2:3192
             CAPGO_MAESTRO_FLOW=${{ matrix.flow }}
-            CAPGO_MAESTRO_TIMEOUT_SECONDS=150
+            CAPGO_MAESTRO_TIMEOUT_SECONDS=360
             MAESTRO_DRIVER_STARTUP_TIMEOUT=300000
             ./scripts/test-maestro-downloader-android.sh
       - name: Upload Maestro artifacts

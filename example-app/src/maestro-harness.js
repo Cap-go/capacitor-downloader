@@ -343,6 +343,7 @@ function installFlowButtons() {
     const button = document.createElement('button');
     button.type = 'button';
     button.id = `e2e-flow-${flowId}`;
+    button.setAttribute('data-testid', `e2e-flow-${flowId}`);
     button.textContent = flowId;
     button.addEventListener('click', async () => {
       try {

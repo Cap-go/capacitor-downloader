@@ -3,13 +3,13 @@ appId: app.capgo.downloader
 - runFlow: ../helpers/launch-harness.yaml
 - scrollUntilVisible:
     element:
-      text: completion-once
+      id: e2e-flow-completion-once
     direction: DOWN
     timeout: 45000
     centerElement: true
 - tapOn:
-    text: completion-once
+    id: e2e-flow-completion-once
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: completion-once:success.*'
-    timeout: 120000
+    timeout: 90000

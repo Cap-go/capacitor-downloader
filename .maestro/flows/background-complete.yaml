@@ -3,12 +3,12 @@ appId: app.capgo.downloader
 - runFlow: ../helpers/launch-harness.yaml
 - scrollUntilVisible:
     element:
-      text: background-complete
+      id: e2e-flow-background-complete
     direction: DOWN
     timeout: 45000
     centerElement: true
 - tapOn:
-    text: background-complete
+    id: e2e-flow-background-complete
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*PHASE:background-complete:downloading.*'

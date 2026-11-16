@@ -4,10 +4,11 @@ enum DownloadLengthHeaderProgress {
     static func bytesTotalAndProgress(
         downloadId: String,
         totalBytesWritten: Int64,
-        totalBytesExpectedToWrite: Int64
+        totalBytesExpectedToWrite: Int64,
+        store: DownloadLengthHeaderStore = .shared
     ) -> (bytesTotal: Int64, progress: Float) {
         var bytesTotal: Int64 = 0
-        if let override = DownloadLengthHeaderStore.shared.expectedTotal(for: downloadId), override > 0 {
+        if let override = store.expectedTotal(for: downloadId), override > 0 {
             bytesTotal = override
         } else if totalBytesExpectedToWrite > 0 {
             bytesTotal = totalBytesExpectedToWrite

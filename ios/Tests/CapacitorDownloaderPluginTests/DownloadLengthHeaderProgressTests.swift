@@ -25,7 +25,8 @@ final class DownloadLengthHeaderProgressTests: XCTestCase {
     let snapshot = DownloadLengthHeaderProgress.bytesTotalAndProgress(
       downloadId: "dl-1",
       totalBytesWritten: 100,
-      totalBytesExpectedToWrite: 100
+      totalBytesExpectedToWrite: 100,
+      store: store
     )
     XCTAssertEqual(snapshot.bytesTotal, 1000)
     XCTAssertEqual(snapshot.progress, 0.1, accuracy: 0.0001)
@@ -38,7 +39,8 @@ final class DownloadLengthHeaderProgressTests: XCTestCase {
     let snapshot = DownloadLengthHeaderProgress.bytesTotalAndProgress(
       downloadId: "dl-2",
       totalBytesWritten: 250,
-      totalBytesExpectedToWrite: 0
+      totalBytesExpectedToWrite: 0,
+      store: store
     )
     XCTAssertEqual(snapshot.bytesTotal, 100)
     XCTAssertEqual(snapshot.progress, 1)

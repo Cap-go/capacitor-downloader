@@ -93,9 +93,11 @@ public class CapacitorDownloaderPluginBatchEntryTest {
         verify(downloadManager, times(100)).enqueue(any(DownloadManager.Request.class));
 
         @SuppressWarnings("unchecked")
-        Map<String, Boolean> batchProgressPollingActive = (Map<String, Boolean>) getField(plugin, "batchProgressPollingActive").get(plugin);
-        assertEquals(1, batchProgressPollingActive.size());
-        assertTrue(batchProgressPollingActive.containsKey("hundred-batch"));
+        Map<String, Long> batchProgressPollingGeneration = (Map<String, Long>) getField(plugin, "batchProgressPollingGeneration").get(
+            plugin
+        );
+        assertEquals(1, batchProgressPollingGeneration.size());
+        assertNotNull(batchProgressPollingGeneration.get("hundred-batch"));
 
         ExecutorService okHttpTransferExecutor = (ExecutorService) getField(plugin, "okHttpTransferExecutor").get(plugin);
         assertTrue(okHttpTransferExecutor instanceof ThreadPoolExecutor);

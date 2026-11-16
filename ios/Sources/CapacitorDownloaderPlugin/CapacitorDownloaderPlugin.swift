@@ -448,6 +448,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             stagedTasks.append((taskId, task))
         }
 
+        batchCoordinator.persistBatchChildRegistrations(batchId: batchId)
+
         for staged in stagedTasks {
             setTask(staged.task, for: staged.taskId)
             if !skipBatchTaskResumeForTests {
@@ -538,6 +540,12 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     internal var skipBatchTaskResumeForTests = false
+
+    internal func tearDownBatchForTests(batchId: String) {
+        cancelBatchTasks(batchId: batchId)
+        batchCoordinator.removeBatch(batchId: batchId)
+        DownloadBatchStore.shared.clear()
+    }
 
     internal var mainBackgroundSessionForTests: URLSession {
         DownloadBackgroundSessionManager.shared.mainSession

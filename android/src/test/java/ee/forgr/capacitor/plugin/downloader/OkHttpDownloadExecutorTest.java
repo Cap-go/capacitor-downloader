@@ -435,6 +435,7 @@ public class OkHttpDownloadExecutorTest {
 
         assertTrue(finished.await(25, TimeUnit.SECONDS));
         workers.shutdown();
+        assertTrue(workers.awaitTermination(10, TimeUnit.SECONDS));
         assertEquals(4, executor.availableTransferSlots());
     }
 
@@ -483,6 +484,7 @@ public class OkHttpDownloadExecutorTest {
 
         assertTrue(finished.await(30, TimeUnit.SECONDS));
         workers.shutdown();
+        assertTrue(workers.awaitTermination(10, TimeUnit.SECONDS));
         assertEquals(4, executor.availableTransferSlots());
     }
 }

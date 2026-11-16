@@ -299,13 +299,18 @@ final class DownloadBatchProgressTests: XCTestCase {
         }
 
         for fileIndex in 0..<40 {
-            _ = coordinator.markFileCompleted(batchId: "debounce", generation: generation, fileIndex: fileIndex)
+            coordinator.recordMovedDestination(
+                batchId: "debounce",
+                generation: generation,
+                fileIndex: fileIndex,
+                destination: "/tmp/debounce-\(fileIndex).bin"
+            )
         }
 
         XCTAssertLessThan(
             store.saveInvocationCountForTests,
             5,
-            "rapid file completions should debounce UserDefaults writes"
+            "rapid destination updates should debounce UserDefaults writes"
         )
 
         let expectation = expectation(description: "debounced persist")
@@ -353,8 +358,7 @@ final class DownloadBatchProgressTests: XCTestCase {
         plugin.download(call)
         wait(for: [expectation], timeout: 5)
         XCTAssertEqual(plugin.trackedBatchFileCountForTests(batchId: "forty-batch"), 40)
-        plugin.batchCoordinatorForTests.removeBatch(batchId: "forty-batch")
-        DownloadBatchStore.shared.clear()
+        plugin.tearDownBatchForTests(batchId: "forty-batch")
     }
 }
 

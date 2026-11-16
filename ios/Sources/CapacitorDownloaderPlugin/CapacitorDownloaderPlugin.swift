@@ -171,9 +171,11 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         totalBytesWritten: Int64,
         totalBytesExpectedToWrite: Int64
     ) -> (bytesTotal: Int64, progress: Float) {
-        var bytesTotal = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : 0
-        if bytesTotal <= 0, let override = DownloadLengthHeaderStore.shared.expectedTotal(for: downloadId) {
+        var bytesTotal: Int64 = 0
+        if let override = DownloadLengthHeaderStore.shared.expectedTotal(for: downloadId), override > 0 {
             bytesTotal = override
+        } else if totalBytesExpectedToWrite > 0 {
+            bytesTotal = totalBytesExpectedToWrite
         }
         let progress: Float
         if bytesTotal > 0 {

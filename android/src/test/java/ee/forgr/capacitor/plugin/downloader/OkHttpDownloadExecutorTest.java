@@ -16,6 +16,7 @@ import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import com.getcapacitor.JSObject;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.net.InetAddress;
@@ -24,6 +25,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.zip.GZIPOutputStream;
 import javax.net.SocketFactory;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
@@ -63,9 +65,15 @@ public class OkHttpDownloadExecutorTest {
     @Test(timeout = 10_000)
     public void usesLengthHeaderWhenContentLengthMissing() throws Exception {
         byte[] payload = "gzip-style-payload".getBytes(StandardCharsets.UTF_8);
+        ByteArrayOutputStream gzipBuffer = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzipOut = new GZIPOutputStream(gzipBuffer)) {
+            gzipOut.write(payload);
+        }
+        byte[] gzipped = gzipBuffer.toByteArray();
         server.enqueue(
             new MockResponse()
-                .setChunkedBody(new okio.Buffer().write(payload), 4)
+                .setBody(new okio.Buffer().write(gzipped))
+                .addHeader("Content-Encoding", "gzip")
                 .addHeader("X-Uncompressed-Length", String.valueOf(payload.length))
         );
 

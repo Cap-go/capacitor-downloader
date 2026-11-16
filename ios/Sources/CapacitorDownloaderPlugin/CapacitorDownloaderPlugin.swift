@@ -181,10 +181,24 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         return Set(tasks.keys.filter { batchCoordinator.childParts(for: $0) == nil })
     }
 
+    private func pluginString(_ value: Any?) -> String? {
+        if let value = value as? String {
+            return value
+        }
+        if let value = value as? NSString {
+            return value as String
+        }
+        return nil
+    }
+
     private func parsedBatchFiles(from filesValue: JSArray) -> [[String: Any]]? {
         var files: [[String: Any]] = []
         files.reserveCapacity(filesValue.count)
         for entry in filesValue {
+            if let object = entry as? [String: Any] {
+                files.append(object)
+                continue
+            }
             if let object = entry as? JSObject {
                 var normalized: [String: Any] = [:]
                 for (key, value) in object {
@@ -387,9 +401,9 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         let batchSession = downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: false)
 
         for fileObject in files {
-            guard let urlString = fileObject["url"] as? String,
+            guard let urlString = pluginString(fileObject["url"]),
                   let url = URL(string: urlString),
-                  let destination = fileObject["destination"] as? String,
+                  let destination = pluginString(fileObject["destination"]),
                   !destination.isEmpty else {
                 call.reject("Each file entry requires url and destination")
                 return
@@ -517,6 +531,10 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
     internal func trackedBatchFileCountForTests(batchId: String) -> Int? {
         batchCoordinator.fileCount(batchId: batchId)
+    }
+
+    internal var batchCoordinatorForTests: DownloadBatchCoordinator {
+        batchCoordinator
     }
 
     internal var skipBatchTaskResumeForTests = false

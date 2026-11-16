@@ -297,7 +297,7 @@ final class DownloadBatchProgressTests: XCTestCase {
         let files: JSArray = (0..<40).map { index in
             [
                 "url": "https://example.com/\(index).bin",
-                "destination": "files/batch-entry-\(index).bin",
+                "destination": "batch-entry-\(index).bin",
             ] as JSObject
         }
         plugin.skipBatchTaskResumeForTests = true
@@ -324,6 +324,8 @@ final class DownloadBatchProgressTests: XCTestCase {
         plugin.download(call)
         wait(for: [expectation], timeout: 5)
         XCTAssertEqual(plugin.trackedBatchFileCountForTests(batchId: "forty-batch"), 40)
+        plugin.batchCoordinatorForTests.removeBatch(batchId: "forty-batch")
+        DownloadBatchStore.shared.clear()
     }
 }
 

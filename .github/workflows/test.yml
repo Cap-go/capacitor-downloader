@@ -7,10 +7,11 @@ concurrency:
 on:
   push:
     branches:
+      - main
       - renovate/**
   pull_request:
     branches: [ main ]
-  workflow_call:  # Allow this workflow to be called by other workflows
+  workflow_call: # release path: called by Build and publish on version tags
 
 env:
   BUN_VERSION: 1.4.2
@@ -224,6 +225,9 @@ jobs:
           - cancel-cleanup
           - parallel-downloads
           - completion-once
+          - batch-error-404
+          - batch-error-5xx
+          - batch-kill-mid
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -304,6 +308,9 @@ jobs:
           - cancel-cleanup
           - parallel-downloads
           - completion-once
+          - batch-error-404
+          - batch-error-5xx
+          - batch-kill-mid
     steps:
       - name: Check out
         uses: actions/checkout@v7

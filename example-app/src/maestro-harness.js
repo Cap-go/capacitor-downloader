@@ -159,6 +159,21 @@ function clearPending() {
   localStorage.removeItem(`${storagePrefix}pending_payload`);
 }
 
+function batchHttpEngine() {
+  return Capacitor.getPlatform() === 'ios' ? 'auto' : 'downloadManager';
+}
+
+function buildBatchSpecs(count, okBytes, failUrl) {
+  const isIos = Capacitor.getPlatform() === 'ios';
+  return Array.from({ length: count }, (_, index) => {
+    const isFailFile = Boolean(failUrl) && index === count - 1;
+    return {
+      url: isFailFile ? failUrl : fileUrl(`/bytes/${okBytes}`),
+      destination: isIos ? `cache/maestro-batch-${index}.bin` : `downloads/maestro-batch-${index}.bin`,
+    };
+  });
+}
+
 const flows = {
   async 'foreground-complete'() {
     const id = 'fg-complete';
@@ -408,11 +423,84 @@ const flows = {
     }
     setMarker('completion-once', true, `count=${count}`);
   },
+
+  async 'batch-error-404'() {
+    const id = 'batch-404';
+    const files = buildBatchSpecs(4, 4096, fileUrl('/status/404'));
+    await plugin.download({
+      id,
+      files,
+      androidHttpEngine: batchHttpEngine(),
+      notification: 'hidden',
+    });
+    const status = await waitForTerminal(id, 90_000);
+    if (status.state !== 'ERROR') {
+      throw new Error(`Expected batch ERROR for 404, got ${status.state}`);
+    }
+    if ((completionCounts.get(id) ?? 0) > 0) {
+      throw new Error('Batch must not emit downloadCompleted when a file fails');
+    }
+    setMarker('batch-error-404', true, 'batch-failed');
+  },
+
+  async 'batch-error-5xx'() {
+    const id = 'batch-5xx';
+    const files = buildBatchSpecs(4, 4096, fileUrl('/status/500'));
+    await plugin.download({
+      id,
+      files,
+      androidHttpEngine: batchHttpEngine(),
+      notification: 'hidden',
+    });
+    const status = await waitForTerminal(id, 90_000);
+    if (status.state !== 'ERROR') {
+      throw new Error(`Expected batch ERROR for 5xx, got ${status.state}`);
+    }
+    if ((completionCounts.get(id) ?? 0) > 0) {
+      throw new Error('Batch must not emit downloadCompleted when a file fails');
+    }
+    setMarker('batch-error-5xx', true, 'batch-failed');
+  },
+
+  async 'batch-kill-mid'() {
+    const id = 'batch-kill';
+    const isIos = Capacitor.getPlatform() === 'ios';
+    const fileCount = isIos ? 10 : 14;
+    const slowBytes = isIos ? 32_768 : 24_576;
+    const files = Array.from({ length: fileCount }, (_, index) => ({
+      url: fileUrl(`/slow/${slowBytes}`),
+      destination: isIos ? `cache/maestro-bk-${index}.bin` : `downloads/maestro-bk-${index}.bin`,
+    }));
+    await plugin.download({
+      id,
+      files,
+      androidHttpEngine: batchHttpEngine(),
+      notification: 'hidden',
+    });
+    persistPending('batch-kill-mid', { id, batch: true, fileCount });
+    setSummary(`PHASE:batch-kill-mid:downloading:id=${id}:files=${fileCount}`);
+    await sleep(2_000);
+  },
 };
 
 async function resumePendingDownload(flowId, payload) {
   const { id } = payload;
   if (hasCompletedInStorage(id) || (completionCounts.get(id) ?? 0) > 0) {
+    return;
+  }
+  if (payload.batch) {
+    const relaunch = await readDownloadStatus(id);
+    setSummary(`STATE:batch-kill-mid:relaunch:${id}:${relaunch.state}:${relaunch.progress}`);
+    if (Capacitor.getPlatform() === 'ios') {
+      const terminal = await waitForTerminal(id, 150_000);
+      if (terminal.state !== 'DONE') {
+        throw new Error(`iOS batch expected DONE after relaunch, got ${terminal.state}`);
+      }
+      return;
+    }
+    await sleep(2_000);
+    const androidState = await readDownloadStatus(id);
+    setSummary(`ASSERT:batch-kill-mid:android-after-kill:${androidState.state}`);
     return;
   }
   const existing = await readDownloadStatus(id);

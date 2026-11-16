@@ -39,6 +39,9 @@ FLOWS = {
     'cancel-cleanup': ROOT / '.maestro/flows/cancel-cleanup.yaml',
     'parallel-downloads': ROOT / '.maestro/flows/parallel-downloads.yaml',
     'completion-once': ROOT / '.maestro/flows/completion-once.yaml',
+    'batch-error-404': ROOT / '.maestro/flows/batch-error-404.yaml',
+    'batch-error-5xx': ROOT / '.maestro/flows/batch-error-5xx.yaml',
+    'batch-kill-mid': ROOT / '.maestro/flows/batch-kill-mid.yaml',
 }
 
 

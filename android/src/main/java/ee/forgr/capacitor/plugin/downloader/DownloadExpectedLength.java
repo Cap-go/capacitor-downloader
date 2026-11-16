@@ -24,13 +24,8 @@ final class DownloadExpectedLength {
         }
     }
 
-    static boolean responseHasContentEncoding(Response response) {
-        String encoding = response.header("Content-Encoding");
-        return encoding != null && !encoding.trim().isEmpty();
-    }
-
     static long resolveTotalBytes(Response response, ResponseBody body, String lengthHeader) {
-        if (lengthHeader != null && !responseHasContentEncoding(response)) {
+        if (lengthHeader != null) {
             String trimmedHeader = lengthHeader.trim();
             if (!trimmedHeader.isEmpty()) {
                 String headerValue = response.header(trimmedHeader);
@@ -41,6 +36,9 @@ final class DownloadExpectedLength {
             }
         }
         long contentLength = body.contentLength();
+        if (contentLength <= 0) {
+            contentLength = parsePositiveHeaderValue(response.header("Content-Length"));
+        }
         return contentLength > 0 ? contentLength : 0L;
     }
 }

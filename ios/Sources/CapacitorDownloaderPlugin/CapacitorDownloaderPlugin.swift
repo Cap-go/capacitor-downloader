@@ -710,7 +710,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     fileIndex: batchParts.fileIndex,
                     error: "Unable to resolve destination"
                 )
-            } else {
+            } else if !batchCoordinator.isBatchFormattedTaskId(id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }
@@ -733,7 +733,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     fileIndex: batchParts.fileIndex,
                     error: "HTTP \(httpResponse.statusCode)"
                 )
-            } else {
+            } else if !batchCoordinator.isBatchFormattedTaskId(id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }
@@ -759,12 +759,18 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
             if let batchParts = batchCoordinator.activeChildParts(for: id) {
                 removeTask(for: id, completing: downloadTask, in: session)
-                batchCoordinator.recordMovedDestination(
+                let recorded = batchCoordinator.recordMovedDestination(
                     batchId: batchParts.batchId,
                     generation: batchParts.generation,
                     fileIndex: batchParts.fileIndex,
                     destination: destinationURL.path
                 )
+                if !recorded {
+                    try? FileManager.default.removeItem(at: destinationURL)
+                    batchCoordinator.unregisterChildTask(id)
+                    clearTaskGeneration(for: downloadTask, in: session)
+                    return
+                }
                 switch batchCoordinator.markFileCompleted(
                     batchId: batchParts.batchId,
                     generation: batchParts.generation,
@@ -791,6 +797,10 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     break
                 }
                 batchCoordinator.unregisterChildTask(id)
+            } else if batchCoordinator.isBatchFormattedTaskId(id) {
+                try? FileManager.default.removeItem(at: destinationURL)
+                removeTask(for: id, completing: downloadTask, in: session)
+                batchCoordinator.unregisterChildTask(id)
             } else {
                 notifyListeners("downloadCompleted", data: ["id": id])
                 if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: id, generation: generation) {
@@ -806,7 +816,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     fileIndex: batchParts.fileIndex,
                     error: error.localizedDescription
                 )
-            } else {
+            } else if !batchCoordinator.isBatchFormattedTaskId(id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }
@@ -849,7 +859,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     fileIndex: batchParts.fileIndex,
                     error: error.localizedDescription
                 )
-            } else {
+            } else if !batchCoordinator.isBatchFormattedTaskId(id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }

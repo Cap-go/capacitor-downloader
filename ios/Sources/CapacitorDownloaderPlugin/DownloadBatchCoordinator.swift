@@ -45,7 +45,7 @@ final class DownloadBatchCoordinator {
     }
 
     private func activeChildPartsUnlocked(for taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
-        guard let parts = childPartsUnlocked(for: taskId),
+        guard let parts = parsedBatchChildTaskId(taskId),
               let batch = batches[parts.batchId],
               batch.generation == parts.generation,
               !batch.cancelled, !batch.failed else {
@@ -54,11 +54,17 @@ final class DownloadBatchCoordinator {
         return parts
     }
 
+    func isBatchFormattedTaskId(_ taskId: String) -> Bool {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        return parsedBatchChildTaskId(taskId) != nil
+    }
+
     /// Verifies a batch child is still active, then removes an existing destination file under the batch lock.
     func prepareDestinationReplacement(taskId: String, destinationURL: URL) throws -> Bool {
         batchesLock.lock()
         defer { batchesLock.unlock() }
-        if childPartsUnlocked(for: taskId) != nil {
+        if parsedBatchChildTaskId(taskId) != nil {
             guard activeChildPartsUnlocked(for: taskId) != nil else {
                 return false
             }
@@ -73,6 +79,10 @@ final class DownloadBatchCoordinator {
         guard registeredChildren[taskId] != nil else {
             return nil
         }
+        return parsedBatchChildTaskId(taskId)
+    }
+
+    private func parsedBatchChildTaskId(_ taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
         guard let hashIndex = taskId.lastIndex(of: "#"),
               let colonIndex = taskId.lastIndex(of: ":"),
               colonIndex > hashIndex else {
@@ -305,15 +315,17 @@ final class DownloadBatchCoordinator {
         return batch.savedDestinations.values.sorted()
     }
 
-    func recordMovedDestination(batchId: String, generation: UInt64, fileIndex: Int, destination: String) {
+    @discardableResult
+    func recordMovedDestination(batchId: String, generation: UInt64, fileIndex: Int, destination: String) -> Bool {
         batchesLock.lock()
         defer { batchesLock.unlock() }
         guard var batch = batches[batchId], batch.generation == generation, !batch.cancelled, !batch.failed else {
-            return
+            return false
         }
         batch.savedDestinations[fileIndex] = destination
         batches[batchId] = batch
         persistBatchesLocked()
+        return true
     }
 
     func updateFileProgress(batchId: String, generation: UInt64, fileIndex: Int, progress: Float) -> (overall: Float, file: Float)? {

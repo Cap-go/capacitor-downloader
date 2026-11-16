@@ -310,6 +310,51 @@ final class DownloadBatchProgressTests: XCTestCase {
         store.clear()
     }
 
+    func testRecordMovedDestinationReturnsFalseWhenBatchCancelled() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let generation = coordinator.startBatch(batchId: "bundle", fileCount: 1, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+        coordinator.markCancelled(batchId: "bundle")
+        XCTAssertFalse(
+            coordinator.recordMovedDestination(
+                batchId: "bundle",
+                generation: generation,
+                fileIndex: 0,
+                destination: "/tmp/file.bin"
+            )
+        )
+        coordinator.removeBatch(batchId: "bundle")
+        store.clear()
+    }
+
+    func testPrepareDestinationReplacementRejectsUnregisteredCancelledBatchChild() throws {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let generation = coordinator.startBatch(batchId: "bundle", fileCount: 1, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+        let childId = coordinator.fileTaskId(batchId: "bundle", generation: generation, fileIndex: 0)
+        coordinator.registerChildTask(batchId: "bundle", taskId: childId, fileIndex: 0)
+        coordinator.markCancelled(batchId: "bundle")
+        coordinator.unregisterChildTask(childId)
+        XCTAssertTrue(coordinator.isBatchFormattedTaskId(childId))
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let destination = directory.appendingPathComponent("file.bin")
+        try Data("keep".utf8).write(to: destination)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        XCTAssertFalse(try coordinator.prepareDestinationReplacement(taskId: childId, destinationURL: destination))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        coordinator.removeBatch(batchId: "bundle")
+        store.clear()
+    }
+
     func testPrepareDestinationReplacementRejectsCancelledBatchChild() throws {
         let store = DownloadBatchStore(defaults: batchDefaults)
         let coordinator = DownloadBatchCoordinator(store: store)

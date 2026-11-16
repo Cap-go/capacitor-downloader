@@ -178,36 +178,52 @@ async function waitForBatchFailure(id, timeoutMs = 150_000, failFileIndex = null
   const deadline = Date.now() + timeoutMs;
   const failChildId =
     failFileIndex != null && Capacitor.getPlatform() === 'android' ? `${id}#${failFileIndex}` : null;
-  while (Date.now() < deadline) {
-    const status = await readDownloadStatus(id);
-    appendLog(`BATCH_FAIL_WAIT:${id}:${status.state}:${status.progress}`);
-    if (status.state === 'ERROR') {
-      return status;
+  let failureSeen = false;
+  const failListener = await plugin.addListener('downloadFailed', (payload) => {
+    if (payload.id === id) {
+      failureSeen = true;
     }
-    if (failChildId) {
-      try {
-        const child = normalizeDownloadTask(await plugin.checkStatus({ id: failChildId }));
-        appendLog(`BATCH_FAIL_CHILD:${failChildId}:${child.state}:${child.progress}`);
-        if (child.state === 'ERROR') {
-          return { state: 'ERROR', progress: status.progress };
-        }
-      } catch (childError) {
-        const message = String(childError?.message ?? childError);
-        if (/not found/i.test(message)) {
-          return { state: 'ERROR', progress: status.progress };
+  });
+  const sawBatchFailure = () => {
+    if (failureSeen) {
+      return true;
+    }
+    const haystack = `${e2eSummary.textContent ?? ''}\n${e2eLog.textContent ?? ''}`;
+    return haystack.includes(`downloadFailed:id=${id}`);
+  };
+  try {
+    while (Date.now() < deadline) {
+      if (sawBatchFailure()) {
+        return { state: 'ERROR', progress: 0 };
+      }
+      const status = await readDownloadStatus(id);
+      appendLog(`BATCH_FAIL_WAIT:${id}:${status.state}:${status.progress}`);
+      if (status.state === 'ERROR') {
+        return status;
+      }
+      if (failChildId) {
+        try {
+          const child = normalizeDownloadTask(await plugin.checkStatus({ id: failChildId }));
+          appendLog(`BATCH_FAIL_CHILD:${failChildId}:${child.state}:${child.progress}`);
+          if (child.state === 'ERROR') {
+            return { state: 'ERROR', progress: status.progress };
+          }
+        } catch (childError) {
+          const message = String(childError?.message ?? childError);
+          if (/not found/i.test(message)) {
+            return { state: 'ERROR', progress: status.progress };
+          }
         }
       }
+      if ((completionCounts.get(id) ?? 0) > 0 && !sawBatchFailure()) {
+        throw new Error(`Batch ${id} completed unexpectedly instead of failing`);
+      }
+      await sleep(750);
     }
-    const summaryText = e2eSummary.textContent || '';
-    if (summaryText.includes(`EVENT:downloadFailed:id=${id}:`)) {
-      return { state: 'ERROR', progress: status.progress };
-    }
-    if ((completionCounts.get(id) ?? 0) > 0) {
-      throw new Error(`Batch ${id} completed unexpectedly instead of failing`);
-    }
-    await sleep(750);
+    throw new Error(`Timed out waiting for batch failure on ${id}`);
+  } finally {
+    await failListener.remove();
   }
-  throw new Error(`Timed out waiting for batch failure on ${id}`);
 }
 
 const flows = {

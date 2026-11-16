@@ -32,14 +32,12 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private let foregroundSessionLock = NSLock()
     internal private(set) var restoredBackgroundSessionIdentifiers: [String] = []
     internal private(set) var didRestoreGenerationsBeforeDelegateRegistration = false
+    private var generationsPresentBeforeDelegateRegistration = false
     static let batchMaxFiles = 32
 
     private func registerDownloadDelegateIfGenerationsRestored() {
-        tasksLock.lock()
-        let generationsRestored = !downloadGenerations.isEmpty
-        tasksLock.unlock()
         DownloadBackgroundSessionManager.shared.register(downloadDelegate: self)
-        didRestoreGenerationsBeforeDelegateRegistration = generationsRestored
+        didRestoreGenerationsBeforeDelegateRegistration = generationsPresentBeforeDelegateRegistration
     }
 
     private func downloadSession(allowsCellularAccess: Bool, preferForegroundCapable: Bool) -> URLSession {
@@ -61,6 +59,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         tasksLock.lock()
         downloadGenerations = DownloadIdGenerationStore.shared.allGenerations()
         taskGenerations = DownloadTaskGenerationStore.shared.allGenerations()
+        generationsPresentBeforeDelegateRegistration = !downloadGenerations.isEmpty
         tasksLock.unlock()
         restoredBackgroundSessionIdentifiers = [
             DownloadSessionIdentifiers.main,

@@ -68,7 +68,7 @@ public class DownloadExpectedLengthTest {
             .message("OK")
             .header("Content-Length", "256")
             .build();
-        ResponseBody body = ResponseBody.create(new byte[0], MediaType.get("application/octet-stream"));
+        ResponseBody body = ResponseBody.create(new byte[256], MediaType.get("application/octet-stream"));
         long total = DownloadExpectedLength.resolveTotalBytes(response, body, "X-Uncompressed-Length");
         assertEquals(256L, total);
     }

@@ -143,17 +143,24 @@ public class OkHttpDownloadExecutorTest {
     @Test(timeout = 10_000)
     public void ignoresLengthHeaderWhenContentEncodingHeaderPresent() throws Exception {
         byte[] payload = new byte[256];
+        ByteArrayOutputStream gzipBuffer = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzipOut = new GZIPOutputStream(gzipBuffer)) {
+            gzipOut.write(payload);
+        }
+        byte[] gzipped = gzipBuffer.toByteArray();
         server.enqueue(
             new MockResponse()
-                .setBody(new okio.Buffer().write(payload))
+                .setBody(new okio.Buffer().write(gzipped))
                 .addHeader("Content-Encoding", "gzip")
-                .addHeader("Content-Length", String.valueOf(payload.length))
+                .addHeader("Content-Length", String.valueOf(gzipped.length))
                 .addHeader("X-Uncompressed-Length", "100000")
         );
 
         File destination = new File(tempDir, "length-header-encoding.bin");
         CountDownLatch finished = new CountDownLatch(1);
         AtomicReference<Long> lastBytesTotal = new AtomicReference<>(0L);
+        JSObject requestHeaders = new JSObject();
+        requestHeaders.put("Accept-Encoding", "gzip");
 
         OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer("length-header-encoding");
         assertNotNull(reservation);
@@ -161,7 +168,7 @@ public class OkHttpDownloadExecutorTest {
             reservation,
             server.url("/encoding").toString(),
             destination,
-            new JSObject(),
+            requestHeaders,
             "cellular",
             "X-Uncompressed-Length",
             (id, progress) -> {
@@ -174,7 +181,8 @@ public class OkHttpDownloadExecutorTest {
         );
 
         assertTrue(finished.await(5, TimeUnit.SECONDS));
-        assertEquals(Long.valueOf(payload.length), lastBytesTotal.get());
+        assertEquals(Long.valueOf(gzipped.length), lastBytesTotal.get());
+        assertEquals(gzipped.length, destination.length());
     }
 
     @Test(timeout = 10_000)

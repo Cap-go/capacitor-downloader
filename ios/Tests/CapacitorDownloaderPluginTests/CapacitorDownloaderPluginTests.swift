@@ -302,10 +302,10 @@ final class DownloadBatchProgressTests: XCTestCase {
         }
         plugin.skipBatchTaskResumeForTests = true
         let expectation = expectation(description: "batch enqueue")
-        let options = NSDictionary(dictionary: [
+        let options: [AnyHashable: Any] = [
             "id": "forty-batch",
             "files": files,
-        ])
+        ]
         guard let call = CAPPluginCall(
             callbackId: "batch-entry",
             methodName: "download",

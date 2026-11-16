@@ -181,6 +181,34 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         return Set(tasks.keys.filter { batchCoordinator.childParts(for: $0) == nil })
     }
 
+    private func parsedBatchFiles(from filesValue: JSArray) -> [[String: Any]]? {
+        var files: [[String: Any]] = []
+        files.reserveCapacity(filesValue.count)
+        for entry in filesValue {
+            if let object = entry as? JSObject {
+                var normalized: [String: Any] = [:]
+                for (key, value) in object {
+                    normalized[key] = value
+                }
+                files.append(normalized)
+                continue
+            }
+            if let object = entry as? NSDictionary {
+                var normalized: [String: Any] = [:]
+                for (key, value) in object {
+                    guard let stringKey = key as? String else {
+                        return nil
+                    }
+                    normalized[stringKey] = value
+                }
+                files.append(normalized)
+                continue
+            }
+            return nil
+        }
+        return files
+    }
+
     private func normalizedTaskId(from call: CAPPluginCall) -> String? {
         guard let rawId = call.getString("id") else {
             return nil
@@ -246,8 +274,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject("Provide either url and destination or files, not both")
                 return
             }
-            let files = filesValue.compactMap { $0 as? [String: Any] }
-            guard files.count == filesValue.count else {
+            guard let files = parsedBatchFiles(from: filesValue) else {
                 call.reject("Invalid file entry")
                 return
             }

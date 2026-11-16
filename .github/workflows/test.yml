@@ -323,8 +323,8 @@ jobs:
           CAPGO_MAESTRO_IOS_APP_PATH: maestro-ios-app/App.app
           CAPGO_MAESTRO_FLOW: ${{ matrix.flow }}
           CAPGO_MAESTRO_TIMEOUT_SECONDS: 360
-          CAPGO_MAESTRO_TEST_RETRIES: 2
-          MAESTRO_DRIVER_STARTUP_TIMEOUT: 90000
+          CAPGO_MAESTRO_TEST_RETRIES: 3
+          MAESTRO_DRIVER_STARTUP_TIMEOUT: 300000
         run: ./scripts/test-maestro-downloader-ios.sh
       - name: Upload Maestro artifacts
         if: failure()

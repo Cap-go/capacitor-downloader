@@ -71,6 +71,14 @@ mkdir -p "$RESULTS_DIR"
 attempt=1
 while (( attempt <= MAESTRO_TEST_RETRIES )); do
   echo "Maestro iOS flow ${FLOW_ID} attempt ${attempt}/${MAESTRO_TEST_RETRIES}"
+  if (( attempt > 1 )); then
+    xcrun simctl shutdown "$SIMULATOR_ID" >/dev/null 2>&1 || true
+    xcrun simctl boot "$SIMULATOR_ID" >/dev/null 2>&1 || true
+    xcrun simctl bootstatus "$SIMULATOR_ID" -b
+    xcrun simctl uninstall "$SIMULATOR_ID" "$APP_ID" >/dev/null 2>&1 || true
+    xcrun simctl install "$SIMULATOR_ID" "$APP_PATH"
+    sleep 10
+  fi
   if maestro test \
     --config "$ROOT_DIR/.maestro/config.yaml" \
     "$FLOW_PATH" \

@@ -747,17 +747,11 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
         do {
             try prepareDestinationDirectory(for: destinationURL)
-            if FileManager.default.fileExists(atPath: destinationURL.path) {
-                try FileManager.default.removeItem(at: destinationURL)
-            }
-
-            if let batchParts = batchCoordinator.childParts(for: id) {
-                guard batchCoordinator.activeChildParts(for: id) != nil else {
-                    try? FileManager.default.removeItem(at: location)
-                    removeTask(for: id, completing: downloadTask, in: session)
-                    batchCoordinator.unregisterChildTask(id)
-                    return
-                }
+            guard try batchCoordinator.prepareDestinationReplacement(taskId: id, destinationURL: destinationURL) else {
+                try? FileManager.default.removeItem(at: location)
+                removeTask(for: id, completing: downloadTask, in: session)
+                batchCoordinator.unregisterChildTask(id)
+                return
             }
 
             try FileManager.default.moveItem(at: location, to: destinationURL)

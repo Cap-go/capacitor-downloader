@@ -39,12 +39,32 @@ final class DownloadBatchCoordinator {
     func activeChildParts(for taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
         batchesLock.lock()
         defer { batchesLock.unlock() }
+        return activeChildPartsUnlocked(for: taskId)
+    }
+
+    private func activeChildPartsUnlocked(for taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
         guard let parts = childPartsUnlocked(for: taskId),
               let batch = batches[parts.batchId],
-              batch.generation == parts.generation else {
+              batch.generation == parts.generation,
+              !batch.cancelled, !batch.failed else {
             return nil
         }
         return parts
+    }
+
+    /// Verifies a batch child is still active, then removes an existing destination file under the batch lock.
+    func prepareDestinationReplacement(taskId: String, destinationURL: URL) throws -> Bool {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        if childPartsUnlocked(for: taskId) != nil {
+            guard activeChildPartsUnlocked(for: taskId) != nil else {
+                return false
+            }
+        }
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try FileManager.default.removeItem(at: destinationURL)
+        }
+        return true
     }
 
     private func childPartsUnlocked(for taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {

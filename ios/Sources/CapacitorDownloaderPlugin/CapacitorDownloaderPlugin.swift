@@ -78,11 +78,16 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
             let semaphore = DispatchSemaphore(value: 0)
+            var didFinishLoad = false
             DownloadBackgroundSessionManager.shared.rehydrateTasks { tasks in
+                didFinishLoad = true
                 finishLoad(tasks)
                 semaphore.signal()
             }
-            _ = semaphore.wait(timeout: .now() + 5)
+            let waitResult = semaphore.wait(timeout: .now() + 5)
+            if waitResult == .timedOut, !didFinishLoad {
+                finishLoad([])
+            }
         } else {
             DownloadBackgroundSessionManager.shared.rehydrateTasks(completion: finishLoad)
         }

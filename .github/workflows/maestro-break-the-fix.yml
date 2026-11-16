@@ -30,23 +30,41 @@ env:
   MAESTRO_VERSION: cli-2.4.0
 
 jobs:
+  break_fix_plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      android_matrix: ${{ steps.plan.outputs.android_matrix }}
+      ios_matrix: ${{ steps.plan.outputs.ios_matrix }}
+      android_enabled: ${{ steps.plan.outputs.android_enabled }}
+      ios_enabled: ${{ steps.plan.outputs.ios_enabled }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          dependency-cache-key: break-fix-plan
+          dependency-cache-path: node_modules
+      - name: Build break-the-fix matrix
+        id: plan
+        env:
+          SCENARIO: ${{ inputs.scenario }}
+          MODE: ${{ inputs.mode }}
+        run: bun scripts/maestro/break-fix-matrix.mjs
+
   break_fix_android:
     name: break-fix android / ${{ matrix.regression }} / ${{ matrix.mode }}
-    if: >-
-      (inputs.scenario == 'all' || inputs.scenario == matrix.flow) &&
-      (inputs.mode == 'both' || inputs.mode == matrix.mode)
+    needs: break_fix_plan
+    if: needs.break_fix_plan.outputs.android_enabled == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { regression: completion-dedupe, flow: completion-once, mode: broken, expect_outcome: failure }
-          - { regression: completion-dedupe, flow: completion-once, mode: fixed, expect_outcome: success }
-          - { regression: cancel-cleanup, flow: cancel-cleanup, mode: broken, expect_outcome: failure }
-          - { regression: cancel-cleanup, flow: cancel-cleanup, mode: fixed, expect_outcome: success }
-          - { regression: error-404-map, flow: error-404, mode: broken, expect_outcome: failure }
-          - { regression: error-404-map, flow: error-404, mode: fixed, expect_outcome: success }
+        include: ${{ fromJSON(needs.break_fix_plan.outputs.android_matrix) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -113,20 +131,14 @@ jobs:
 
   break_fix_ios:
     name: break-fix ios / ${{ matrix.regression }} / ${{ matrix.mode }}
-    if: >-
-      (inputs.scenario == 'all' || inputs.scenario == matrix.flow) &&
-      (inputs.mode == 'both' || inputs.mode == matrix.mode) &&
-      (matrix.platform == 'ios')
+    needs: break_fix_plan
+    if: needs.break_fix_plan.outputs.ios_enabled == 'true'
     runs-on: macOS-latest
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { regression: completion-dedupe, flow: completion-once, platform: ios, mode: broken, expect_outcome: failure }
-          - { regression: completion-dedupe, flow: completion-once, platform: ios, mode: fixed, expect_outcome: success }
-          - { regression: error-404-map, flow: error-404, platform: ios, mode: broken, expect_outcome: failure }
-          - { regression: error-404-map, flow: error-404, platform: ios, mode: fixed, expect_outcome: success }
+        include: ${{ fromJSON(needs.break_fix_plan.outputs.ios_matrix) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -139,16 +151,13 @@ jobs:
             node_modules
             example-app/node_modules
           install-example: 'true'
-      - name: Boot iOS simulator
+      - name: Select iOS simulator
         run: |
           simulator_id="$(./scripts/maestro/select-ios-simulator.sh)"
           echo "CAPGO_MAESTRO_IOS_SIMULATOR_ID=$simulator_id" >> "$GITHUB_ENV"
-          xcrun simctl boot "$simulator_id" >/dev/null 2>&1 || true
       - uses: ./.github/actions/setup-maestro
         with:
           maestro-version: ${{ env.MAESTRO_VERSION }}
-      - name: Wait for iOS simulator boot
-        run: xcrun simctl bootstatus "$CAPGO_MAESTRO_IOS_SIMULATOR_ID" -b
       - name: Run break-the-fix scenario
         id: run
         continue-on-error: true

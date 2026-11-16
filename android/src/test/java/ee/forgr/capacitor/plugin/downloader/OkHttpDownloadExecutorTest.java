@@ -60,6 +60,12 @@ public class OkHttpDownloadExecutorTest {
         server.shutdown();
     }
 
+    @Test(timeout = 5_000)
+    public void fetchResponseCodeReturnsOriginStatusWithoutSavingBody() throws Exception {
+        server.enqueue(new MockResponse().setResponseCode(500).setBody("server error"));
+        assertEquals(500, executor.fetchResponseCode(server.url("/status/500").toString()));
+    }
+
     @Test(timeout = 10_000)
     public void downloadsBytesToDestination() throws Exception {
         byte[] payload = "offline-package".getBytes(StandardCharsets.UTF_8);

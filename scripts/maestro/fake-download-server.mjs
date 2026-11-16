@@ -68,6 +68,12 @@ const server = createServer((req, res) => {
   }
 
 
+  if (req.method === 'GET' && pathname === '/status/500-empty') {
+    res.writeHead(500, { 'content-type': 'text/plain', 'content-length': '0' });
+    res.end();
+    return;
+  }
+
   const statusMatch = pathname.match(/^\/status\/(\d{3})$/);
   if (req.method === 'GET' && statusMatch) {
     const code = Number(statusMatch[1]);
@@ -77,9 +83,8 @@ const server = createServer((req, res) => {
       return;
     }
     if (code >= 500 && code <= 599) {
-      // OkHttp rejects non-2xx. DownloadManager must not treat a 5xx body as a successful file.
-      res.writeHead(code, { 'content-type': 'text/plain', 'content-length': '0' });
-      res.end();
+      res.writeHead(code, { 'content-type': 'text/plain' });
+      res.end('server error');
       return;
     }
   }

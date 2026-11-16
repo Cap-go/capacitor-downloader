@@ -300,7 +300,7 @@ final class DownloadBatchProgressTests: XCTestCase {
             ] as [String: String]
         }
         let expectation = expectation(description: "batch enqueue")
-        let call = CAPPluginCall(
+        guard let call = CAPPluginCall(
             callbackId: "batch-entry",
             methodName: "download",
             options: ["id": "forty-batch", "files": files],
@@ -311,7 +311,10 @@ final class DownloadBatchProgressTests: XCTestCase {
             error: { _ in
                 XCTFail("batch download should resolve")
             }
-        )
+        ) else {
+            XCTFail("failed to create CAPPluginCall")
+            return
+        }
         plugin.download(call)
         wait(for: [expectation], timeout: 5)
         XCTAssertEqual(plugin.trackedBatchFileCountForTests(batchId: "forty-batch"), 40)

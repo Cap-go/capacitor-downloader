@@ -9,6 +9,16 @@ final class DownloadHttpErrorTaskGenerationTests: XCTestCase {
 
     override func tearDown() {
         DownloadSessionDelegateTestSupport.reset()
+        for (key, _) in DownloadTaskGenerationStore.shared.allGenerations() {
+            let parts = key.split(separator: "|", omittingEmptySubsequences: false)
+            if parts.count == 2, let taskId = Int(parts[1]) {
+                let sessionId = String(parts[0])
+                DownloadTaskGenerationStore.shared.removeGeneration(
+                    forSessionIdentifier: sessionId,
+                    taskIdentifier: taskId
+                )
+            }
+        }
         super.tearDown()
     }
 

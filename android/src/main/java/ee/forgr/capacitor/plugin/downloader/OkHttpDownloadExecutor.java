@@ -277,7 +277,7 @@ public class OkHttpDownloadExecutor {
             completionListener.onFinished(id, false, false, active.errorMessage);
         } finally {
             if (acquired) {
-                transferSlots.release();
+                // transferSlots.release();
             }
         }
     }

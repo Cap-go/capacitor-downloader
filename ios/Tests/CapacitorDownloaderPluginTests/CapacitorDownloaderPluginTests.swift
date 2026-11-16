@@ -276,6 +276,58 @@ final class DownloadBatchProgressTests: XCTestCase {
         coordinator.removeBatch(batchId: "bundle")
         store.clear()
     }
+
+    func testBatchStartupSnapshotHonoursPausedAndCancelled() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let generation = coordinator.startBatch(batchId: "bundle", fileCount: 2, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+        coordinator.setPaused(batchId: "bundle", paused: true)
+        var snapshot = coordinator.batchStartupSnapshot(batchId: "bundle", generation: generation)
+        XCTAssertTrue(snapshot.allowed)
+        XCTAssertTrue(snapshot.paused)
+
+        let childA = coordinator.fileTaskId(batchId: "bundle", generation: generation, fileIndex: 0)
+        let childB = coordinator.fileTaskId(batchId: "bundle", generation: generation, fileIndex: 1)
+        snapshot = coordinator.registerStartupChildren(
+            batchId: "bundle",
+            generation: generation,
+            children: [(childA, 0), (childB, 1)]
+        )
+        XCTAssertTrue(snapshot.allowed)
+        XCTAssertTrue(snapshot.paused)
+        XCTAssertEqual(Set(coordinator.childTaskIds(batchId: "bundle")), Set([childA, childB]))
+
+        coordinator.markCancelled(batchId: "bundle")
+        XCTAssertFalse(coordinator.batchStartupSnapshot(batchId: "bundle", generation: generation).allowed)
+        XCTAssertFalse(
+            coordinator.registerStartupChildren(batchId: "bundle", generation: generation, children: [(childA, 0)]).allowed
+        )
+
+        coordinator.removeBatch(batchId: "bundle")
+        store.clear()
+    }
+
+    func testTakeBatchForStopIsAtomicWithStartupRegistration() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let generation = coordinator.startBatch(batchId: "bundle", fileCount: 1, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+        let childId = coordinator.fileTaskId(batchId: "bundle", generation: generation, fileIndex: 0)
+        coordinator.registerChildTask(batchId: "bundle", taskId: childId, fileIndex: 0)
+
+        let stopSnapshot = coordinator.takeBatchForStop(batchId: "bundle")
+        XCTAssertNotNil(stopSnapshot)
+        XCTAssertEqual(stopSnapshot?.childTaskIds, [childId])
+        XCTAssertFalse(coordinator.isBatch(batchId: "bundle"))
+        XCTAssertFalse(coordinator.batchStartupSnapshot(batchId: "bundle", generation: generation).allowed)
+
+        store.clear()
+    }
 }
 
 final class DownloadCompletedNotificationTextTests: XCTestCase {

@@ -191,6 +191,62 @@ final class DownloadBatchCoordinator {
         persistBatchesLocked()
     }
 
+    struct BatchStartupSnapshot {
+        let allowed: Bool
+        let paused: Bool
+    }
+
+    func batchStartupSnapshot(batchId: String, generation: UInt64) -> BatchStartupSnapshot {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        guard let batch = batches[batchId], batch.generation == generation, !batch.cancelled, !batch.failed else {
+            return BatchStartupSnapshot(allowed: false, paused: false)
+        }
+        return BatchStartupSnapshot(allowed: true, paused: batch.paused)
+    }
+
+    /// Registers child task ids for a batch under the same lock used by cancellation.
+    func registerStartupChildren(
+        batchId: String,
+        generation: UInt64,
+        children: [(taskId: String, fileIndex: Int)]
+    ) -> BatchStartupSnapshot {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        guard var batch = batches[batchId], batch.generation == generation, !batch.cancelled, !batch.failed else {
+            return BatchStartupSnapshot(allowed: false, paused: false)
+        }
+        for child in children {
+            batch.childTaskIds.insert(child.taskId)
+            registeredChildren[child.taskId] = batchId
+        }
+        batches[batchId] = batch
+        persistBatchesLocked()
+        return BatchStartupSnapshot(allowed: true, paused: batch.paused)
+    }
+
+    struct BatchStopSnapshot {
+        let generation: UInt64
+        let childTaskIds: [String]
+        let destinations: [String]
+    }
+
+    /// Removes the batch under the batch lock and returns child ids for task cancellation.
+    func takeBatchForStop(batchId: String) -> BatchStopSnapshot? {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        guard let batch = batches[batchId] else {
+            return nil
+        }
+        let snapshot = BatchStopSnapshot(
+            generation: batch.generation,
+            childTaskIds: Array(batch.childTaskIds),
+            destinations: batch.savedDestinations.values.sorted()
+        )
+        removeBatchLocked(batchId: batchId, unregisterChildren: false)
+        return snapshot
+    }
+
     func removeBatch(batchId: String, unregisterChildren: Bool = true) {
         batchesLock.lock()
         defer { batchesLock.unlock() }

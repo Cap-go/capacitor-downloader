@@ -605,6 +605,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
         call.resolve(result);
 
         for (int i = 0; i < fileRequests.size(); i++) {
+            if (!ownsBatch(batchId, batch) || isBatchCancelled(batch)) {
+                okHttpDownloadExecutor.abandonTransfer(reservations.get(i));
+                continue;
+            }
             startOkHttpBatchFile(batch, fileRequests.get(i), reservations.get(i), headers, network);
         }
     }
@@ -618,6 +622,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
     ) {
         final String batchId = batch.batchId;
         Runnable transfer = () -> {
+            if (!ownsBatch(batchId, batch) || isBatchCancelled(batch)) {
+                okHttpDownloadExecutor.abandonTransfer(reservation);
+                return;
+            }
             try {
                 okHttpDownloadExecutor.start(
                     reservation,

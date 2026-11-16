@@ -410,18 +410,18 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let self else {
                 return
             }
-            guard self.batchCoordinator.generation(for: batchId) == generation else {
+            guard self.batchCoordinator.batchStartupSnapshot(batchId: batchId, generation: generation).allowed else {
                 self.markContinuedProcessingFinished(downloadId: batchId, success: false)
                 call.reject("Download was cancelled")
                 return
             }
             let batchSession = self.downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: useForeground)
             var stagedTasks: [(taskId: String, task: URLSessionDownloadTask)] = []
+            var childRegistrations: [(taskId: String, fileIndex: Int)] = []
 
             for (index, entry) in parsed.enumerated() {
                 let taskId = self.batchCoordinator.fileTaskId(batchId: batchId, generation: generation, fileIndex: index)
                 DownloadDestinationStore.shared.setDestination(entry.destination, for: taskId)
-                self.batchCoordinator.registerChildTask(batchId: batchId, taskId: taskId, fileIndex: index)
 
                 var request = URLRequest(url: entry.url)
                 for (key, value) in headers {
@@ -431,6 +431,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 let task = batchSession.downloadTask(with: request)
                 task.taskDescription = taskId
                 stagedTasks.append((taskId, task))
+                childRegistrations.append((taskId, index))
             }
 
             if useForeground {
@@ -440,19 +441,30 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             }
 
             stagedTasks.forEach { self.setTask($0.task, for: $0.taskId) }
-            guard self.batchCoordinator.generation(for: batchId) == generation else {
+            let startup = self.batchCoordinator.registerStartupChildren(
+                batchId: batchId,
+                generation: generation,
+                children: childRegistrations
+            )
+            guard startup.allowed else {
                 self.discardStagedBatchTasks(stagedTasks, session: batchSession)
                 self.markBatchContinuedProcessingFinished(batchId: batchId, generation: generation, success: false)
                 call.reject("Download was cancelled")
                 return
             }
-            if !self.batchCoordinator.isPaused(batchId: batchId) {
+            if !startup.paused {
                 stagedTasks.forEach { $0.task.resume() }
+            }
+            guard self.batchCoordinator.batchStartupSnapshot(batchId: batchId, generation: generation).allowed else {
+                self.discardStagedBatchTasks(stagedTasks, session: batchSession)
+                self.markBatchContinuedProcessingFinished(batchId: batchId, generation: generation, success: false)
+                call.reject("Download was cancelled")
+                return
             }
 
             call.resolve([
                 "id": batchId,
-                "state": "RUNNING",
+                "state": startup.paused ? "PAUSED" : "RUNNING",
                 "progress": 0
             ])
         }
@@ -480,13 +492,17 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func cancelBatchTasks(batchId: String) {
-        let taskIds = batchCoordinator.childTaskIds(batchId: batchId)
+        cancelBatchTasks(taskIds: batchCoordinator.childTaskIds(batchId: batchId))
+    }
+
+    private func cancelBatchTasks(taskIds: [String]) {
         for taskId in taskIds {
             if let task = getTask(for: taskId) {
                 task.cancel()
                 removeTask(for: taskId, completing: task, in: sessionAssumedForStoredTask(downloadId: taskId))
             }
             DownloadDestinationStore.shared.removeDestination(for: taskId)
+            batchCoordinator.unregisterChildTask(taskId)
         }
     }
 
@@ -571,15 +587,13 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         if batchCoordinator.isBatch(batchId: id) {
-            let destinations = batchCoordinator.destinationsForCancellation(batchId: id)
-            batchCoordinator.markCancelled(batchId: id)
-            let generation = batchCoordinator.generation(for: id)
-            cancelBatchTasks(batchId: id)
-            if let generation {
-                markBatchContinuedProcessingFinished(batchId: id, generation: generation, success: false)
+            guard let stopSnapshot = batchCoordinator.takeBatchForStop(batchId: id) else {
+                call.reject("Task not found")
+                return
             }
-            deleteDownloadedFiles(destinations: destinations)
-            batchCoordinator.removeBatch(batchId: id, unregisterChildren: false)
+            cancelBatchTasks(taskIds: stopSnapshot.childTaskIds)
+            markBatchContinuedProcessingFinished(batchId: id, generation: stopSnapshot.generation, success: false)
+            deleteDownloadedFiles(destinations: stopSnapshot.destinations)
             call.resolve()
             return
         }

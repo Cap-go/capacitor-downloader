@@ -44,11 +44,37 @@ public class DownloadExpectedLengthTest {
     }
 
     @Test
-    public void progressFromLengthHeaderNeverExceedsOne() {
-        long headerTotal = 100L;
-        long written = 250L;
-        float progress = Math.min(1f, (float) written / (float) headerTotal);
-        assertEquals(1f, progress, 0f);
-        assertTrue(progress <= 1f);
+    public void resolveTotalBytesIgnoresLengthHeaderWhenContentEncodingPresent() {
+        Response response = new Response.Builder()
+            .request(new Request.Builder().url("http://127.0.0.1/").build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .header("Content-Encoding", "gzip")
+            .header("Content-Length", "132")
+            .header("X-Uncompressed-Length", "100000")
+            .build();
+        ResponseBody body = ResponseBody.create(new byte[132], MediaType.get("application/octet-stream"));
+        long total = DownloadExpectedLength.resolveTotalBytes(response, body, "X-Uncompressed-Length");
+        assertEquals(132L, total);
+    }
+
+    @Test
+    public void resolveTotalBytesFallsBackWhenLengthHeaderMissing() {
+        Response response = new Response.Builder()
+            .request(new Request.Builder().url("http://127.0.0.1/").build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .header("Content-Length", "256")
+            .build();
+        ResponseBody body = ResponseBody.create(new byte[0], MediaType.get("application/octet-stream"));
+        long total = DownloadExpectedLength.resolveTotalBytes(response, body, "X-Uncompressed-Length");
+        assertEquals(256L, total);
+    }
+
+    @Test
+    public void parsePositiveHeaderValueRejectsOverflow() {
+        assertEquals(-1L, DownloadExpectedLength.parsePositiveHeaderValue("9223372036854775808"));
     }
 }

@@ -65,22 +65,14 @@ public class OkHttpDownloadExecutorTest {
     @Test(timeout = 10_000)
     public void usesLengthHeaderWhenContentLengthMissing() throws Exception {
         byte[] payload = "gzip-style-payload".getBytes(StandardCharsets.UTF_8);
-        ByteArrayOutputStream gzipBuffer = new ByteArrayOutputStream();
-        try (GZIPOutputStream gzipOut = new GZIPOutputStream(gzipBuffer)) {
-            gzipOut.write(payload);
-        }
-        byte[] gzipped = gzipBuffer.toByteArray();
         server.enqueue(
-            new MockResponse()
-                .setBody(new okio.Buffer().write(gzipped))
-                .addHeader("Content-Encoding", "gzip")
-                .addHeader("X-Uncompressed-Length", String.valueOf(payload.length))
+            new MockResponse().setBody(new okio.Buffer().write(payload)).addHeader("X-Uncompressed-Length", String.valueOf(payload.length))
         );
 
         File destination = new File(tempDir, "length-header.bin");
         CountDownLatch finished = new CountDownLatch(1);
         AtomicBoolean success = new AtomicBoolean(false);
-        AtomicReference<Float> lastProgress = new AtomicReference<>(0f);
+        java.util.List<Float> progressSamples = new java.util.ArrayList<>();
         AtomicReference<Long> lastBytesTotal = new AtomicReference<>(0L);
 
         OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer("length-header");
@@ -93,7 +85,7 @@ public class OkHttpDownloadExecutorTest {
             "cellular",
             "X-Uncompressed-Length",
             (id, progress) -> {
-                lastProgress.set(progress);
+                progressSamples.add(progress);
                 OkHttpDownloadExecutor.ActiveDownload active = executor.getActive(id);
                 if (active != null) {
                     lastBytesTotal.set(active.bytesTotal);
@@ -108,7 +100,10 @@ public class OkHttpDownloadExecutorTest {
         assertTrue(finished.await(5, TimeUnit.SECONDS));
         assertTrue(success.get());
         assertEquals(payload.length, destination.length());
-        assertTrue(lastProgress.get() <= 1f);
+        assertFalse(progressSamples.isEmpty());
+        for (Float sample : progressSamples) {
+            assertTrue("progress must stay <= 1 (sample=" + sample + ")", sample <= 1f);
+        }
         assertEquals(Long.valueOf(payload.length), lastBytesTotal.get());
     }
 
@@ -118,21 +113,11 @@ public class OkHttpDownloadExecutorTest {
         for (int i = 0; i < payload.length; i++) {
             payload[i] = (byte) (i % 251);
         }
-        ByteArrayOutputStream gzipBuffer = new ByteArrayOutputStream();
-        try (GZIPOutputStream gzipOut = new GZIPOutputStream(gzipBuffer)) {
-            gzipOut.write(payload);
-        }
-        byte[] gzipped = gzipBuffer.toByteArray();
-        server.enqueue(
-            new MockResponse()
-                .setBody(new okio.Buffer().write(gzipped))
-                .addHeader("Content-Encoding", "gzip")
-                .addHeader("X-Uncompressed-Length", "100")
-        );
+        server.enqueue(new MockResponse().setBody(new okio.Buffer().write(payload)).addHeader("X-Uncompressed-Length", "100"));
 
         File destination = new File(tempDir, "length-header-clamp.bin");
         CountDownLatch finished = new CountDownLatch(1);
-        AtomicReference<Float> lastProgress = new AtomicReference<>(0f);
+        java.util.List<Float> progressSamples = new java.util.ArrayList<>();
 
         OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer("length-header-clamp");
         assertNotNull(reservation);
@@ -143,13 +128,53 @@ public class OkHttpDownloadExecutorTest {
             new JSObject(),
             "cellular",
             "X-Uncompressed-Length",
-            (id, progress) -> lastProgress.set(progress),
+            (id, progress) -> progressSamples.add(progress),
             (id, ok, cancelled, errorMessage) -> finished.countDown()
         );
 
         assertTrue(finished.await(5, TimeUnit.SECONDS));
         assertEquals(payload.length, destination.length());
-        assertTrue(lastProgress.get() <= 1f);
+        assertFalse(progressSamples.isEmpty());
+        for (Float sample : progressSamples) {
+            assertTrue("progress must stay <= 1 (sample=" + sample + ")", sample <= 1f);
+        }
+    }
+
+    @Test(timeout = 10_000)
+    public void ignoresLengthHeaderWhenContentEncodingHeaderPresent() throws Exception {
+        byte[] payload = new byte[256];
+        server.enqueue(
+            new MockResponse()
+                .setBody(new okio.Buffer().write(payload))
+                .addHeader("Content-Encoding", "gzip")
+                .addHeader("Content-Length", String.valueOf(payload.length))
+                .addHeader("X-Uncompressed-Length", "100000")
+        );
+
+        File destination = new File(tempDir, "length-header-encoding.bin");
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicReference<Long> lastBytesTotal = new AtomicReference<>(0L);
+
+        OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer("length-header-encoding");
+        assertNotNull(reservation);
+        executor.start(
+            reservation,
+            server.url("/encoding").toString(),
+            destination,
+            new JSObject(),
+            "cellular",
+            "X-Uncompressed-Length",
+            (id, progress) -> {
+                OkHttpDownloadExecutor.ActiveDownload active = executor.getActive(id);
+                if (active != null) {
+                    lastBytesTotal.set(active.bytesTotal);
+                }
+            },
+            (id, ok, cancelled, errorMessage) -> finished.countDown()
+        );
+
+        assertTrue(finished.await(5, TimeUnit.SECONDS));
+        assertEquals(Long.valueOf(payload.length), lastBytesTotal.get());
     }
 
     @Test(timeout = 10_000)

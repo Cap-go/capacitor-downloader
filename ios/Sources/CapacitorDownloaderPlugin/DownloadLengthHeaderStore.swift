@@ -9,6 +9,9 @@ final class DownloadLengthHeaderStore {
 
     private let defaults: UserDefaults
     private let lock = NSLock()
+    private var headerNames: [String: String] = [:]
+    private var expectedTotals: [String: Int64] = [:]
+    private var loadedFromDisk = false
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -17,22 +20,21 @@ final class DownloadLengthHeaderStore {
     func setHeaderName(_ name: String?, for taskId: String) {
         lock.lock()
         defer { lock.unlock() }
-        var names = headerNamesMap()
-        var totals = expectedTotalsMap()
+        ensureLoadedUnlocked()
         if let name, !name.isEmpty {
-            names[taskId] = name
+            headerNames[taskId] = name
         } else {
-            names.removeValue(forKey: taskId)
+            headerNames.removeValue(forKey: taskId)
         }
-        totals.removeValue(forKey: taskId)
-        persistHeaderNames(names)
-        persistExpectedTotals(totals)
+        expectedTotals.removeValue(forKey: taskId)
+        persistUnlocked()
     }
 
     func headerName(for taskId: String) -> String? {
         lock.lock()
         defer { lock.unlock() }
-        return headerNamesMap()[taskId]
+        ensureLoadedUnlocked()
+        return headerNames[taskId]
     }
 
     func setExpectedTotal(_ total: Int64, for taskId: String) {
@@ -41,49 +43,65 @@ final class DownloadLengthHeaderStore {
         }
         lock.lock()
         defer { lock.unlock() }
-        var totals = expectedTotalsMap()
-        totals[taskId] = total
-        persistExpectedTotals(totals)
+        ensureLoadedUnlocked()
+        expectedTotals[taskId] = total
+        persistUnlocked()
     }
 
     func expectedTotal(for taskId: String) -> Int64? {
         lock.lock()
         defer { lock.unlock() }
-        return expectedTotalsMap()[taskId]
+        ensureLoadedUnlocked()
+        return expectedTotals[taskId]
     }
 
     func clear(for taskId: String) {
         lock.lock()
         defer { lock.unlock() }
-        var names = headerNamesMap()
-        var totals = expectedTotalsMap()
-        names.removeValue(forKey: taskId)
-        totals.removeValue(forKey: taskId)
-        persistHeaderNames(names)
-        persistExpectedTotals(totals)
+        ensureLoadedUnlocked()
+        headerNames.removeValue(forKey: taskId)
+        expectedTotals.removeValue(forKey: taskId)
+        persistUnlocked()
     }
 
-    private func headerNamesMap() -> [String: String] {
-        defaults.dictionary(forKey: Self.headerNamesDefaultsKey) as? [String: String] ?? [:]
-    }
-
-    private func expectedTotalsMap() -> [String: Int64] {
-        guard let raw = defaults.dictionary(forKey: Self.expectedTotalsDefaultsKey) as? [String: NSNumber] else {
-            return [:]
+    func sweepStaleEntries(keeping taskIds: Set<String>) {
+        lock.lock()
+        defer { lock.unlock() }
+        ensureLoadedUnlocked()
+        let staleNameKeys = headerNames.keys.filter { !taskIds.contains($0) }
+        let staleTotalKeys = expectedTotals.keys.filter { !taskIds.contains($0) }
+        guard !staleNameKeys.isEmpty || !staleTotalKeys.isEmpty else {
+            return
         }
-        var totals: [String: Int64] = [:]
-        for (key, value) in raw {
-            totals[key] = value.int64Value
+        for key in staleNameKeys {
+            headerNames.removeValue(forKey: key)
         }
-        return totals
+        for key in staleTotalKeys {
+            expectedTotals.removeValue(forKey: key)
+        }
+        persistUnlocked()
     }
 
-    private func persistHeaderNames(_ map: [String: String]) {
-        defaults.set(map, forKey: Self.headerNamesDefaultsKey)
+    private func ensureLoadedUnlocked() {
+        guard !loadedFromDisk else {
+            return
+        }
+        loadedFromDisk = true
+        headerNames = defaults.dictionary(forKey: Self.headerNamesDefaultsKey) as? [String: String] ?? [:]
+        if let raw = defaults.dictionary(forKey: Self.expectedTotalsDefaultsKey) as? [String: NSNumber] {
+            var totals: [String: Int64] = [:]
+            for (key, value) in raw {
+                totals[key] = value.int64Value
+            }
+            expectedTotals = totals
+        } else {
+            expectedTotals = [:]
+        }
     }
 
-    private func persistExpectedTotals(_ map: [String: Int64]) {
-        let encoded = map.mapValues { NSNumber(value: $0) }
+    private func persistUnlocked() {
+        defaults.set(headerNames, forKey: Self.headerNamesDefaultsKey)
+        let encoded = expectedTotals.mapValues { NSNumber(value: $0) }
         defaults.set(encoded, forKey: Self.expectedTotalsDefaultsKey)
     }
 }

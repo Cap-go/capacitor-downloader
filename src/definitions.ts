@@ -146,8 +146,11 @@ export interface DownloadOptions {
    * `downloadProgress` totals and progress is clamped at 1. Examples: `X-Uncompressed-Length`.
    *
    * Single downloads: Android OkHttp and iOS. Ignored on Web and Android DownloadManager.
+   * On Android OkHttp, ignored when the response still includes `Content-Encoding` (for example
+   * after setting `Accept-Encoding: gzip` on the request). Do not set request `Accept-Encoding`;
+   * OkHttp handles decompression by default.
    *
-   * @since 8.8.4
+   * @since 8.9.0
    */
   lengthHeader?: string;
   /**
@@ -276,7 +279,7 @@ export interface DownloadBatchOptions {
    * Batch downloads: iOS only (same header name applies to every file in `files`). Android batches always
    * use DownloadManager and ignore this option. Ignored on Web.
    *
-   * @since 8.8.4
+   * @since 8.9.0
    */
   lengthHeader?: string;
 }

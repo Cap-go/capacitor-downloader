@@ -19,4 +19,15 @@ final class DownloadExpectedLengthTests: XCTestCase {
         )!
         XCTAssertEqual(DownloadExpectedLength.parse(from: response, headerName: "X-Uncompressed-Length"), 500)
     }
+
+    func testParseRejectsNonNumericAndOverflow() {
+        XCTAssertNil(DownloadExpectedLength.parsePositiveHeaderValue("not-a-number"))
+        XCTAssertNil(DownloadExpectedLength.parsePositiveHeaderValue("9223372036854775808"))
+    }
+
+    func testParseIgnoresMissingLengthHeaderOnResponse() throws {
+        let url = URL(string: "https://example.com/file")!
+        let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: [:])!
+        XCTAssertNil(DownloadExpectedLength.parse(from: response, headerName: "X-Uncompressed-Length"))
+    }
 }

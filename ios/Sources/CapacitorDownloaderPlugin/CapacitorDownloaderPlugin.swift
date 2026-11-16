@@ -74,6 +74,9 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 return
             }
             self.rehydrateBackgroundDownloadTasks(tasks)
+            let activeIds = self.singleDownloadIds()
+                .union(Set(tasks.compactMap { ($0 as? URLSessionDownloadTask)?.taskDescription }))
+            DownloadLengthHeaderStore.shared.sweepStaleEntries(keeping: activeIds)
             self.registerDownloadDelegateIfGenerationsRestored()
         }
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
@@ -525,6 +528,24 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         DownloadBackgroundSessionManager.shared.mainSession
     }
 
+    internal func registerSingleDownloadForTests(
+        downloadId: String,
+        task: URLSessionDownloadTask,
+        session: URLSession,
+        generation: UInt64,
+        destination: String
+    ) {
+        DownloadDestinationStore.shared.setDestination(destination, for: downloadId)
+        setTask(task, for: downloadId)
+        setTaskGeneration(generation, for: task, in: session)
+    }
+
+    internal func registeredTaskGenerationKeysForTests() -> Set<String> {
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
+        return Set(taskGenerations.keys)
+    }
+
     private func failBatch(batchId: String, generation: UInt64, fileIndex: Int, error: String) {
         guard batchCoordinator.beginFailure(batchId: batchId, generation: generation) else {
             return
@@ -677,7 +698,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             return
         }
 
-        if let httpResponse = downloadTask.response as? HTTPURLResponse,
+        if let httpResponse = DownloadSessionDelegateTestSupport.httpResponse(for: downloadTask),
            !DownloadHTTPValidator.isSuccessfulStatusCode(httpResponse.statusCode) {
             try? FileManager.default.removeItem(at: location)
             if let batchParts = batchCoordinator.activeChildParts(for: id) {
@@ -697,8 +718,6 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 )
                 markContinuedProcessingFinished(downloadId: id, success: false)
             }
-            removeTask(for: id, completing: downloadTask, in: session)
-            batchCoordinator.unregisterChildTask(id)
             return
         }
 

@@ -40,4 +40,19 @@ final class DownloadLengthHeaderStoreTests: XCTestCase {
     let totals = defaults.dictionary(forKey: DownloadLengthHeaderStore.expectedTotalsDefaultsKey) as? [String: NSNumber]
     XCTAssertNil(totals?["task-2"])
   }
+
+  func testSweepStaleEntriesDropsOrphanedTasks() {
+    let store = DownloadLengthHeaderStore(defaults: defaults)
+    store.setHeaderName("X-Uncompressed-Length", for: "active-task")
+    store.setExpectedTotal(100, for: "active-task")
+    store.setHeaderName("X-Uncompressed-Length", for: "stale-task")
+    store.setExpectedTotal(200, for: "stale-task")
+
+    store.sweepStaleEntries(keeping: ["active-task"])
+
+    XCTAssertEqual(store.headerName(for: "active-task"), "X-Uncompressed-Length")
+    XCTAssertNil(store.headerName(for: "stale-task"))
+    XCTAssertEqual(store.expectedTotal(for: "active-task"), 100)
+    XCTAssertNil(store.expectedTotal(for: "stale-task"))
+  }
 }

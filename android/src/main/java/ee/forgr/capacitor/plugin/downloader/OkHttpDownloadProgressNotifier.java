@@ -260,6 +260,7 @@ final class OkHttpDownloadProgressNotifier {
         final String title;
         final String description;
         final String notificationMode;
+        /** Wall-clock download start; keeps parallel progress notifications sorted by start order. */
         final long startedAt;
         long lastPostedAt;
 

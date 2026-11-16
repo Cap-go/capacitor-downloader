@@ -174,13 +174,29 @@ function buildBatchSpecs(count, okBytes, failUrl) {
   });
 }
 
-async function waitForBatchFailure(id, timeoutMs = 150_000) {
+async function waitForBatchFailure(id, timeoutMs = 150_000, failFileIndex = null) {
   const deadline = Date.now() + timeoutMs;
+  const failChildId =
+    failFileIndex != null && Capacitor.getPlatform() === 'android' ? `${id}#${failFileIndex}` : null;
   while (Date.now() < deadline) {
     const status = await readDownloadStatus(id);
     appendLog(`BATCH_FAIL_WAIT:${id}:${status.state}:${status.progress}`);
     if (status.state === 'ERROR') {
       return status;
+    }
+    if (failChildId) {
+      try {
+        const child = normalizeDownloadTask(await plugin.checkStatus({ id: failChildId }));
+        appendLog(`BATCH_FAIL_CHILD:${failChildId}:${child.state}:${child.progress}`);
+        if (child.state === 'ERROR') {
+          return { state: 'ERROR', progress: status.progress };
+        }
+      } catch (childError) {
+        const message = String(childError?.message ?? childError);
+        if (/not found/i.test(message)) {
+          return { state: 'ERROR', progress: status.progress };
+        }
+      }
     }
     const summaryText = e2eSummary.textContent || '';
     if (summaryText.includes(`EVENT:downloadFailed:id=${id}:`)) {
@@ -453,7 +469,7 @@ const flows = {
       androidHttpEngine: batchHttpEngine(),
       notification: 'hidden',
     });
-    const status = await waitForBatchFailure(id);
+    const status = await waitForBatchFailure(id, 150_000, files.length - 1);
     if (status.state !== 'ERROR') {
       throw new Error(`Expected batch ERROR for 404, got ${status.state}`);
     }
@@ -465,14 +481,16 @@ const flows = {
 
   async 'batch-error-5xx'() {
     const id = 'batch-5xx';
-    const files = buildBatchSpecs(4, 4096, fileUrl('/status/500'));
+    const isIos = Capacitor.getPlatform() === 'ios';
+    const failPath = isIos ? '/status/500' : '/status/503';
+    const files = buildBatchSpecs(4, 4096, fileUrl(failPath));
     await plugin.download({
       id,
       files,
       androidHttpEngine: batchHttpEngine(),
       notification: 'hidden',
     });
-    const status = await waitForBatchFailure(id);
+    const status = await waitForBatchFailure(id, 150_000, files.length - 1);
     if (status.state !== 'ERROR') {
       throw new Error(`Expected batch ERROR for 5xx, got ${status.state}`);
     }

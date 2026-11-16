@@ -74,13 +74,14 @@ const server = createServer((req, res) => {
   }
 
   if (req.method === 'GET' && pathname === '/status/500') {
-    // OkHttp rejects non-2xx before reading the body. DownloadManager may still store a
-    // short 5xx body as a successful file, so declare a larger body and close early.
-    res.writeHead(500, {
-      'content-type': 'text/plain',
-      'content-length': '4096',
-    });
+    res.writeHead(500, { 'content-type': 'text/plain' });
     res.end('server error');
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/status/503') {
+    res.writeHead(503, { 'content-type': 'text/plain' });
+    res.end('unavailable');
     return;
   }
 

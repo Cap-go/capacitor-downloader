@@ -88,16 +88,13 @@ public class CapacitorDownloaderPluginBatchEntryTest {
     private static PluginCall buildBatchCall(String batchId, int fileCount) throws Exception {
         JSArray filesArray = Mockito.mock(JSArray.class);
         when(filesArray.length()).thenReturn(fileCount);
-        when(filesArray.getJSONObject(Mockito.anyInt()))
-            .thenAnswer(
-                (invocation) -> {
-                    int index = invocation.getArgument(0);
-                    JSONObject file = new JSONObject();
-                    file.put("url", "https://example.com/" + index + ".bin");
-                    file.put("destination", "large-" + index + ".bin");
-                    return file;
-                }
-            );
+        when(filesArray.getJSONObject(Mockito.anyInt())).thenAnswer((invocation) -> {
+            int index = invocation.getArgument(0);
+            JSONObject file = new JSONObject();
+            file.put("url", "https://example.com/" + index + ".bin");
+            file.put("destination", "large-" + index + ".bin");
+            return file;
+        });
         PluginCall call = Mockito.mock(PluginCall.class);
         when(call.getString("id")).thenReturn(batchId);
         when(call.getArray("files")).thenReturn(filesArray);

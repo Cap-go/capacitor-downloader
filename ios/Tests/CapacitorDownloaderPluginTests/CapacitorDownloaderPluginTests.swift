@@ -1,3 +1,4 @@
+import Capacitor
 import XCTest
 @testable import CapacitorDownloaderPlugin
 

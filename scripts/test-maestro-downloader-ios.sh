@@ -29,7 +29,7 @@ cleanup() {
 trap cleanup EXIT
 
 wait_for_server() {
-  for _ in $(seq 1 40); do
+  for _ in $(seq 1 25); do
     if curl --silent --fail "$HOST_SERVER_URL/health" >/dev/null; then
       curl --silent --show-error --fail -X POST "$HOST_SERVER_URL/control/reset" >/dev/null
       return 0

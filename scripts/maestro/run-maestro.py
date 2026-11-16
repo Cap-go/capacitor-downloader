@@ -118,7 +118,7 @@ def monitor_process(process, selector, report, timeout, termination_signal):
         summary_passed = bool(re.search(r'\b(\d+)/\1 Flow Passed\b', output))
         if summary_passed and report_passed(report):
             passed_at = passed_at or time.monotonic()
-            if time.monotonic() - passed_at >= 5:
+            if time.monotonic() - passed_at >= 2:
                 print('Maestro flow and JUnit report passed; stopping stalled CLI teardown.', flush=True)
                 return 0
         else:

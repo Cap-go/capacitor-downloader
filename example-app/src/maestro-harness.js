@@ -175,20 +175,27 @@ const flows = {
 
   async 'background-complete'() {
     const id = 'bg-complete';
+    const isIos = Capacitor.getPlatform() === 'ios';
+    const url = fileUrl(isIos ? '/slow/262144' : '/slow/98304');
+    const destination = isIos ? 'cache/maestro-bg.bin' : 'downloads/maestro-bg.bin';
+    const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
     await plugin.download({
       id,
-      url: fileUrl('/slow/98304'),
-      destination: 'downloads/maestro-bg.bin',
-      androidHttpEngine: 'downloadManager',
+      url,
+      destination,
+      androidHttpEngine,
       notification: 'hidden',
     });
     persistPending('background-complete', {
       id,
-      url: fileUrl('/slow/98304'),
-      destination: 'downloads/maestro-bg.bin',
-      androidHttpEngine: 'downloadManager',
+      url,
+      destination,
+      androidHttpEngine,
     });
     setSummary(`PHASE:background-complete:downloading:id=${id}`);
+    if (isIos) {
+      await sleep(2_500);
+    }
   },
 
   async 'kill-relaunch-resume'() {
@@ -374,8 +381,9 @@ const flows = {
         }),
       ),
     );
+    const parallelWaitMs = Capacitor.getPlatform() === 'ios' ? 60_000 : 120_000;
     for (const spec of specs) {
-      await waitForDone(spec.id, 120_000);
+      await waitForDone(spec.id, parallelWaitMs);
       setSummary(`EVENT:downloadCompleted:id=${spec.id}:count=1`);
     }
     setMarker('parallel-downloads', true);
@@ -405,6 +413,11 @@ const flows = {
 async function resumePendingDownload(flowId, payload) {
   const { id } = payload;
   if (hasCompletedInStorage(id) || (completionCounts.get(id) ?? 0) > 0) {
+    return;
+  }
+  const existing = await readDownloadStatus(id);
+  if (existing.state === 'DONE') {
+    markCompletedInStorage(id);
     return;
   }
   try {
@@ -453,6 +466,11 @@ async function resumePendingFlowIfNeeded() {
   }
   const { flowId, payload } = pending;
   if (!payload?.id) {
+    return;
+  }
+  if (hasCompletedInStorage(payload.id) || (completionCounts.get(payload.id) ?? 0) > 0) {
+    clearPending();
+    setMarker(flowId, true, 'resumed');
     return;
   }
   await resumePendingDownload(flowId, payload);

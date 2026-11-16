@@ -9,9 +9,33 @@ final class DownloadManagerCursorReader {
     /** {@link DownloadManager#COLUMN_REASON} when {@link DownloadManager#STATUS_PAUSED} and waiting to retry. */
     static final int PAUSED_WAITING_TO_RETRY = 5;
 
-    static final int DEFAULT_MAX_PAUSE_RETRY_POLLS = 90;
+    /** Bounded cap only for {@link #PAUSED_WAITING_TO_RETRY} (1 poll per second in the plugin). */
+    static final int DEFAULT_MAX_PAUSE_RETRY_POLLS = 600;
 
     private DownloadManagerCursorReader() {}
+
+    /** Result of evaluating whether a progress poll should advance the pause-retry counter. */
+    static final class PauseRetryPollUpdate {
+
+        final int nextCount;
+        final boolean shouldFailExhausted;
+        final boolean trackCount;
+
+        private PauseRetryPollUpdate(int nextCount, boolean shouldFailExhausted, boolean trackCount) {
+            this.nextCount = nextCount;
+            this.shouldFailExhausted = shouldFailExhausted;
+            this.trackCount = trackCount;
+        }
+
+        static PauseRetryPollUpdate clear() {
+            return new PauseRetryPollUpdate(0, false, false);
+        }
+
+        static PauseRetryPollUpdate incrementWaitingToRetry(int currentCount) {
+            int next = currentCount + 1;
+            return new PauseRetryPollUpdate(next, next > DEFAULT_MAX_PAUSE_RETRY_POLLS, true);
+        }
+    }
 
     static final class Snapshot {
 
@@ -80,6 +104,20 @@ final class DownloadManagerCursorReader {
 
     static boolean isPauseWaitingToRetry(int status, int reason) {
         return status == DownloadManager.STATUS_PAUSED && reason == PAUSED_WAITING_TO_RETRY;
+    }
+
+    /**
+     * Only {@link #PAUSED_WAITING_TO_RETRY} advances the retry poll counter. Any other pause reason or
+     * non-paused status clears it so wifi-only and offline pauses are never failed by this cap.
+     */
+    static PauseRetryPollUpdate pauseRetryPollUpdate(int status, int reason, int currentCount) {
+        if (status != DownloadManager.STATUS_PAUSED) {
+            return PauseRetryPollUpdate.clear();
+        }
+        if (!isPauseWaitingToRetry(status, reason)) {
+            return PauseRetryPollUpdate.clear();
+        }
+        return PauseRetryPollUpdate.incrementWaitingToRetry(currentCount);
     }
 
     static boolean shouldRejectReportedSuccess(int httpStatus) {

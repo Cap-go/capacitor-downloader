@@ -1104,18 +1104,24 @@ public class CapacitorDownloaderPlugin extends Plugin {
         boolean shouldContinue = true;
         String failureMessage = DownloadManagerCursorReader.failureMessage(snapshot.status, snapshot.reason, snapshot.httpStatus);
 
-        if (snapshot.status == DownloadManager.STATUS_PAUSED) {
-            int polls = downloadPauseRetryPolls.merge(id, 1, Integer::sum);
-            if (polls > DownloadManagerCursorReader.DEFAULT_MAX_PAUSE_RETRY_POLLS) {
-                if (batchParts != null) {
-                    failBatch(batchParts.batchId, "Download retry budget exhausted", batchParts.fileIndex);
-                } else {
-                    failSingleDownload(snapshot.id, systemDownloadId, "Download retry budget exhausted", capturedGeneration);
-                }
-                return;
-            }
+        int pauseRetryPolls = downloadPauseRetryPolls.getOrDefault(id, 0);
+        DownloadManagerCursorReader.PauseRetryPollUpdate pauseUpdate = DownloadManagerCursorReader.pauseRetryPollUpdate(
+            snapshot.status,
+            snapshot.reason,
+            pauseRetryPolls
+        );
+        if (pauseUpdate.trackCount) {
+            downloadPauseRetryPolls.put(id, pauseUpdate.nextCount);
         } else {
             downloadPauseRetryPolls.remove(id);
+        }
+        if (pauseUpdate.shouldFailExhausted) {
+            if (batchParts != null) {
+                failBatch(batchParts.batchId, "Download retry budget exhausted", batchParts.fileIndex);
+            } else {
+                failSingleDownload(snapshot.id, systemDownloadId, "Download retry budget exhausted", capturedGeneration);
+            }
+            return;
         }
 
         if (batchParts != null) {

@@ -450,7 +450,7 @@ const flows = {
       androidHttpEngine: batchHttpEngine(),
       notification: 'hidden',
     });
-    const status = await waitForTerminal(id, 90_000);
+    const status = await waitForBatchFailure(id);
     if (status.state !== 'ERROR') {
       throw new Error(`Expected batch ERROR for 404, got ${status.state}`);
     }
@@ -469,7 +469,7 @@ const flows = {
       androidHttpEngine: batchHttpEngine(),
       notification: 'hidden',
     });
-    const status = await waitForTerminal(id, 90_000);
+    const status = await waitForBatchFailure(id);
     if (status.state !== 'ERROR') {
       throw new Error(`Expected batch ERROR for 5xx, got ${status.state}`);
     }

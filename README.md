@@ -85,21 +85,39 @@ For `iosContinuedProcessingTitle`, add a permitted identifier prefix to `Info.pl
 
 (Documentation: https://capgo.app/docs/plugins/downloader/)
 
-## Accurate progress for gzip downloads
+## `lengthHeader` for gzip and compressed responses
 
-Servers that compress responses in transit (`Content-Encoding: gzip`) often omit a useful `Content-Length`. Progress then stalls at 0 or tracks compressed size while bytes written reflect the decompressed file.
+> **Use this when:** the server sends `Content-Encoding: gzip` (or similar), `Content-Length` is missing or reflects **compressed** bytes, and your CDN still exposes the **uncompressed** size in a custom header (for example `X-Uncompressed-Length`).
 
-Set `lengthHeader` to the response header your CDN sends with the uncompressed byte count (for example `X-Uncompressed-Length`). The plugin uses it on **Android OkHttp** and **iOS** (single and batch). Progress stays clamped at 1.
+Without `lengthHeader`, `downloadProgress` can sit at `0`, jump early to `1`, or report `bytesTotal` that does not match the file on disk. With `lengthHeader`, native code reads that header from the HTTP response and uses it for progress totals. Progress is always clamped at `1`.
+
+| Platform | Supported |
+| --- | --- |
+| iOS | Single and batch downloads |
+| Android OkHttp | `androidHttpEngine: 'okhttp'` or `'auto'` on app-private paths |
+| Android DownloadManager | Ignored |
+| Web | Ignored |
 
 ```typescript
+import { CapacitorDownloader } from '@capgo/capacitor-downloader';
+
+await CapacitorDownloader.addListener('downloadProgress', (event) => {
+  console.log(event.id, event.progress, event.bytesTotal, event.bytesWritten);
+});
+
 await CapacitorDownloader.download({
-  id: 'large-pack',
-  url: packUrl,
-  destination: 'files/offline/pack.tar.gz',
+  id: 'gzip-pack',
+  url: 'https://cdn.example.com/bundle.tar.gz',
+  destination: 'files/updates/bundle.tar.gz',
   androidHttpEngine: 'okhttp',
   lengthHeader: 'X-Uncompressed-Length',
+  headers: { 'Accept-Encoding': 'gzip' },
 });
 ```
+
+Batch downloads share one `lengthHeader` name for every file in the batch (iOS and Android OkHttp).
+
+Full docs: [Capgo downloader guide](https://capgo.app/docs/plugins/downloader/getting-started/#lengthheader-for-gzip-downloads/) (once released on the website). Tracked with [capacitor-downloader#144](https://github.com/Cap-go/capacitor-downloader/pull/144).
 
 ## Key features
 

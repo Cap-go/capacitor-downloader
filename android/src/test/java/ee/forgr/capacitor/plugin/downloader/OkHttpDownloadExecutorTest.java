@@ -113,6 +113,46 @@ public class OkHttpDownloadExecutorTest {
     }
 
     @Test(timeout = 10_000)
+    public void clampsProgressWhenLengthHeaderSmallerThanDecodedBody() throws Exception {
+        byte[] payload = new byte[4096];
+        for (int i = 0; i < payload.length; i++) {
+            payload[i] = (byte) (i % 251);
+        }
+        ByteArrayOutputStream gzipBuffer = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzipOut = new GZIPOutputStream(gzipBuffer)) {
+            gzipOut.write(payload);
+        }
+        byte[] gzipped = gzipBuffer.toByteArray();
+        server.enqueue(
+            new MockResponse()
+                .setBody(new okio.Buffer().write(gzipped))
+                .addHeader("Content-Encoding", "gzip")
+                .addHeader("X-Uncompressed-Length", "100")
+        );
+
+        File destination = new File(tempDir, "length-header-clamp.bin");
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicReference<Float> lastProgress = new AtomicReference<>(0f);
+
+        OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer("length-header-clamp");
+        assertNotNull(reservation);
+        executor.start(
+            reservation,
+            server.url("/clamp").toString(),
+            destination,
+            new JSObject(),
+            "cellular",
+            "X-Uncompressed-Length",
+            (id, progress) -> lastProgress.set(progress),
+            (id, ok, cancelled, errorMessage) -> finished.countDown()
+        );
+
+        assertTrue(finished.await(5, TimeUnit.SECONDS));
+        assertEquals(payload.length, destination.length());
+        assertTrue(lastProgress.get() <= 1f);
+    }
+
+    @Test(timeout = 10_000)
     public void downloadsBytesToDestination() throws Exception {
         byte[] payload = "offline-package".getBytes(StandardCharsets.UTF_8);
         server.enqueue(

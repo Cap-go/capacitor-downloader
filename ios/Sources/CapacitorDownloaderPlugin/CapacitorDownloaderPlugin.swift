@@ -166,26 +166,6 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         DownloadLengthHeaderStore.shared.setExpectedTotal(expected, for: downloadId)
     }
 
-    private func progressBytesAndFraction(
-        downloadId: String,
-        totalBytesWritten: Int64,
-        totalBytesExpectedToWrite: Int64
-    ) -> (bytesTotal: Int64, progress: Float) {
-        var bytesTotal: Int64 = 0
-        if let override = DownloadLengthHeaderStore.shared.expectedTotal(for: downloadId), override > 0 {
-            bytesTotal = override
-        } else if totalBytesExpectedToWrite > 0 {
-            bytesTotal = totalBytesExpectedToWrite
-        }
-        let progress: Float
-        if bytesTotal > 0 {
-            progress = min(1, max(0, Float(totalBytesWritten) / Float(bytesTotal)))
-        } else {
-            progress = 0
-        }
-        return (bytesTotal, progress)
-    }
-
     private func nextGeneration(for id: String) -> UInt64 {
         tasksLock.lock()
         defer { tasksLock.unlock() }
@@ -717,6 +697,8 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 )
                 markContinuedProcessingFinished(downloadId: id, success: false)
             }
+            removeTask(for: id, completing: downloadTask, in: session)
+            batchCoordinator.unregisterChildTask(id)
             return
         }
 
@@ -854,7 +836,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         }
         captureExpectedTotalFromResponseIfNeeded(downloadId: id, downloadTask: downloadTask)
 
-        let progressSnapshot = progressBytesAndFraction(
+        let progressSnapshot = DownloadLengthHeaderProgress.bytesTotalAndProgress(
             downloadId: id,
             totalBytesWritten: totalBytesWritten,
             totalBytesExpectedToWrite: totalBytesExpectedToWrite

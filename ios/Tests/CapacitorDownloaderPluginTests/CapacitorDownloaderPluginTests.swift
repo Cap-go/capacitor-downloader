@@ -288,6 +288,32 @@ final class DownloadBatchProgressTests: XCTestCase {
         coordinator.removeBatch(batchId: "big")
         store.clear()
     }
+
+    func testDownloadBatchEnqueuesFortyFilesThroughPlugin() {
+        let plugin = CapacitorDownloaderPlugin()
+        plugin.load()
+        let files = (0..<40).map { index in
+            [
+                "url": "https://example.com/\(index).bin",
+                "destination": "files/batch-entry-\(index).bin",
+            ] as [String: String]
+        }
+        let expectation = expectation(description: "batch enqueue")
+        let call = CAPPluginCall(
+            callbackId: "batch-entry",
+            options: ["id": "forty-batch", "files": files],
+            success: { result, _ in
+                XCTAssertEqual(result?["id"] as? String, "forty-batch")
+                expectation.fulfill()
+            },
+            error: { _ in
+                XCTFail("batch download should resolve")
+            }
+        )
+        plugin.download(call)
+        wait(for: [expectation], timeout: 5)
+        XCTAssertEqual(plugin.trackedBatchFileCountForTests(batchId: "forty-batch"), 40)
+    }
 }
 
 final class DownloadCompletedNotificationTextTests: XCTestCase {

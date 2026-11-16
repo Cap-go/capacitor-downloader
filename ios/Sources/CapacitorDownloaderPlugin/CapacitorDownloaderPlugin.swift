@@ -485,6 +485,10 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    internal func trackedBatchFileCountForTests(batchId: String) -> Int? {
+        batchCoordinator.fileCount(batchId: batchId)
+    }
+
     internal var mainBackgroundSessionForTests: URLSession {
         DownloadBackgroundSessionManager.shared.mainSession
     }

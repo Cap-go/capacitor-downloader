@@ -18,6 +18,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -42,6 +43,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private final Map<String, Long> downloadGenerations = new ConcurrentHashMap<>();
     private final AtomicLong pendingDownloadSequence = new AtomicLong(0);
     private ExecutorService downloadManagerExecutor;
+    private ExecutorService okHttpTransferExecutor;
+    private final Map<String, Boolean> batchProgressPollingActive = new ConcurrentHashMap<>();
     private OkHttpDownloadExecutor okHttpDownloadExecutor;
     private OkHttpDownloadProgressNotifier okHttpProgressNotifier;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -52,6 +55,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
     public void load() {
         downloadManager = (DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
         downloadManagerExecutor = Executors.newCachedThreadPool();
+        okHttpTransferExecutor = Executors.newFixedThreadPool(4);
         okHttpDownloadExecutor = new OkHttpDownloadExecutor(getContext());
         okHttpProgressNotifier = new OkHttpDownloadProgressNotifier(getContext());
         completedNotificationStore = new DownloadCompletedNotificationStore(getContext());
@@ -508,9 +512,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         }
 
                         enqueuedIds.add(downloadId);
-                        startProgressCheck(childId, downloadId);
                     }
 
+                    startBatchProgressCheck(batchId, batchState);
                     batchState.committed.set(true);
                     JSObject result = new JSObject();
                     result.put("id", batchId);
@@ -601,6 +605,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (batch == null) {
             return;
         }
+        stopBatchProgressPolling(batch.batchId);
         batch.rolledBack.set(true);
         if (!batches.remove(batch.batchId, batch)) {
             return;
@@ -669,6 +674,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (batch == null || batch.failed.getAndSet(true)) {
             return;
         }
+        stopBatchProgressPolling(batchId);
         if (!batches.remove(batchId, batch)) {
             return;
         }
@@ -732,6 +738,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         if (allDone) {
             final long storedGeneration = batch.generation;
+            stopBatchProgressPolling(batchId);
             if (!batches.remove(batchId, batch)) {
                 return;
             }
@@ -819,61 +826,65 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
                 okHttpProgressNotifier.started(id, title, description, notificationMode);
 
-                try {
-                    okHttpDownloadExecutor.start(
-                        okHttpReservation,
-                        url,
-                        destinationFile,
-                        headers,
-                        network,
-                        (downloadId, progress) ->
-                            handler.post(() -> {
-                                if (!isCurrentOkHttpDownload(downloadId) || !isCurrentOkHttpGeneration(downloadId, storedGeneration)) {
-                                    return;
-                                }
-                                okHttpProgressNotifier.update(downloadId, progress);
-                                JSObject progressData = new JSObject();
-                                progressData.put("id", downloadId);
-                                progressData.put("progress", progress);
-                                notifyListeners("downloadProgress", progressData);
-                            }),
-                        (downloadId, success, cancelled, errorMessage) ->
-                            handler.post(() -> {
-                                if (!isCurrentOkHttpDownload(downloadId) || !isCurrentOkHttpGeneration(downloadId, storedGeneration)) {
-                                    return;
-                                }
-                                if (cancelled) {
-                                    okHttpProgressNotifier.abandonDownload(downloadId);
-                                    return;
-                                }
-                                if (success) {
-                                    okHttpProgressNotifier.finished(downloadId, true);
-                                    JSObject completedData = new JSObject();
-                                    completedData.put("id", downloadId);
-                                    notifyListeners("downloadCompleted", completedData);
-                                    if (!OkHttpDownloadProgressNotifier.shouldShowProgressForMode(notificationMode)) {
-                                        DownloadCompletionNotifier.notifyIfRequested(getContext(), downloadId, notificationMode, true);
+                runOkHttpTransferWork(() -> {
+                    try {
+                        okHttpDownloadExecutor.start(
+                            okHttpReservation,
+                            url,
+                            destinationFile,
+                            headers,
+                            network,
+                            (downloadId, progress) ->
+                                handler.post(() -> {
+                                    if (!isCurrentOkHttpDownload(downloadId) || !isCurrentOkHttpGeneration(downloadId, storedGeneration)) {
+                                        return;
                                     }
-                                    String completionText = completedNotificationStore.takeText(downloadId, storedGeneration);
-                                    if (completionText != null) {
-                                        DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), downloadId, completionText);
+                                    okHttpProgressNotifier.update(downloadId, progress);
+                                    JSObject progressData = new JSObject();
+                                    progressData.put("id", downloadId);
+                                    progressData.put("progress", progress);
+                                    notifyListeners("downloadProgress", progressData);
+                                }),
+                            (downloadId, success, cancelled, errorMessage) ->
+                                handler.post(() -> {
+                                    if (!isCurrentOkHttpDownload(downloadId) || !isCurrentOkHttpGeneration(downloadId, storedGeneration)) {
+                                        return;
                                     }
-                                } else {
-                                    okHttpProgressNotifier.finished(downloadId, false);
-                                    okHttpDestinationFiles.remove(downloadId, destinationFile);
-                                    completedNotificationStore.remove(downloadId, storedGeneration);
-                                    JSObject failedData = new JSObject();
-                                    failedData.put("id", downloadId);
-                                    failedData.put("error", errorMessage != null ? errorMessage : "Download failed");
-                                    notifyListeners("downloadFailed", failedData);
-                                }
-                            })
-                    );
-                } catch (RuntimeException e) {
-                    okHttpDownloadExecutor.abandonTransfer(okHttpReservation);
-                    okHttpProgressNotifier.abandonDownload(id);
-                    applyOkHttpStartFailureIfCurrent(id, storedGeneration, destinationFile, e.getMessage());
-                }
+                                    if (cancelled) {
+                                        okHttpProgressNotifier.abandonDownload(downloadId);
+                                        return;
+                                    }
+                                    if (success) {
+                                        okHttpProgressNotifier.finished(downloadId, true);
+                                        JSObject completedData = new JSObject();
+                                        completedData.put("id", downloadId);
+                                        notifyListeners("downloadCompleted", completedData);
+                                        if (!OkHttpDownloadProgressNotifier.shouldShowProgressForMode(notificationMode)) {
+                                            DownloadCompletionNotifier.notifyIfRequested(getContext(), downloadId, notificationMode, true);
+                                        }
+                                        String completionText = completedNotificationStore.takeText(downloadId, storedGeneration);
+                                        if (completionText != null) {
+                                            DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), downloadId, completionText);
+                                        }
+                                    } else {
+                                        okHttpProgressNotifier.finished(downloadId, false);
+                                        okHttpDestinationFiles.remove(downloadId, destinationFile);
+                                        completedNotificationStore.remove(downloadId, storedGeneration);
+                                        JSObject failedData = new JSObject();
+                                        failedData.put("id", downloadId);
+                                        failedData.put("error", errorMessage != null ? errorMessage : "Download failed");
+                                        notifyListeners("downloadFailed", failedData);
+                                    }
+                                })
+                        );
+                    } catch (RuntimeException e) {
+                        okHttpDownloadExecutor.abandonTransfer(okHttpReservation);
+                        handler.post(() -> {
+                            okHttpProgressNotifier.abandonDownload(id);
+                            applyOkHttpStartFailureIfCurrent(id, storedGeneration, destinationFile, e.getMessage());
+                        });
+                    }
+                });
             },
             () -> {
                 downloads.remove(id, pendingToken);
@@ -888,7 +899,116 @@ public class CapacitorDownloaderPlugin extends Plugin {
     }
 
     private void startProgressCheck(final String id, final long downloadId) {
+        if (batchChildOwners.containsKey(id)) {
+            return;
+        }
         runProgressQuery(id, true, downloadId);
+    }
+
+    private void startBatchProgressCheck(final String batchId, final DownloadBatchState batchState) {
+        batchProgressPollingActive.put(batchId, Boolean.TRUE);
+        final Runnable[] pollHolder = new Runnable[1];
+        Runnable poll = new Runnable() {
+            @Override
+            public void run() {
+                if (!Boolean.TRUE.equals(batchProgressPollingActive.get(batchId))) {
+                    return;
+                }
+                DownloadBatchState current = batches.get(batchId);
+                if (current == null || current != batchState || isBatchCancelled(current) || current.failed.get()) {
+                    batchProgressPollingActive.remove(batchId);
+                    return;
+                }
+
+                List<Long> downloadIds = new ArrayList<>();
+                Map<Long, String> systemIdToChild = new HashMap<>();
+                for (String childId : current.ownedChildIds) {
+                    Long systemDownloadId = downloads.get(childId);
+                    if (
+                        systemDownloadId == null ||
+                        isPendingDownload(systemDownloadId) ||
+                        isOkHttpDownload(systemDownloadId) ||
+                        !batchId.equals(batchChildOwners.get(childId))
+                    ) {
+                        continue;
+                    }
+                    downloadIds.add(systemDownloadId);
+                    systemIdToChild.put(systemDownloadId, childId);
+                }
+
+                if (downloadIds.isEmpty()) {
+                    if (Boolean.TRUE.equals(batchProgressPollingActive.get(batchId)) && batches.get(batchId) == batchState) {
+                        handler.postDelayed(pollHolder[0], 1000);
+                    }
+                    return;
+                }
+
+                long[] filterIds = new long[downloadIds.size()];
+                for (int index = 0; index < downloadIds.size(); index++) {
+                    filterIds[index] = downloadIds.get(index);
+                }
+
+                ExecutorService executor = downloadManagerExecutor;
+                if (executor == null) {
+                    return;
+                }
+                try {
+                    executor.execute(() -> {
+                        List<ProgressSnapshot> snapshots = new ArrayList<>();
+                        try {
+                            DownloadManager.Query query = new DownloadManager.Query().setFilterById(filterIds);
+                            try (Cursor cursor = downloadManager.query(query)) {
+                                if (cursor != null) {
+                                    while (cursor.moveToNext()) {
+                                        long systemDownloadId = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID));
+                                        String childId = systemIdToChild.get(systemDownloadId);
+                                        if (childId == null) {
+                                            continue;
+                                        }
+                                        int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+                                        long bytesDownloaded = cursor.getLong(
+                                            cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                                        );
+                                        long bytesTotal = cursor.getLong(
+                                            cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+                                        );
+                                        float progress = bytesTotal > 0 ? (float) bytesDownloaded / bytesTotal : 0f;
+                                        snapshots.add(new ProgressSnapshot(childId, progress, status, true, bytesDownloaded, bytesTotal));
+                                    }
+                                }
+                            }
+                        } catch (RuntimeException ignored) {
+                            // Query failures are handled by scheduling the next poll.
+                        }
+                        handler.post(() -> {
+                            deliverBatchProgressSnapshots(batchId, batchState, snapshots);
+                            if (Boolean.TRUE.equals(batchProgressPollingActive.get(batchId)) && batches.get(batchId) == batchState) {
+                                handler.postDelayed(pollHolder[0], 1000);
+                            }
+                        });
+                    });
+                } catch (RejectedExecutionException ignored) {
+                    // Plugin is shutting down; stop polling quietly.
+                    batchProgressPollingActive.remove(batchId);
+                }
+            }
+        };
+        pollHolder[0] = poll;
+        handler.post(poll);
+    }
+
+    private void stopBatchProgressPolling(String batchId) {
+        batchProgressPollingActive.remove(batchId);
+    }
+
+    private void deliverBatchProgressSnapshots(String batchId, DownloadBatchState batchState, List<ProgressSnapshot> snapshots) {
+        for (ProgressSnapshot snapshot : snapshots) {
+            Long systemDownloadId = downloads.get(snapshot.id);
+            if (systemDownloadId == null || !isTrackedDownload(snapshot.id, systemDownloadId)) {
+                continue;
+            }
+            deliverProgressSnapshot(snapshot.id, systemDownloadId, false, snapshot, null);
+        }
     }
 
     private void checkDownloadStatus(String id) {
@@ -1121,6 +1241,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
         batch.cancelled.set(true);
+        stopBatchProgressPolling(batchId);
 
         List<StoppedBatchChild> stoppedChildren = new ArrayList<>();
         for (String childId : new ArrayList<>(batch.ownedChildIds)) {
@@ -1220,12 +1341,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
             batchChildOwners.put(stoppedChild.childId, batchId);
             batch.trackChildId(stoppedChild.childId);
             restoredAny = true;
-            if (!isPendingDownload(stoppedChild.downloadId)) {
-                startProgressCheck(stoppedChild.childId, stoppedChild.downloadId);
-            }
         }
         if (restoredAny && batch.committed.get() && !batch.rolledBack.get() && batches.get(batchId) == null) {
             batches.putIfAbsent(batchId, batch);
+        }
+        if (restoredAny) {
+            startBatchProgressCheck(batchId, batch);
         }
     }
 
@@ -1329,6 +1450,18 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
     }
 
+    private void runOkHttpTransferWork(Runnable work) {
+        ExecutorService executor = okHttpTransferExecutor;
+        if (executor == null) {
+            return;
+        }
+        try {
+            executor.execute(work);
+        } catch (RejectedExecutionException ignored) {
+            // Plugin is shutting down; OkHttp work stops quietly.
+        }
+    }
+
     private JSObject getDownloadStatus(Cursor cursor) {
         int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
         long bytesDownloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
@@ -1414,6 +1547,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (downloadManagerExecutor != null) {
             downloadManagerExecutor.shutdown();
             downloadManagerExecutor = null;
+        }
+        if (okHttpTransferExecutor != null) {
+            okHttpTransferExecutor.shutdown();
+            okHttpTransferExecutor = null;
         }
         if (okHttpProgressNotifier != null) {
             okHttpProgressNotifier.shutdown();

@@ -66,6 +66,10 @@ public class OkHttpDownloadExecutor {
         return activeDownloads.get(id);
     }
 
+    int availableTransferSlots() {
+        return transferSlots.availablePermits();
+    }
+
     /**
      * Reserve an in-memory slot before the transfer id is published to JS. Prevents a race where
      * {@code stop()} runs between marker publication and worker registration.

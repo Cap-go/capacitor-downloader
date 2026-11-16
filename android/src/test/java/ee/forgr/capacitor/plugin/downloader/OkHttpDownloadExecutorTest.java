@@ -369,4 +369,52 @@ public class OkHttpDownloadExecutorTest {
         assertTrue(semaphore.isFair());
         assertEquals(4, semaphore.availablePermits());
     }
+
+    @Test(timeout = 60_000)
+    public void transferSlotsReturnToFourAfterMixedOutcomes() throws Exception {
+        byte[] payload = "slot-test".getBytes(StandardCharsets.UTF_8);
+        CountDownLatch finished = new CountDownLatch(5);
+        java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(5);
+
+        for (int index = 0; index < 2; index++) {
+            server.enqueue(
+                new MockResponse().setBody(new okio.Buffer().write(payload)).addHeader("Content-Length", String.valueOf(payload.length))
+            );
+        }
+        for (int index = 0; index < 2; index++) {
+            server.enqueue(new MockResponse().setResponseCode(500));
+        }
+        server.enqueue(
+            new MockResponse()
+                .setBody(new okio.Buffer().write(payload))
+                .addHeader("Content-Length", String.valueOf(payload.length))
+                .setBodyDelay(3, TimeUnit.SECONDS)
+        );
+
+        for (int index = 0; index < 5; index++) {
+            final int taskIndex = index;
+            workers.submit(() -> {
+                String taskId = "mixed-" + taskIndex;
+                File destination = new File(tempDir, taskId + ".bin");
+                OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer(taskId);
+                assertNotNull(reservation);
+                executor.start(
+                    reservation,
+                    server.url("/file-" + taskIndex).toString(),
+                    destination,
+                    new JSObject(),
+                    "cellular",
+                    (id, progress) -> {},
+                    (id, ok, cancelled, errorMessage) -> finished.countDown()
+                );
+            });
+        }
+
+        Thread.sleep(300);
+        executor.cancel("mixed-4", new File(tempDir, "mixed-4.bin"));
+
+        assertTrue(finished.await(30, TimeUnit.SECONDS));
+        workers.shutdown();
+        assertEquals(4, executor.availableTransferSlots());
+    }
 }

@@ -20,6 +20,8 @@ final class DownloadBatchCoordinator {
     private var registeredChildren: [String: String] = [:]
     private let batchesLock = NSLock()
     private let store: DownloadBatchStore
+    private let persistQueue = DispatchQueue(label: "CapacitorDownloader.DownloadBatchCoordinator.persist")
+    private var persistDebounceWorkItem: DispatchWorkItem?
 
     init(store: DownloadBatchStore = .shared) {
         self.store = store
@@ -105,7 +107,7 @@ final class DownloadBatchCoordinator {
             childTaskIds: [],
             savedDestinations: [:]
         )
-        persistBatchesLocked()
+        persistBatchesImmediatelyLocked()
         return generation
     }
 
@@ -118,7 +120,7 @@ final class DownloadBatchCoordinator {
         batch.childTaskIds.insert(taskId)
         registeredChildren[taskId] = batchId
         batches[batchId] = batch
-        persistBatchesLocked()
+        schedulePersistBatchesLocked()
     }
 
     func unregisterChildTask(_ taskId: String) {
@@ -168,7 +170,7 @@ final class DownloadBatchCoordinator {
         }
         batch.paused = paused
         batches[batchId] = batch
-        persistBatchesLocked()
+        schedulePersistBatchesLocked()
     }
 
     func overallProgress(batchId: String) -> Float? {
@@ -188,7 +190,7 @@ final class DownloadBatchCoordinator {
         }
         batch.cancelled = true
         batches[batchId] = batch
-        persistBatchesLocked()
+        persistBatchesImmediatelyLocked()
     }
 
     func removeBatch(batchId: String, unregisterChildren: Bool = true) {
@@ -214,7 +216,7 @@ final class DownloadBatchCoordinator {
         }
         batch.savedDestinations[fileIndex] = destination
         batches[batchId] = batch
-        persistBatchesLocked()
+        schedulePersistBatchesLocked()
     }
 
     func updateFileProgress(batchId: String, generation: UInt64, fileIndex: Int, progress: Float) -> (overall: Float, file: Float)? {
@@ -263,7 +265,7 @@ final class DownloadBatchCoordinator {
             removeBatchLocked(batchId: batchId, unregisterChildren: true)
             return .allSucceeded(batchId: batchId, generation: generation)
         }
-        persistBatchesLocked()
+        schedulePersistBatchesLocked()
         return .inProgress(
             overall: DownloadBatchProgress.overallProgress(fileProgress: batch.fileProgress, fileCount: batch.fileCount)
         )
@@ -277,7 +279,7 @@ final class DownloadBatchCoordinator {
         }
         batch.failed = true
         batches[batchId] = batch
-        persistBatchesLocked()
+        persistBatchesImmediatelyLocked()
         return true
     }
 
@@ -295,10 +297,36 @@ final class DownloadBatchCoordinator {
                 registeredChildren.removeValue(forKey: taskId)
             }
         }
-        persistBatchesLocked()
+        persistBatchesImmediatelyLocked()
     }
 
-    private func persistBatchesLocked() {
+    private func schedulePersistBatchesLocked() {
+        persistDebounceWorkItem?.cancel()
+        let snapshot = batches.mapValues { batch in
+            DownloadBatchStore.Record(
+                batchId: batch.batchId,
+                generation: batch.generation,
+                fileCount: batch.fileCount,
+                fileProgress: batch.fileProgress,
+                fileCompleted: batch.fileCompleted,
+                completedCount: batch.completedCount,
+                failed: batch.failed,
+                cancelled: batch.cancelled,
+                paused: batch.paused,
+                childTaskIds: Array(batch.childTaskIds),
+                savedDestinations: batch.savedDestinations
+            )
+        }
+        let work = DispatchWorkItem { [store] in
+            store.save(snapshot)
+        }
+        persistDebounceWorkItem = work
+        persistQueue.asyncAfter(deadline: .now() + 0.05, execute: work)
+    }
+
+    private func persistBatchesImmediatelyLocked() {
+        persistDebounceWorkItem?.cancel()
+        persistDebounceWorkItem = nil
         store.save(batches.mapValues { batch in
             DownloadBatchStore.Record(
                 batchId: batch.batchId,

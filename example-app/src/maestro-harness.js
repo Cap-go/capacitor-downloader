@@ -186,6 +186,9 @@ async function waitForBatchFailure(id, timeoutMs = 150_000) {
     if (summaryText.includes(`EVENT:downloadFailed:id=${id}:`)) {
       return { state: 'ERROR', progress: status.progress };
     }
+    if ((completionCounts.get(id) ?? 0) > 0) {
+      throw new Error(`Batch ${id} completed unexpectedly instead of failing`);
+    }
     await sleep(750);
   }
   throw new Error(`Timed out waiting for batch failure on ${id}`);

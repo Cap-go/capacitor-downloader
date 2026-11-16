@@ -12,4 +12,4 @@ appId: app.capgo.downloader
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: batch-error-404:success.*'
-    timeout: 90000
+    timeout: 150000

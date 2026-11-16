@@ -141,7 +141,7 @@ public class OkHttpDownloadExecutorTest {
     }
 
     @Test(timeout = 10_000)
-    public void usesLengthHeaderWhenContentEncodingHeaderPresent() throws Exception {
+    public void ignoresLengthHeaderWhenContentEncodingHeaderPresent() throws Exception {
         byte[] payload = new byte[256];
         ByteArrayOutputStream gzipBuffer = new ByteArrayOutputStream();
         try (GZIPOutputStream gzipOut = new GZIPOutputStream(gzipBuffer)) {
@@ -181,8 +181,8 @@ public class OkHttpDownloadExecutorTest {
         );
 
         assertTrue(finished.await(5, TimeUnit.SECONDS));
-        assertEquals(Long.valueOf(100000L), lastBytesTotal.get());
-        assertEquals(payload.length, destination.length());
+        assertEquals(Long.valueOf(gzipped.length), lastBytesTotal.get());
+        assertEquals(gzipped.length, destination.length());
     }
 
     @Test(timeout = 10_000)

@@ -24,8 +24,13 @@ final class DownloadExpectedLength {
         }
     }
 
+    static boolean responseHasContentEncoding(Response response) {
+        String encoding = response.header("Content-Encoding");
+        return encoding != null && !encoding.trim().isEmpty();
+    }
+
     static long resolveTotalBytes(Response response, ResponseBody body, String lengthHeader) {
-        if (lengthHeader != null) {
+        if (lengthHeader != null && !responseHasContentEncoding(response)) {
             String trimmedHeader = lengthHeader.trim();
             if (!trimmedHeader.isEmpty()) {
                 String headerValue = response.header(trimmedHeader);

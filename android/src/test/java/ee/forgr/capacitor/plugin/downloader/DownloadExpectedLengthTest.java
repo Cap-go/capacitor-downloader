@@ -44,7 +44,7 @@ public class DownloadExpectedLengthTest {
     }
 
     @Test
-    public void resolveTotalBytesUsesLengthHeaderWhenContentEncodingPresent() {
+    public void resolveTotalBytesIgnoresLengthHeaderWhenContentEncodingPresent() {
         Response response = new Response.Builder()
             .request(new Request.Builder().url("http://127.0.0.1/").build())
             .protocol(Protocol.HTTP_1_1)
@@ -56,7 +56,7 @@ public class DownloadExpectedLengthTest {
             .build();
         ResponseBody body = ResponseBody.create(new byte[132], MediaType.get("application/octet-stream"));
         long total = DownloadExpectedLength.resolveTotalBytes(response, body, "X-Uncompressed-Length");
-        assertEquals(100000L, total);
+        assertEquals(132L, total);
     }
 
     @Test

@@ -410,18 +410,6 @@ public class OkHttpDownloadExecutor {
         }
     }
 
-    /** Confirms the origin response code when DownloadManager reports success. */
-    public int fetchResponseCode(String url) throws IOException {
-        Request request = new Request.Builder().url(url).get().build();
-        try (Response response = defaultClient.newCall(request).execute()) {
-            ResponseBody body = response.body();
-            if (body != null) {
-                body.close();
-            }
-            return response.code();
-        }
-    }
-
     public boolean isWifiSatisfied(String network) {
         if (!"wifi-only".equals(network)) {
             return true;

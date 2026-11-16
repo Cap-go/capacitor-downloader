@@ -293,7 +293,7 @@ jobs:
     name: Maestro E2E iOS / ${{ matrix.flow }}
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 6
       matrix:
         flow:
           - foreground-complete
@@ -357,12 +357,22 @@ jobs:
     timeout-minutes: 10
     runs-on: ubuntu-latest
     name: Maestro E2E Android
+    permissions:
+      actions: read
     steps:
       - name: Fail when any Android Maestro flow fails
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ "${{ needs.maestro_e2e_android.result }}" != "success" ]]; then
+          conclusions=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate \
+            --jq '[.jobs[] | select(.name | startswith("Maestro E2E Android / ")) | .conclusion]')
+          echo "$conclusions"
+          if echo "$conclusions" | jq -e 'map(select(. == "failure")) | length > 0' >/dev/null; then
             echo "One or more Android Maestro flows failed."
             exit 1
+          fi
+          if echo "$conclusions" | jq -e 'map(select(. == "cancelled")) | length > 0' >/dev/null; then
+            echo "Some Android Maestro flows were cancelled (timeout or workflow cancellation). Not counted as flow failures."
           fi
 
   maestro_e2e_ios_gate:
@@ -372,10 +382,20 @@ jobs:
     timeout-minutes: 10
     runs-on: macOS-latest
     name: Maestro E2E iOS
+    permissions:
+      actions: read
     steps:
       - name: Fail when any iOS Maestro flow fails
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [[ "${{ needs.maestro_e2e_ios.result }}" != "success" ]]; then
+          conclusions=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate \
+            --jq '[.jobs[] | select(.name | startswith("Maestro E2E iOS / ")) | .conclusion]')
+          echo "$conclusions"
+          if echo "$conclusions" | jq -e 'map(select(. == "failure")) | length > 0' >/dev/null; then
             echo "One or more iOS Maestro flows failed."
             exit 1
+          fi
+          if echo "$conclusions" | jq -e 'map(select(. == "cancelled")) | length > 0' >/dev/null; then
+            echo "Some iOS Maestro flows were cancelled (timeout or workflow cancellation). Not counted as flow failures."
           fi

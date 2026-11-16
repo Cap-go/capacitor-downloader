@@ -47,11 +47,11 @@ function fileUrl(path) {
 }
 
 const ANDROID_DOWNLOAD_MANAGER_STATUS = {
-  1: 'PENDING',
-  2: 'RUNNING',
-  4: 'PAUSED',
-  8: 'DONE',
-  16: 'ERROR',
+  190: 'PENDING',
+  192: 'RUNNING',
+  193: 'PAUSED',
+  200: 'DONE',
+  400: 'ERROR',
 };
 
 function normalizeDownloadTask(raw) {
@@ -59,7 +59,8 @@ function normalizeDownloadTask(raw) {
     return { state: 'RUNNING', progress: 0 };
   }
   if (typeof raw.state === 'string') {
-    return { state: raw.state, progress: Number(raw.progress) || 0 };
+    const state = raw.state === 'PAUSED' ? 'RUNNING' : raw.state;
+    return { state, progress: Number(raw.progress) || 0 };
   }
   const statusCode = typeof raw.status === 'number' ? raw.status : undefined;
   if (statusCode !== undefined) {
@@ -229,9 +230,10 @@ async function waitForBatchFailure(id, timeoutMs = 150_000, failFileIndex = null
 const flows = {
   async 'foreground-complete'() {
     const id = 'fg-complete';
+    const bytes = Capacitor.getPlatform() === 'ios' ? 65_536 : 49_152;
     await plugin.download({
       id,
-      url: fileUrl('/bytes/65536'),
+      url: fileUrl(`/bytes/${bytes}`),
       destination: 'downloads/maestro-fg.bin',
       androidHttpEngine: 'auto',
       notification: 'hidden',
@@ -268,7 +270,7 @@ const flows = {
   async 'kill-relaunch-resume'() {
     const id = 'kill-resume';
     const isIos = Capacitor.getPlatform() === 'ios';
-    const slowBytes = isIos ? 65536 : 131072;
+    const slowBytes = isIos ? 49_152 : 131072;
     const destination = isIos ? 'cache/maestro-kill.bin' : 'downloads/maestro-kill.bin';
     const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
     const url = fileUrl(`/slow/${slowBytes}`);

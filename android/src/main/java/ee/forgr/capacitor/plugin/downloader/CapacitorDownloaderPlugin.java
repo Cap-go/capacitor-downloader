@@ -41,8 +41,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private final Map<String, DownloadBatchState> batches = new ConcurrentHashMap<>();
     private final Map<String, String> batchChildOwners = new ConcurrentHashMap<>();
     private final Map<String, File> okHttpDestinationFiles = new ConcurrentHashMap<>();
-    private final Map<String, String> downloadSourceUrls = new ConcurrentHashMap<>();
     private final Map<String, File> downloadManagerDestinationFiles = new ConcurrentHashMap<>();
+    private final Map<String, Integer> downloadPauseRetryPolls = new ConcurrentHashMap<>();
     private final Map<String, Long> downloadGenerations = new ConcurrentHashMap<>();
     private final AtomicLong pendingDownloadSequence = new AtomicLong(0);
     private ExecutorService downloadManagerExecutor;
@@ -305,7 +305,6 @@ public class CapacitorDownloaderPlugin extends Plugin {
             call.reject("Download already exists");
             return;
         }
-        downloadSourceUrls.put(id, url);
         downloadManagerDestinationFiles.put(id, destinationFile);
         final long downloadGeneration = nextGeneration(id);
         completedNotificationStore.setText(id, completionNotificationText, downloadGeneration);
@@ -519,7 +518,6 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             return;
                         }
 
-                        downloadSourceUrls.put(childId, fileRequest.url);
                         downloadManagerDestinationFiles.put(childId, fileRequest.destinationFile);
                         enqueuedIds.add(downloadId);
                         startProgressCheck(childId, downloadId);
@@ -602,8 +600,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
     }
 
     private void clearDownloadManagerTracking(String id) {
-        downloadSourceUrls.remove(id);
         downloadManagerDestinationFiles.remove(id);
+        downloadPauseRetryPolls.remove(id);
     }
 
     private void clearChildOwnersForBatch(String batchId) {
@@ -934,40 +932,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         try {
             executor.execute(() -> {
-                ProgressSnapshot snapshot = queryProgressSnapshot(id, systemDownloadId);
-                if (
-                    snapshot != null &&
-                    snapshot.found &&
-                    (snapshot.status == DownloadManager.STATUS_SUCCESSFUL ||
-                        snapshot.status == DownloadManager.STATUS_RUNNING ||
-                        snapshot.status == DownloadManager.STATUS_PAUSED)
-                ) {
-                    int httpCode = snapshot.reportedHttpStatus;
-                    if (httpCode <= 0) {
-                        httpCode = resolveHttpStatusAfterDownloadManagerSuccess(id);
-                    }
-                    if (httpCode > 0 && !DownloadHttpStatusRules.isSuccessfulHttpCode(httpCode)) {
-                        final int rejectedCode = httpCode;
-                        handler.post(() -> rejectDownloadManagerSuccess(id, systemDownloadId, rejectedCode, capturedGeneration));
-                        return;
-                    }
-                }
+                DownloadManagerCursorReader.Snapshot snapshot = queryProgressSnapshot(id, systemDownloadId);
                 handler.post(() -> deliverProgressSnapshot(id, systemDownloadId, scheduleNext, snapshot, capturedGeneration));
             });
         } catch (RejectedExecutionException ignored) {
             // Plugin is shutting down; stop polling quietly.
-        }
-    }
-
-    private int resolveHttpStatusAfterDownloadManagerSuccess(String id) {
-        String url = downloadSourceUrls.get(id);
-        if (url == null || url.isEmpty()) {
-            return 0;
-        }
-        try {
-            return okHttpDownloadExecutor.fetchResponseCode(url);
-        } catch (Exception e) {
-            return 0;
         }
     }
 
@@ -977,7 +946,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
         String error = DownloadHttpStatusRules.formatHttpErrorMessage(httpCode);
         File destination = downloadManagerDestinationFiles.remove(id);
-        downloadSourceUrls.remove(id);
+        downloadPauseRetryPolls.remove(id);
         if (destination != null && destination.exists()) {
             // Best effort removal of a partial file DownloadManager may have written.
             destination.delete();
@@ -1004,7 +973,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         notifyListeners("downloadFailed", failedData);
     }
 
-    private ProgressSnapshot queryProgressSnapshot(String id, long systemDownloadId) {
+    private DownloadManagerCursorReader.Snapshot queryProgressSnapshot(String id, long systemDownloadId) {
         if (!isTrackedDownload(id, systemDownloadId)) {
             return null;
         }
@@ -1012,23 +981,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
         DownloadManager.Query query = new DownloadManager.Query().setFilterById(systemDownloadId);
         Cursor cursor = downloadManager.query(query);
         if (cursor == null) {
-            return ProgressSnapshot.notFound(id);
+            return DownloadManagerCursorReader.Snapshot.notFound(id);
         }
         try (cursor) {
-            if (!cursor.moveToFirst()) {
-                return ProgressSnapshot.notFound(id);
-            }
-
-            int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-            long bytesDownloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
-            long bytesTotal = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
-            float progress = bytesTotal > 0 ? (float) bytesDownloaded / bytesTotal : 0f;
-            int reportedHttpStatus = 0;
-            int httpStatusColumn = cursor.getColumnIndex("http_status");
-            if (httpStatusColumn >= 0 && !cursor.isNull(httpStatusColumn)) {
-                reportedHttpStatus = cursor.getInt(httpStatusColumn);
-            }
-            return new ProgressSnapshot(id, progress, status, true, bytesDownloaded, bytesTotal, reportedHttpStatus);
+            return DownloadManagerCursorReader.readSnapshot(id, cursor);
         }
     }
 
@@ -1036,7 +992,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         String id,
         long systemDownloadId,
         boolean scheduleNext,
-        ProgressSnapshot snapshot,
+        DownloadManagerCursorReader.Snapshot snapshot,
         Long capturedGeneration
     ) {
         if (snapshot == null || !snapshot.found || !isTrackedDownload(id, systemDownloadId)) {
@@ -1045,19 +1001,38 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         DownloadBatchState.BatchIdParts batchParts = resolveOwnedBatchChild(snapshot.id);
         boolean shouldContinue = true;
+        String failureMessage = DownloadManagerCursorReader.failureMessage(snapshot.status, snapshot.reason, snapshot.httpStatus);
+
+        if (DownloadManagerCursorReader.isPauseWaitingToRetry(snapshot.status, snapshot.reason)) {
+            int polls = downloadPauseRetryPolls.merge(id, 1, Integer::sum);
+            if (polls > DownloadManagerCursorReader.DEFAULT_MAX_PAUSE_RETRY_POLLS) {
+                if (batchParts != null) {
+                    failBatch(batchParts.batchId, "Download retry budget exhausted", batchParts.fileIndex);
+                } else {
+                    failSingleDownload(snapshot.id, systemDownloadId, "Download retry budget exhausted", capturedGeneration);
+                }
+                return;
+            }
+        } else {
+            downloadPauseRetryPolls.remove(id);
+        }
 
         if (batchParts != null) {
             if (snapshot.status == DownloadManager.STATUS_SUCCESSFUL) {
+                if (DownloadManagerCursorReader.shouldRejectReportedSuccess(snapshot.httpStatus)) {
+                    rejectDownloadManagerSuccess(id, systemDownloadId, snapshot.httpStatus, capturedGeneration);
+                    return;
+                }
                 completeBatchFile(batchParts.batchId, batchParts.fileIndex, snapshot.bytesDownloaded, snapshot.bytesTotal);
                 shouldContinue = false;
             } else if (snapshot.status == DownloadManager.STATUS_FAILED) {
-                failBatch(batchParts.batchId, "Download failed", batchParts.fileIndex);
+                failBatch(batchParts.batchId, failureMessage, batchParts.fileIndex);
                 shouldContinue = false;
             } else {
                 notifyBatchProgress(
                     batchParts.batchId,
                     batchParts.fileIndex,
-                    snapshot.progress,
+                    snapshot.progress(),
                     snapshot.bytesDownloaded,
                     snapshot.bytesTotal
                 );
@@ -1065,12 +1040,16 @@ public class CapacitorDownloaderPlugin extends Plugin {
         } else {
             JSObject progressData = new JSObject();
             progressData.put("id", snapshot.id);
-            progressData.put("progress", snapshot.progress);
+            progressData.put("progress", snapshot.progress());
             progressData.put("bytesWritten", snapshot.bytesDownloaded);
             progressData.put("bytesTotal", snapshot.bytesTotal);
             notifyListeners("downloadProgress", progressData);
 
             if (snapshot.status == DownloadManager.STATUS_SUCCESSFUL) {
+                if (DownloadManagerCursorReader.shouldRejectReportedSuccess(snapshot.httpStatus)) {
+                    rejectDownloadManagerSuccess(id, systemDownloadId, snapshot.httpStatus, capturedGeneration);
+                    return;
+                }
                 JSObject completedData = new JSObject();
                 completedData.put("id", snapshot.id);
                 notifyListeners("downloadCompleted", completedData);
@@ -1081,13 +1060,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 }
                 shouldContinue = false;
             } else if (snapshot.status == DownloadManager.STATUS_FAILED) {
-                JSObject failedData = new JSObject();
-                failedData.put("id", snapshot.id);
-                failedData.put("error", "Download failed");
-                notifyListeners("downloadFailed", failedData);
-                if (capturedGeneration != null) {
-                    completedNotificationStore.remove(snapshot.id, capturedGeneration);
-                }
+                failSingleDownload(snapshot.id, systemDownloadId, failureMessage, capturedGeneration);
                 shouldContinue = false;
             }
         }
@@ -1097,37 +1070,16 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
     }
 
-    private static final class ProgressSnapshot {
-
-        private final String id;
-        private final float progress;
-        private final int status;
-        private final boolean found;
-        private final long bytesDownloaded;
-        private final long bytesTotal;
-        private final int reportedHttpStatus;
-
-        private ProgressSnapshot(
-            String id,
-            float progress,
-            int status,
-            boolean found,
-            long bytesDownloaded,
-            long bytesTotal,
-            int reportedHttpStatus
-        ) {
-            this.id = id;
-            this.progress = progress;
-            this.status = status;
-            this.found = found;
-            this.bytesDownloaded = bytesDownloaded;
-            this.bytesTotal = bytesTotal;
-            this.reportedHttpStatus = reportedHttpStatus;
+    private void failSingleDownload(String id, long systemDownloadId, String error, Long capturedGeneration) {
+        downloads.remove(id, systemDownloadId);
+        clearDownloadManagerTracking(id);
+        if (capturedGeneration != null) {
+            completedNotificationStore.remove(id, capturedGeneration);
         }
-
-        private static ProgressSnapshot notFound(String id) {
-            return new ProgressSnapshot(id, 0f, -1, false, 0, 0, 0);
-        }
+        JSObject failedData = new JSObject();
+        failedData.put("id", id);
+        failedData.put("error", error);
+        notifyListeners("downloadFailed", failedData);
     }
 
     @PluginMethod
@@ -1429,19 +1381,19 @@ public class CapacitorDownloaderPlugin extends Plugin {
     }
 
     private JSObject getDownloadStatus(Cursor cursor) {
-        int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-        long bytesDownloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
-        long bytesTotal = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
-
+        DownloadManagerCursorReader.Snapshot snapshot = DownloadManagerCursorReader.readSnapshot("status", cursor);
         JSObject result = new JSObject();
-        result.put("status", status);
-        result.put("bytesDownloaded", bytesDownloaded);
-        result.put("bytesTotal", bytesTotal);
+        result.put("status", snapshot.status);
+        result.put("state", DownloadManagerCursorReader.toCapacitorState(snapshot.status));
+        result.put("bytesDownloaded", snapshot.bytesDownloaded);
+        result.put("bytesTotal", snapshot.bytesTotal);
 
-        if (status == DownloadManager.STATUS_FAILED) {
-            int reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON));
-            result.put("reason", reason);
-            result.put("reasonText", getReasonText(status, reason));
+        if (snapshot.status == DownloadManager.STATUS_FAILED) {
+            result.put("reason", snapshot.reason);
+            result.put("reasonText", getReasonText(snapshot.status, snapshot.reason));
+            result.put("error", DownloadManagerCursorReader.failureMessage(snapshot.status, snapshot.reason, snapshot.httpStatus));
+        } else if (snapshot.httpStatus > 0) {
+            result.put("httpStatus", snapshot.httpStatus);
         }
 
         return result;

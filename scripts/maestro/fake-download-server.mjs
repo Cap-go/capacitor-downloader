@@ -83,8 +83,13 @@ const server = createServer((req, res) => {
       return;
     }
     if (code >= 500 && code <= 599) {
-      res.writeHead(code, { 'content-type': 'text/plain' });
-      res.end('server error');
+      const body = 'server error';
+      res.writeHead(code, {
+        'content-type': 'text/plain',
+        'content-length': String(Buffer.byteLength(body)),
+        connection: 'close',
+      });
+      res.end(body);
       return;
     }
   }

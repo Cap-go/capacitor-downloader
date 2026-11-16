@@ -231,7 +231,7 @@ public class OkHttpDownloadExecutor {
                             written += read;
                             active.bytesWritten = written;
                             if (total > 0) {
-                                active.progress = (float) written / (float) total;
+                                active.progress = Math.min(1f, (float) written / (float) total);
                             }
                             int percent = (int) (active.progress * 100f);
                             if (percent != lastReportedPercent) {

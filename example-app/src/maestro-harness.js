@@ -174,6 +174,23 @@ function buildBatchSpecs(count, okBytes, failUrl) {
   });
 }
 
+async function waitForBatchFailure(id, timeoutMs = 150_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = await readDownloadStatus(id);
+    appendLog(`BATCH_FAIL_WAIT:${id}:${status.state}:${status.progress}`);
+    if (status.state === 'ERROR') {
+      return status;
+    }
+    const summaryText = e2eSummary.textContent || '';
+    if (summaryText.includes(`EVENT:downloadFailed:id=${id}:`)) {
+      return { state: 'ERROR', progress: status.progress };
+    }
+    await sleep(750);
+  }
+  throw new Error(`Timed out waiting for batch failure on ${id}`);
+}
+
 const flows = {
   async 'foreground-complete'() {
     const id = 'fg-complete';

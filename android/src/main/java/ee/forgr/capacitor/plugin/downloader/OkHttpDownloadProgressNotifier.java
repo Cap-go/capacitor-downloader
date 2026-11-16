@@ -45,7 +45,7 @@ final class OkHttpDownloadProgressNotifier {
             return true;
         }
         synchronized (serviceLock) {
-            entries.put(downloadId, new ProgressEntry(title, description, notificationMode, SystemClock.elapsedRealtime()));
+            entries.put(downloadId, new ProgressEntry(title, description, notificationMode));
             activeDownloads.incrementAndGet();
             OkHttpDownloadForegroundService.notifyActiveDownloads(context, activeDownloads.get());
             OkHttpDownloadForegroundService.requestStart(context);
@@ -159,6 +159,7 @@ final class OkHttpDownloadProgressNotifier {
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setContentIntent(launchIntent())
+            .setWhen(entry.startedAt)
             .build();
         try {
             if (simulateNotificationPostSecurityExceptionForTests) {
@@ -189,6 +190,7 @@ final class OkHttpDownloadProgressNotifier {
             .setOngoing(false)
             .setAutoCancel(true)
             .setContentIntent(launchIntent())
+            .setWhen(entry.startedAt)
             .build();
         try {
             notificationManager.notify(notificationTagFor(downloadId), NOTIFICATION_ID, notification);
@@ -258,13 +260,15 @@ final class OkHttpDownloadProgressNotifier {
         final String title;
         final String description;
         final String notificationMode;
+        final long startedAt;
         long lastPostedAt;
 
-        ProgressEntry(String title, String description, String notificationMode, long lastPostedAt) {
+        ProgressEntry(String title, String description, String notificationMode) {
             this.title = title;
             this.description = description;
             this.notificationMode = notificationMode;
-            this.lastPostedAt = lastPostedAt;
+            this.startedAt = System.currentTimeMillis();
+            this.lastPostedAt = SystemClock.elapsedRealtime();
         }
     }
 }

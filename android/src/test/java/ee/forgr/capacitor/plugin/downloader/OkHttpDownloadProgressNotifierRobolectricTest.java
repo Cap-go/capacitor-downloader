@@ -5,6 +5,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.robolectric.Shadows.shadowOf;
 
+import android.app.Notification;
+import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
 import com.getcapacitor.JSObject;
@@ -23,7 +25,9 @@ import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowNotificationManager;
 import org.robolectric.shadows.ShadowService;
+import org.robolectric.shadows.ShadowSystemClock;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 34)
@@ -46,6 +50,37 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
         OkHttpDownloadForegroundService.setThrowOnStartForegroundForTests(false);
         OkHttpDownloadProgressNotifier.setSimulateNotificationPostSecurityExceptionForTests(false);
         OkHttpDownloadForegroundService.resetLifecycleStateForTests();
+    }
+
+    @Test
+    public void parallelProgressNotificationsKeepStableSortKeyByStartOrder() {
+        assertTrue(notifier.started("download-a", "First", null, "progress"));
+        Notification first = progressNotification("download-a");
+        assertTrue(first.when > 0);
+
+        ShadowSystemClock.advanceBy(50, TimeUnit.MILLISECONDS);
+        assertTrue(notifier.started("download-b", "Second", null, "progress"));
+        Notification second = progressNotification("download-b");
+
+        assertTrue("start order should define notification sort time", first.when < second.when);
+
+        ShadowSystemClock.advanceBy(2_000, TimeUnit.MILLISECONDS);
+        notifier.update("download-b", 0.5f);
+        Notification secondAfterUpdate = progressNotification("download-b");
+        assertEquals("progress updates must not move notification sort time", second.when, secondAfterUpdate.when);
+
+        notifier.finished("download-a", true);
+        notifier.finished("download-b", true);
+    }
+
+    private Notification progressNotification(String downloadId) {
+        NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        ShadowNotificationManager shadow = shadowOf(notificationManager);
+        String tag = OkHttpDownloadProgressNotifier.notificationTagForDownload(downloadId);
+        int id = OkHttpDownloadProgressNotifier.notificationIdForDownload(downloadId);
+        Notification notification = shadow.getNotification(tag, id);
+        assertTrue("expected progress notification for " + downloadId, notification != null);
+        return notification;
     }
 
     @Test

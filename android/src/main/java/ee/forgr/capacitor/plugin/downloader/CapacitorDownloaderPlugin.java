@@ -34,7 +34,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
     static final int BATCH_MAX_FILES = 32;
 
-    private final String pluginVersion = "8.8.0";
+    private final String pluginVersion = "8.8.1";
 
     private DownloadManager downloadManager;
     private final Map<String, Long> downloads = new ConcurrentHashMap<>();

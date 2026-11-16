@@ -1,6 +1,13 @@
 import type { PluginListenerHandle } from '@capacitor/core';
 
 /**
+ * Legacy batch file limit constant.
+ *
+ * @deprecated No longer enforced. Batch `download()` accepts any file count; native layers limit concurrency instead.
+ */
+export const DOWNLOAD_BATCH_MAX_FILES = 32;
+
+/**
  * Represents the current state and progress of a download task.
  */
 export interface DownloadTask {

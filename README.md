@@ -91,11 +91,13 @@ For `iosContinuedProcessingTitle`, add a permitted identifier prefix to `Info.pl
 
 Without `lengthHeader`, `downloadProgress` can sit at `0`, jump early to `1`, or report `bytesTotal` that does not match the file on disk. With `lengthHeader`, native code reads that header from the HTTP response and uses it for progress totals. Progress is always clamped at `1`.
 
-| Platform | Supported |
+| Scope | `lengthHeader` |
 | --- | --- |
-| iOS | Single and batch downloads |
-| Android OkHttp | `androidHttpEngine: 'okhttp'` or `'auto'` on app-private paths |
-| Android DownloadManager | Ignored |
+| Single download, iOS | Supported |
+| Single download, Android OkHttp | `androidHttpEngine: 'okhttp'` or `'auto'` on app-private paths |
+| Batch download, iOS | Supported (one header name for every file in `files`) |
+| Batch download, Android | Ignored (batches always use DownloadManager) |
+| Android DownloadManager (single) | Ignored |
 | Web | Ignored |
 
 ```typescript
@@ -115,7 +117,7 @@ await CapacitorDownloader.download({
 });
 ```
 
-Batch downloads share one `lengthHeader` name for every file in the batch (iOS and Android OkHttp).
+On iOS, batch downloads share one `lengthHeader` name for every file in `files`. Android batches always use DownloadManager and ignore `lengthHeader`.
 
 Full docs: [Capgo downloader guide](https://capgo.app/docs/plugins/downloader/getting-started/#lengthheader-for-gzip-downloads/) (once released on the website). Tracked with [capacitor-downloader#144](https://github.com/Cap-go/capacitor-downloader/pull/144).
 

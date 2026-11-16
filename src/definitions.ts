@@ -145,8 +145,7 @@ export interface DownloadOptions {
    * When the response includes this header with a positive integer, native code uses it for
    * `downloadProgress` totals and progress is clamped at 1. Examples: `X-Uncompressed-Length`.
    *
-   * Android: OkHttp downloads only. iOS: single and batch downloads. Ignored on Web and Android
-   * DownloadManager.
+   * Single downloads: Android OkHttp and iOS. Ignored on Web and Android DownloadManager.
    *
    * @since 8.8.4
    */
@@ -274,8 +273,8 @@ export interface DownloadBatchOptions {
    * When the response includes this header with a positive integer, native code uses it for
    * `downloadProgress` totals and progress is clamped at 1. Examples: `X-Uncompressed-Length`.
    *
-   * Android: OkHttp downloads only. iOS: single and batch downloads. Ignored on Web and Android
-   * DownloadManager.
+   * Batch downloads: iOS only (same header name applies to every file in `files`). Android batches always
+   * use DownloadManager and ignore this option. Ignored on Web.
    *
    * @since 8.8.4
    */

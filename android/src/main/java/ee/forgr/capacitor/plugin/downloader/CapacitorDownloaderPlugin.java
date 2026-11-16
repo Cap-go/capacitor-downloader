@@ -935,7 +935,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
         try {
             executor.execute(() -> {
                 ProgressSnapshot snapshot = queryProgressSnapshot(id, systemDownloadId);
-                if (snapshot != null && snapshot.found && snapshot.status == DownloadManager.STATUS_SUCCESSFUL) {
+                if (
+                    snapshot != null &&
+                    snapshot.found &&
+                    (snapshot.status == DownloadManager.STATUS_SUCCESSFUL ||
+                        snapshot.status == DownloadManager.STATUS_RUNNING)
+                ) {
                     int httpCode = snapshot.reportedHttpStatus;
                     if (httpCode <= 0) {
                         httpCode = resolveHttpStatusAfterDownloadManagerSuccess(id);

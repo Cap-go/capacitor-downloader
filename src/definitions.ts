@@ -139,6 +139,19 @@ export interface DownloadOptions {
    */
   downloadCompletedNotificationText?: string;
   /**
+   * HTTP response header that carries the uncompressed byte length when the body is transferred
+   * compressed (for example `Content-Encoding: gzip`) and `Content-Length` is missing or wrong.
+   *
+   * When the response includes this header with a positive integer, native code uses it for
+   * `downloadProgress` totals and progress is clamped at 1. Examples: `X-Uncompressed-Length`.
+   *
+   * Android: OkHttp downloads only. iOS: single and batch downloads. Ignored on Web and Android
+   * DownloadManager.
+   *
+   * @since 8.8.4
+   */
+  lengthHeader?: string;
+  /**
    * iOS 26 and later: opt in to a `BGContinuedProcessingTask` so the system can show download progress while the
    * device is locked. Falls back to the background URL session when the task does not launch in time. If the continued
    * processing task expires, the active transfer is cancelled with `downloadFailed` and is not resumed automatically.
@@ -254,6 +267,19 @@ export interface DownloadBatchOptions {
    * @since 8.5.0
    */
   downloadCompletedNotificationText?: string;
+  /**
+   * HTTP response header that carries the uncompressed byte length when the body is transferred
+   * compressed (for example `Content-Encoding: gzip`) and `Content-Length` is missing or wrong.
+   *
+   * When the response includes this header with a positive integer, native code uses it for
+   * `downloadProgress` totals and progress is clamped at 1. Examples: `X-Uncompressed-Length`.
+   *
+   * Android: OkHttp downloads only. iOS: single and batch downloads. Ignored on Web and Android
+   * DownloadManager.
+   *
+   * @since 8.8.4
+   */
+  lengthHeader?: string;
 }
 
 /**

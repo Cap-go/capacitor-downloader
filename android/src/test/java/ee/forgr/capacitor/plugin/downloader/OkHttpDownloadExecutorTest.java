@@ -61,6 +61,46 @@ public class OkHttpDownloadExecutorTest {
     }
 
     @Test(timeout = 10_000)
+    public void usesLengthHeaderWhenContentLengthMissing() throws Exception {
+        byte[] payload = "gzip-style-payload".getBytes(StandardCharsets.UTF_8);
+        server.enqueue(
+            new MockResponse()
+                .setBody(new okio.Buffer().write(payload))
+                .addHeader("Content-Encoding", "gzip")
+                .addHeader("X-Uncompressed-Length", String.valueOf(payload.length))
+        );
+
+        File destination = new File(tempDir, "length-header.bin");
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicBoolean success = new AtomicBoolean(false);
+        AtomicReference<Float> lastProgress = new AtomicReference<>(0f);
+
+        OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer("length-header");
+        assertNotNull(reservation);
+        executor.start(
+            reservation,
+            server.url("/file").toString(),
+            destination,
+            new JSObject(),
+            "cellular",
+            "X-Uncompressed-Length",
+            (id, progress) -> lastProgress.set(progress),
+            (id, ok, cancelled, errorMessage) -> {
+                success.set(ok);
+                finished.countDown();
+            }
+        );
+
+        assertTrue(finished.await(5, TimeUnit.SECONDS));
+        assertTrue(success.get());
+        assertEquals(payload.length, destination.length());
+        assertTrue(lastProgress.get() <= 1f);
+        OkHttpDownloadExecutor.ActiveDownload active = executor.getActive("length-header");
+        assertNotNull(active);
+        assertEquals(payload.length, active.bytesTotal);
+    }
+
+    @Test(timeout = 10_000)
     public void downloadsBytesToDestination() throws Exception {
         byte[] payload = "offline-package".getBytes(StandardCharsets.UTF_8);
         server.enqueue(
@@ -80,6 +120,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            null,
             (id, progress) -> {},
             (id, ok, cancelled, errorMessage) -> {
                 success.set(ok);
@@ -114,6 +155,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            null,
             (id, progress) -> {},
             (id, ok, cancelled, errorMessage) -> {
                 success.set(ok);
@@ -239,6 +281,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "wifi-only",
+            null,
             (id, progress) -> {},
             (id, ok, cancelled, errorMessage) -> {
                 success.set(ok);
@@ -272,6 +315,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            null,
             (id, progress) -> {},
             (id, ok, cancelled, errorMessage) -> {
                 success.set(ok);
@@ -325,6 +369,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            null,
             (id, progress) -> {},
             (id, ok, cancelledFlag, errorMessage) -> {
                 success.set(ok);

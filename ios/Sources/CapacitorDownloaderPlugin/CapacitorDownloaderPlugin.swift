@@ -138,6 +138,37 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             tasks.removeValue(forKey: id)
         }
         taskGenerations.removeValue(forKey: DownloadTaskGenerationKey.storageKey(session: session, task: task))
+        DownloadLengthHeaderStore.shared.clear(for: id)
+    }
+
+    private func normalizedLengthHeader(from call: CAPPluginCall) -> String? {
+        guard let raw = call.getString("lengthHeader")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else {
+            return nil
+        }
+        return raw
+    }
+
+    private func registerLengthHeaderOption(_ headerName: String?, for taskId: String) {
+        DownloadLengthHeaderStore.shared.setHeaderName(headerName, for: taskId)
+    }
+
+    private func progressBytesAndFraction(
+        downloadId: String,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) -> (bytesTotal: Int64, progress: Float) {
+        var bytesTotal = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : 0
+        if bytesTotal <= 0, let override = DownloadLengthHeaderStore.shared.expectedTotal(for: downloadId) {
+            bytesTotal = override
+        }
+        let progress: Float
+        if bytesTotal > 0 {
+            progress = min(1, max(0, Float(totalBytesWritten) / Float(bytesTotal)))
+        } else {
+            progress = 0
+        }
+        return (bytesTotal, progress)
     }
 
     private func nextGeneration(for id: String) -> UInt64 {
@@ -304,6 +335,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 request.setValue(value, forHTTPHeaderField: key)
             }
         }
+        registerLengthHeaderOption(normalizedLengthHeader(from: call), for: id)
 
         let wifiOnly = call.getString("network") == "wifi-only"
         let continuedRequest = parseContinuedProcessingRequest(call)
@@ -362,6 +394,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
         var parsed: [(url: URL, destination: String)] = []
         let headers = call.getObject("headers") as? [String: String] ?? [:]
+        let lengthHeader = normalizedLengthHeader(from: call)
         let wifiOnly = call.getString("network") == "wifi-only"
         let batchSession = downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: false)
 
@@ -402,6 +435,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             let taskId = batchCoordinator.fileTaskId(batchId: batchId, generation: generation, fileIndex: index)
             DownloadDestinationStore.shared.setDestination(entry.destination, for: taskId)
             batchCoordinator.registerChildTask(batchId: batchId, taskId: taskId, fileIndex: index)
+            registerLengthHeaderOption(lengthHeader, for: taskId)
 
             var request = URLRequest(url: entry.url)
             for (key, value) in headers {
@@ -796,6 +830,23 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
     public func urlSession(
         _ session: URLSession,
         downloadTask: URLSessionDownloadTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        guard let id = idForTask(downloadTask),
+              let httpResponse = response as? HTTPURLResponse,
+              let headerName = DownloadLengthHeaderStore.shared.headerName(for: id),
+              let expected = DownloadExpectedLength.parse(from: httpResponse, headerName: headerName) else {
+            completionHandler(.allow)
+            return
+        }
+        DownloadLengthHeaderStore.shared.setExpectedTotal(expected, for: id)
+        completionHandler(.allow)
+    }
+
+    public func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
         didWriteData bytesWritten: Int64,
         totalBytesWritten: Int64,
         totalBytesExpectedToWrite: Int64
@@ -804,8 +855,13 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             return
         }
 
-        let bytesTotal = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : 0
-        let progress = bytesTotal > 0 ? Float(totalBytesWritten) / Float(bytesTotal) : 0
+        let progressSnapshot = progressBytesAndFraction(
+            downloadId: id,
+            totalBytesWritten: totalBytesWritten,
+            totalBytesExpectedToWrite: totalBytesExpectedToWrite
+        )
+        let bytesTotal = progressSnapshot.bytesTotal
+        let progress = progressSnapshot.progress
 
         if let batchParts = batchCoordinator.activeChildParts(for: id) {
             guard let batchProgress = batchCoordinator.updateFileProgress(

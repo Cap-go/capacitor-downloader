@@ -21,6 +21,7 @@ import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -358,5 +359,14 @@ public class OkHttpDownloadExecutorTest {
         OkHttpDownloadExecutor.ActiveDownload next = executor.beginTransfer("shared-id");
         assertNotNull(next);
         assertNotSame(current, next);
+    }
+
+    @Test
+    public void transferSlotsUseFairSemaphoreAndFourConcurrentCap() throws Exception {
+        Field field = OkHttpDownloadExecutor.class.getDeclaredField("transferSlots");
+        field.setAccessible(true);
+        Semaphore semaphore = (Semaphore) field.get(executor);
+        assertTrue(semaphore.isFair());
+        assertEquals(4, semaphore.availablePermits());
     }
 }

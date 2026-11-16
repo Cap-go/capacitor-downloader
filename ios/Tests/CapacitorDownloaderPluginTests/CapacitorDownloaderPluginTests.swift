@@ -276,6 +276,18 @@ final class DownloadBatchProgressTests: XCTestCase {
         coordinator.removeBatch(batchId: "bundle")
         store.clear()
     }
+
+    func testBatchCoordinatorAcceptsLargeFileCount() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let generation = coordinator.startBatch(batchId: "big", fileCount: 40, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+        XCTAssertGreaterThan(generation, 0)
+        coordinator.removeBatch(batchId: "big")
+        store.clear()
+    }
 }
 
 final class DownloadCompletedNotificationTextTests: XCTestCase {

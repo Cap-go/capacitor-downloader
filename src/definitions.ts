@@ -1,8 +1,5 @@
 import type { PluginListenerHandle } from '@capacitor/core';
 
-/** Maximum number of files allowed in one batch `download()` call. */
-export const DOWNLOAD_BATCH_MAX_FILES = 32;
-
 /**
  * Represents the current state and progress of a download task.
  */
@@ -182,7 +179,7 @@ export interface DownloadBatchOptions {
    *
    * The batch shares the top-level `id`. Progress events use `progress` and `fileProgress` from 0 to 1 (same scale as DownloadTask).
    * `downloadCompleted` fires once when every file succeeds. Any failure cancels the batch.
-   * At most 32 entries are allowed.
+   * There is no fixed maximum file count. Native layers still limit concurrency (Android OkHttp: up to 4 concurrent transfers; iOS: URLSession queues per host).
    *
    * @since 8.7.0
    */

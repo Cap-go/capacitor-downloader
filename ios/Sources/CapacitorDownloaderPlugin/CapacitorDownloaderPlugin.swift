@@ -32,8 +32,6 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private let foregroundSessionLock = NSLock()
     internal private(set) var restoredBackgroundSessionIdentifiers: [String] = []
     internal private(set) var didRestoreGenerationsBeforeDelegateRegistration = false
-    static let batchMaxFiles = 32
-
     private func registerDownloadDelegateIfGenerationsRestored() {
         tasksLock.lock()
         let generationsRestored = !downloadGenerations.isEmpty
@@ -355,11 +353,6 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func downloadBatch(_ call: CAPPluginCall, batchId: String, files: [[String: Any]]) {
-        if files.count > Self.batchMaxFiles {
-            call.reject("Batch exceeds maximum of \(Self.batchMaxFiles) files")
-            return
-        }
-
         var parsed: [(url: URL, destination: String)] = []
         let headers = call.getObject("headers") as? [String: String] ?? [:]
         let wifiOnly = call.getString("network") == "wifi-only"

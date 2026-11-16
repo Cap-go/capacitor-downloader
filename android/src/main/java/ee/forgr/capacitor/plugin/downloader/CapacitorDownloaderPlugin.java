@@ -32,8 +32,6 @@ import org.json.JSONObject;
 @CapacitorPlugin(name = "CapacitorDownloader")
 public class CapacitorDownloaderPlugin extends Plugin {
 
-    static final int BATCH_MAX_FILES = 32;
-
     private final String pluginVersion = "8.8.3";
 
     private DownloadManager downloadManager;
@@ -363,11 +361,6 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private void downloadBatch(PluginCall call, String batchId, JSArray files) {
         if (isDownloadIdTaken(batchId)) {
             call.reject("Download already exists");
-            return;
-        }
-
-        if (files.length() > BATCH_MAX_FILES) {
-            call.reject("Batch exceeds maximum of " + BATCH_MAX_FILES + " files");
             return;
         }
 

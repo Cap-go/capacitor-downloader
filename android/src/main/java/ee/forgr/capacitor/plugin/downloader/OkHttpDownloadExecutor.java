@@ -54,7 +54,7 @@ public class OkHttpDownloadExecutor {
 
     private final OkHttpClient defaultClient;
     private final Map<String, ActiveDownload> activeDownloads = new ConcurrentHashMap<>();
-    private final Semaphore transferSlots = new Semaphore(MAX_CONCURRENT_TRANSFERS);
+    private final Semaphore transferSlots = new Semaphore(MAX_CONCURRENT_TRANSFERS, true);
     private final Context context;
 
     public OkHttpDownloadExecutor(Context context) {

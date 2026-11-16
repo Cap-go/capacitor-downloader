@@ -408,7 +408,9 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
         for staged in stagedTasks {
             setTask(staged.task, for: staged.taskId)
-            staged.task.resume()
+            if !skipBatchTaskResumeForTests {
+                staged.task.resume()
+            }
         }
 
         call.resolve([
@@ -488,6 +490,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     internal func trackedBatchFileCountForTests(batchId: String) -> Int? {
         batchCoordinator.fileCount(batchId: batchId)
     }
+
+    internal var skipBatchTaskResumeForTests = false
 
     internal var mainBackgroundSessionForTests: URLSession {
         DownloadBackgroundSessionManager.shared.mainSession

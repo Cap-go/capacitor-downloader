@@ -299,6 +299,7 @@ final class DownloadBatchProgressTests: XCTestCase {
                 "destination": "files/batch-entry-\(index).bin",
             ] as [String: String]
         }
+        plugin.skipBatchTaskResumeForTests = true
         let expectation = expectation(description: "batch enqueue")
         guard let call = CAPPluginCall(
             callbackId: "batch-entry",

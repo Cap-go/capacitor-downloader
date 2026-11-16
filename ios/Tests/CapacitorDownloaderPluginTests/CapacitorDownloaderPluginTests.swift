@@ -290,6 +290,35 @@ final class DownloadBatchProgressTests: XCTestCase {
         store.clear()
     }
 
+    func testBatchProgressPersistenceDebouncesRapidCompletions() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let generation = coordinator.startBatch(batchId: "debounce", fileCount: 50, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+
+        for fileIndex in 0..<40 {
+            _ = coordinator.markFileCompleted(batchId: "debounce", generation: generation, fileIndex: fileIndex)
+        }
+
+        XCTAssertLessThan(
+            store.saveInvocationCountForTests,
+            5,
+            "rapid file completions should debounce UserDefaults writes"
+        )
+
+        let expectation = expectation(description: "debounced persist")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            XCTAssertGreaterThanOrEqual(store.saveInvocationCountForTests, 1)
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 2)
+
+        coordinator.removeBatch(batchId: "debounce")
+        store.clear()
+    }
+
     func testDownloadBatchEnqueuesFortyFilesThroughPlugin() {
         DownloadBatchStore.shared.clear()
         let plugin = CapacitorDownloaderPlugin()

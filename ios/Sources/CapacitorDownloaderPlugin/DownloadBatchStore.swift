@@ -20,12 +20,14 @@ final class DownloadBatchStore {
     }
 
     private let defaults: UserDefaults
+    private(set) var saveInvocationCountForTests = 0
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
     }
 
     func save(_ batches: [String: Record]) {
+        saveInvocationCountForTests += 1
         let encoder = JSONEncoder()
         guard let data = try? encoder.encode(batches) else {
             return

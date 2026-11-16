@@ -2,6 +2,7 @@ package ee.forgr.capacitor.plugin.downloader;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
@@ -19,6 +20,7 @@ import java.lang.reflect.Field;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.json.JSONObject;
@@ -76,6 +78,28 @@ public class CapacitorDownloaderPluginBatchEntryTest {
 
         verify(call, timeout(5000)).resolve(any());
         verify(downloadManager, times(33)).enqueue(any(DownloadManager.Request.class));
+    }
+
+    @Test
+    public void downloadBatchStartsSingleProgressPollerForHundredFiles() throws Exception {
+        AtomicLong nextSystemId = new AtomicLong(3000L);
+        when(downloadManager.enqueue(any(DownloadManager.Request.class))).thenAnswer((invocation) -> nextSystemId.getAndIncrement());
+
+        PluginCall call = buildBatchCall("hundred-batch", 100);
+        plugin.download(call);
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+
+        verify(call, timeout(5000)).resolve(any());
+        verify(downloadManager, times(100)).enqueue(any(DownloadManager.Request.class));
+
+        @SuppressWarnings("unchecked")
+        Map<String, Boolean> batchProgressPollingActive = (Map<String, Boolean>) getField(plugin, "batchProgressPollingActive").get(plugin);
+        assertEquals(1, batchProgressPollingActive.size());
+        assertTrue(batchProgressPollingActive.containsKey("hundred-batch"));
+
+        ExecutorService okHttpTransferExecutor = (ExecutorService) getField(plugin, "okHttpTransferExecutor").get(plugin);
+        assertTrue(okHttpTransferExecutor instanceof ThreadPoolExecutor);
+        assertEquals(4, ((ThreadPoolExecutor) okHttpTransferExecutor).getMaximumPoolSize());
     }
 
     @Test

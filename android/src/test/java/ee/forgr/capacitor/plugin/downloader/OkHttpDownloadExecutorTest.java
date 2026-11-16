@@ -370,6 +370,74 @@ public class OkHttpDownloadExecutorTest {
         assertEquals(4, semaphore.availablePermits());
     }
 
+    @Test(timeout = 30_000)
+    public void transferSlotsReturnAfterConcurrentSuccesses() throws Exception {
+        assertTransferSlotsReturnAfterOutcomes(2, 0, 0);
+    }
+
+    @Test(timeout = 30_000)
+    public void transferSlotsReturnAfterConcurrentHttp500() throws Exception {
+        assertTransferSlotsReturnAfterOutcomes(0, 2, 0);
+    }
+
+    @Test(timeout = 30_000)
+    public void transferSlotsReturnAfterCancelDuringTransfer() throws Exception {
+        assertTransferSlotsReturnAfterOutcomes(0, 0, 1);
+    }
+
+    private void assertTransferSlotsReturnAfterOutcomes(int successCount, int http500Count, int cancelCount) throws Exception {
+        byte[] payload = "slot-test".getBytes(StandardCharsets.UTF_8);
+        int total = successCount + http500Count + cancelCount;
+        CountDownLatch finished = new CountDownLatch(total);
+        java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(Math.max(1, total));
+
+        for (int index = 0; index < successCount; index++) {
+            server.enqueue(
+                new MockResponse().setBody(new okio.Buffer().write(payload)).addHeader("Content-Length", String.valueOf(payload.length))
+            );
+        }
+        for (int index = 0; index < http500Count; index++) {
+            server.enqueue(new MockResponse().setResponseCode(500));
+        }
+        for (int index = 0; index < cancelCount; index++) {
+            server.enqueue(
+                new MockResponse()
+                    .setBody(new okio.Buffer().write(payload))
+                    .addHeader("Content-Length", String.valueOf(payload.length))
+                    .setBodyDelay(3, TimeUnit.SECONDS)
+            );
+        }
+
+        String cancelTaskId = "cancel-path-0";
+        for (int index = 0; index < total; index++) {
+            final int taskIndex = index;
+            final String taskId = cancelCount > 0 && index == total - 1 ? cancelTaskId : "outcome-" + taskIndex;
+            workers.submit(() -> {
+                File destination = new File(tempDir, taskId + ".bin");
+                OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer(taskId);
+                assertNotNull(reservation);
+                executor.start(
+                    reservation,
+                    server.url("/file-" + taskIndex).toString(),
+                    destination,
+                    new JSObject(),
+                    "cellular",
+                    (id, progress) -> {},
+                    (id, ok, cancelled, errorMessage) -> finished.countDown()
+                );
+            });
+        }
+
+        if (cancelCount > 0) {
+            Thread.sleep(300);
+            executor.cancel(cancelTaskId, new File(tempDir, cancelTaskId + ".bin"));
+        }
+
+        assertTrue(finished.await(25, TimeUnit.SECONDS));
+        workers.shutdown();
+        assertEquals(4, executor.availableTransferSlots());
+    }
+
     @Test(timeout = 60_000)
     public void transferSlotsReturnToFourAfterMixedOutcomes() throws Exception {
         byte[] payload = "slot-test".getBytes(StandardCharsets.UTF_8);

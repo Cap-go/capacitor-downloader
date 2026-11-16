@@ -718,8 +718,6 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 )
                 markContinuedProcessingFinished(downloadId: id, success: false)
             }
-            removeTask(for: id, completing: downloadTask, in: session)
-            batchCoordinator.unregisterChildTask(id)
             return
         }
 

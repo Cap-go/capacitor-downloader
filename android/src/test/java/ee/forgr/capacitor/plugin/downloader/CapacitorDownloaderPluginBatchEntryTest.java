@@ -66,6 +66,19 @@ public class CapacitorDownloaderPluginBatchEntryTest {
     }
 
     @Test
+    public void downloadBatchEnqueuesThirtyThreeFilesFromPluginEntry() throws Exception {
+        AtomicLong nextSystemId = new AtomicLong(2000L);
+        when(downloadManager.enqueue(any(DownloadManager.Request.class))).thenAnswer((invocation) -> nextSystemId.getAndIncrement());
+
+        PluginCall call = buildBatchCall("thirty-three-batch", 33);
+        plugin.download(call);
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+
+        verify(call, timeout(5000)).resolve(any());
+        verify(downloadManager, times(33)).enqueue(any(DownloadManager.Request.class));
+    }
+
+    @Test
     public void downloadBatchEnqueuesFortyFilesFromPluginEntry() throws Exception {
         AtomicLong nextSystemId = new AtomicLong(1000L);
         when(downloadManager.enqueue(any(DownloadManager.Request.class))).thenAnswer((invocation) -> nextSystemId.getAndIncrement());

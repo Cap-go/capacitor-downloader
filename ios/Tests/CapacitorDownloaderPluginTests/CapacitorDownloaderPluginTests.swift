@@ -293,18 +293,18 @@ final class DownloadBatchProgressTests: XCTestCase {
     func testDownloadBatchEnqueuesFortyFilesThroughPlugin() {
         let plugin = CapacitorDownloaderPlugin()
         plugin.load()
-        let files = (0..<40).map { index in
+        let files: [[String: Any]] = (0..<40).map { index in
             [
                 "url": "https://example.com/\(index).bin",
                 "destination": "files/batch-entry-\(index).bin",
-            ] as [String: String]
+            ]
         }
         plugin.skipBatchTaskResumeForTests = true
         let expectation = expectation(description: "batch enqueue")
         guard let call = CAPPluginCall(
             callbackId: "batch-entry",
             methodName: "download",
-            options: ["id": "forty-batch", "files": files],
+            options: ["id": "forty-batch", "files": files] as [String: Any],
             success: { result, _ in
                 XCTAssertEqual(result?.data?["id"] as? String, "forty-batch")
                 expectation.fulfill()

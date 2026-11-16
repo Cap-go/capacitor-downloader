@@ -246,7 +246,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject("Provide either url and destination or files, not both")
                 return
             }
-            guard let files = filesValue as? [[String: Any]] else {
+            let files = filesValue.compactMap { $0 as? [String: Any] }
+            guard files.count == filesValue.count else {
                 call.reject("Invalid file entry")
                 return
             }

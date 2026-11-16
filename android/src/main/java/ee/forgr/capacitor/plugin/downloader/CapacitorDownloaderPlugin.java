@@ -363,6 +363,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
     }
 
     private void downloadBatch(PluginCall call, String batchId, JSArray files) {
+        if (files.length() > 32) {
+            call.reject("Batch exceeds maximum file count");
+            return;
+        }
         if (isDownloadIdTaken(batchId)) {
             call.reject("Download already exists");
             return;

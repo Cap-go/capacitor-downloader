@@ -939,7 +939,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     snapshot != null &&
                     snapshot.found &&
                     (snapshot.status == DownloadManager.STATUS_SUCCESSFUL ||
-                        snapshot.status == DownloadManager.STATUS_RUNNING)
+                        snapshot.status == DownloadManager.STATUS_RUNNING ||
+                        snapshot.status == DownloadManager.STATUS_PAUSED)
                 ) {
                     int httpCode = snapshot.reportedHttpStatus;
                     if (httpCode <= 0) {

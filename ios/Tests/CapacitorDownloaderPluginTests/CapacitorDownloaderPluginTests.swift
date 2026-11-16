@@ -1,3 +1,4 @@
+import Capacitor
 import XCTest
 @testable import CapacitorDownloaderPlugin
 
@@ -301,9 +302,10 @@ final class DownloadBatchProgressTests: XCTestCase {
         let expectation = expectation(description: "batch enqueue")
         let call = CAPPluginCall(
             callbackId: "batch-entry",
+            methodName: "download",
             options: ["id": "forty-batch", "files": files],
             success: { result, _ in
-                XCTAssertEqual(result?["id"] as? String, "forty-batch")
+                XCTAssertEqual(result?.data?["id"] as? String, "forty-batch")
                 expectation.fulfill()
             },
             error: { _ in

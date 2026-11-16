@@ -42,19 +42,23 @@ FLOWS = {
 }
 
 
-def run(timeout, scenario, device):
+def run(timeout, scenario, device, platform='android', results_dir=None):
     if not 0 < timeout <= 600:
         raise ValueError('Maestro timeout must be between 0 and 600 seconds')
     if scenario not in FLOWS:
         raise ValueError('Unknown Maestro E2E flow')
+    if platform not in {'android', 'ios'}:
+        raise ValueError('Maestro platform must be android or ios')
     if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}', device):
-        raise ValueError('Invalid Android device identifier')
-    results = ROOT / 'maestro-results'
+        raise ValueError('Invalid device identifier')
+    results = Path(results_dir) if results_dir else ROOT / (
+        'maestro-results-ios' if platform == 'ios' else 'maestro-results'
+    )
     results.mkdir(exist_ok=True)
     report = results / 'junit.xml'
     command = [
         'maestro', 'test', '--config', str(ROOT / '.maestro/config.yaml'), str(FLOWS[scenario]),
-        '--platform', 'android', '--udid', device,
+        '--platform', platform, '--udid', device,
         '--format', 'junit', '--output', str(report),
         '--debug-output', str(results / 'debug'), '--flatten-debug-output',
         '--test-output-dir', str(results / 'artifacts'),
@@ -148,4 +152,6 @@ def stop_process(process):
 
 
 if __name__ == '__main__':
-    sys.exit(run(float(sys.argv[1]), sys.argv[2], sys.argv[3]))
+    platform = sys.argv[4] if len(sys.argv) > 4 else 'android'
+    results_dir = sys.argv[5] if len(sys.argv) > 5 else None
+    sys.exit(run(float(sys.argv[1]), sys.argv[2], sys.argv[3], platform, results_dir))

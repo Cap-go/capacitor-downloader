@@ -67,22 +67,21 @@ const server = createServer((req, res) => {
     return;
   }
 
-  if (req.method === 'GET' && pathname === '/status/404') {
-    res.writeHead(404, { 'content-type': 'text/plain' });
-    res.end('not found');
-    return;
-  }
 
-  if (req.method === 'GET' && pathname === '/status/500') {
-    res.writeHead(500, { 'content-type': 'text/plain' });
-    res.end('server error');
-    return;
-  }
-
-  if (req.method === 'GET' && pathname === '/status/503') {
-    res.writeHead(503, { 'content-type': 'text/plain' });
-    res.end('unavailable');
-    return;
+  const statusMatch = pathname.match(/^\/status\/(\d{3})$/);
+  if (req.method === 'GET' && statusMatch) {
+    const code = Number(statusMatch[1]);
+    if (code === 404) {
+      res.writeHead(404, { 'content-type': 'text/plain' });
+      res.end('not found');
+      return;
+    }
+    if (code >= 500 && code <= 599) {
+      // OkHttp rejects non-2xx. DownloadManager must not treat a 5xx body as a successful file.
+      res.writeHead(code, { 'content-type': 'text/plain', 'content-length': '0' });
+      res.end();
+      return;
+    }
   }
 
   const bytesMatch = pathname.match(/^\/bytes\/(\d+)$/);

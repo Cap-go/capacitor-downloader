@@ -497,9 +497,7 @@ const flows = {
 
   async 'batch-error-5xx'() {
     const id = 'batch-5xx';
-    const isIos = Capacitor.getPlatform() === 'ios';
-    const failPath = isIos ? '/status/500' : '/status/503';
-    const files = buildBatchSpecs(4, 4096, fileUrl(failPath));
+    const files = buildBatchSpecs(4, 4096, fileUrl('/status/500'));
     await plugin.download({
       id,
       files,

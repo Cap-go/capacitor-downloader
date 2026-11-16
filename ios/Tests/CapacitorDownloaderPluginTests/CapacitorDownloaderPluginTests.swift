@@ -291,26 +291,31 @@ final class DownloadBatchProgressTests: XCTestCase {
     }
 
     func testDownloadBatchEnqueuesFortyFilesThroughPlugin() {
+        DownloadBatchStore.shared.clear()
         let plugin = CapacitorDownloaderPlugin()
         plugin.load()
-        let files: [[String: Any]] = (0..<40).map { index in
+        let files: JSArray = (0..<40).map { index in
             [
                 "url": "https://example.com/\(index).bin",
                 "destination": "files/batch-entry-\(index).bin",
-            ]
+            ] as JSObject
         }
         plugin.skipBatchTaskResumeForTests = true
         let expectation = expectation(description: "batch enqueue")
+        let options = NSDictionary(dictionary: [
+            "id": "forty-batch",
+            "files": files,
+        ])
         guard let call = CAPPluginCall(
             callbackId: "batch-entry",
             methodName: "download",
-            options: ["id": "forty-batch", "files": files] as [String: Any],
+            options: options,
             success: { result, _ in
                 XCTAssertEqual(result?.data?["id"] as? String, "forty-batch")
                 expectation.fulfill()
             },
-            error: { _ in
-                XCTFail("batch download should resolve")
+            error: { error in
+                XCTFail("batch download should resolve: \(error?.message ?? "unknown")")
             }
         ) else {
             XCTFail("failed to create CAPPluginCall")

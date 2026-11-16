@@ -66,7 +66,9 @@ public class OkHttpDownloadExecutorTest {
     public void usesLengthHeaderWhenContentLengthMissing() throws Exception {
         byte[] payload = "gzip-style-payload".getBytes(StandardCharsets.UTF_8);
         server.enqueue(
-            new MockResponse().setBody(new okio.Buffer().write(payload)).addHeader("X-Uncompressed-Length", String.valueOf(payload.length))
+            new MockResponse()
+                .setChunkedBody(new okio.Buffer().write(payload), 8)
+                .addHeader("X-Uncompressed-Length", String.valueOf(payload.length))
         );
 
         File destination = new File(tempDir, "length-header.bin");

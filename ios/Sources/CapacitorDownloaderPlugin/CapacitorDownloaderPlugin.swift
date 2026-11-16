@@ -853,7 +853,12 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         guard let id = idForTask(downloadTask) else {
             return
         }
-        captureExpectedTotalFromResponseIfNeeded(downloadId: id, downloadTask: downloadTask)
+        tasksLock.lock()
+        let isCurrentTask = tasks[id] === downloadTask
+        tasksLock.unlock()
+        if isCurrentTask {
+            captureExpectedTotalFromResponseIfNeeded(downloadId: id, downloadTask: downloadTask)
+        }
 
         let progressSnapshot = DownloadLengthHeaderProgress.bytesTotalAndProgress(
             downloadId: id,

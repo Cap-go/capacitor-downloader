@@ -334,6 +334,29 @@ final class DownloadBatchProgressTests: XCTestCase {
         store.clear()
     }
 
+    func testBatchStartupResumeOutcomeTreatsFastCompletionAsProceed() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let generation = coordinator.startBatch(batchId: "bundle", fileCount: 1, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+        _ = coordinator.registerStartupChildren(
+            batchId: "bundle",
+            generation: generation,
+            children: [(coordinator.fileTaskId(batchId: "bundle", generation: generation, fileIndex: 0), 0)]
+        )
+        _ = coordinator.markFileCompleted(batchId: "bundle", generation: generation, fileIndex: 0)
+        XCTAssertFalse(coordinator.isBatch(batchId: "bundle"))
+        switch coordinator.batchStartupResumeOutcome(batchId: "bundle", generation: generation) {
+        case .proceed(let paused):
+            XCTAssertFalse(paused)
+        case .abort:
+            XCTFail("expected fast completion to allow resolve")
+        }
+        store.clear()
+    }
+
     func testTakeBatchForStopIsAtomicWithStartupRegistration() {
         let store = DownloadBatchStore(defaults: batchDefaults)
         let coordinator = DownloadBatchCoordinator(store: store)

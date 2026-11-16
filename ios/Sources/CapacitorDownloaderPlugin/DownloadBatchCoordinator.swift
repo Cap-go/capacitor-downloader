@@ -18,6 +18,8 @@ final class DownloadBatchCoordinator {
     private var batches: [String: ActiveBatch] = [:]
     private var batchGenerations: [String: UInt64] = [:]
     private var registeredChildren: [String: String] = [:]
+    /// Batch generations that finished before the download() promise resolved startup.
+    private var startupCompletedBeforeResolve: [String: UInt64] = [:]
     private let batchesLock = NSLock()
     private let store: DownloadBatchStore
 
@@ -225,6 +227,27 @@ final class DownloadBatchCoordinator {
         return BatchStartupSnapshot(allowed: true, paused: batch.paused)
     }
 
+    enum BatchStartupResumeOutcome {
+        case proceed(paused: Bool)
+        case abort
+    }
+
+    /// Decides whether download() may resolve after child tasks were resumed.
+    func batchStartupResumeOutcome(batchId: String, generation: UInt64) -> BatchStartupResumeOutcome {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        if let batch = batches[batchId], batch.generation == generation {
+            if batch.cancelled || batch.failed {
+                return .abort
+            }
+            return .proceed(paused: batch.paused)
+        }
+        if startupCompletedBeforeResolve.removeValue(forKey: batchId) == generation {
+            return .proceed(paused: false)
+        }
+        return .abort
+    }
+
     /// Registers child task ids for a batch under the same lock used by cancellation.
     func registerStartupChildren(
         batchId: String,
@@ -336,6 +359,7 @@ final class DownloadBatchCoordinator {
         batches[batchId] = batch
         if batch.completedCount >= batch.fileCount {
             let generation = batch.generation
+            startupCompletedBeforeResolve[batchId] = generation
             removeBatchLocked(batchId: batchId, unregisterChildren: true)
             return .allSucceeded(batchId: batchId, generation: generation)
         }

@@ -455,18 +455,19 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             if !startup.paused {
                 stagedTasks.forEach { $0.task.resume() }
             }
-            guard self.batchCoordinator.batchStartupSnapshot(batchId: batchId, generation: generation).allowed else {
+            switch self.batchCoordinator.batchStartupResumeOutcome(batchId: batchId, generation: generation) {
+            case .abort:
                 self.discardStagedBatchTasks(stagedTasks, session: batchSession)
                 self.markBatchContinuedProcessingFinished(batchId: batchId, generation: generation, success: false)
                 call.reject("Download was cancelled")
                 return
+            case .proceed(let paused):
+                call.resolve([
+                    "id": batchId,
+                    "state": paused ? "PAUSED" : "RUNNING",
+                    "progress": 0
+                ])
             }
-
-            call.resolve([
-                "id": batchId,
-                "state": startup.paused ? "PAUSED" : "RUNNING",
-                "progress": 0
-            ])
         }
     }
 

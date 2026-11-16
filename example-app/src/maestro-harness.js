@@ -161,7 +161,7 @@ function clearPending() {
 }
 
 function batchHttpEngine() {
-  return Capacitor.getPlatform() === 'ios' ? 'auto' : 'downloadManager';
+  return 'auto';
 }
 
 function buildBatchSpecs(count, okBytes, failUrl) {
@@ -170,7 +170,7 @@ function buildBatchSpecs(count, okBytes, failUrl) {
     const isFailFile = Boolean(failUrl) && index === count - 1;
     return {
       url: isFailFile ? failUrl : fileUrl(`/bytes/${okBytes}`),
-      destination: isIos ? `cache/maestro-batch-${index}.bin` : `downloads/maestro-batch-${index}.bin`,
+      destination: `cache/maestro-batch-${index}.bin`,
     };
   });
 }
@@ -523,7 +523,7 @@ const flows = {
     const slowBytes = isIos ? 32_768 : 24_576;
     const files = Array.from({ length: fileCount }, (_, index) => ({
       url: fileUrl(`/slow/${slowBytes}`),
-      destination: isIos ? `cache/maestro-bk-${index}.bin` : `downloads/maestro-bk-${index}.bin`,
+      destination: `cache/maestro-bk-${index}.bin`,
     }));
     await plugin.download({
       id,

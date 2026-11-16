@@ -409,14 +409,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     androidHttpEngine,
                     resolvedDestination.preferOkHttpInAutoMode
                 );
-                if (httpEngine == AndroidHttpEngineSelector.Engine.OKHTTP) {
-                    rollbackBatch(batchState);
-                    call.reject(
-                        "Multi-file batch downloads currently require DownloadManager. Set androidHttpEngine to 'downloadManager' or omit it."
-                    );
-                    return;
-                }
-                fileRequests.add(new BatchFileRequest(index, url, resolvedDestination.file));
+                fileRequests.add(
+                    new BatchFileRequest(index, url, resolvedDestination.file, httpEngine == AndroidHttpEngineSelector.Engine.OKHTTP)
+                );
             }
         } catch (JSONException e) {
             rollbackBatch(batchState);
@@ -430,6 +425,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         final JSObject headers = call.getObject("headers");
         final String network = call.getString("network");
+        final String title = call.getString("title");
+        final String description = call.getString("description");
+        final String notificationMode = notification != null ? notification : "completed";
 
         runDownloadManagerWork(
             call,
@@ -472,6 +470,29 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             return;
                         }
 
+                        if (fileRequest.useOkHttp) {
+                            if (
+                                !startBatchChildOkHttpTransfer(
+                                    batchId,
+                                    batchState,
+                                    childId,
+                                    childPendingToken,
+                                    fileRequest,
+                                    headers,
+                                    network,
+                                    notificationMode,
+                                    title,
+                                    description
+                                )
+                            ) {
+                                removeSystemDownloads(enqueuedIds);
+                                rollbackBatch(batchState);
+                                call.reject("Download could not be started");
+                                return;
+                            }
+                            continue;
+                        }
+
                         DownloadManager.Request request = buildDownloadRequest(
                             fileRequest.url,
                             fileRequest.destinationFile,
@@ -479,7 +500,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             network,
                             notification
                         );
-                        DownloadManagerNotificationLabels.apply(request, call.getString("title"), call.getString("description"));
+                        DownloadManagerNotificationLabels.apply(request, title, description);
 
                         long downloadId;
                         try {
@@ -544,11 +565,91 @@ public class CapacitorDownloaderPlugin extends Plugin {
         final int index;
         final String url;
         final File destinationFile;
+        final boolean useOkHttp;
 
-        BatchFileRequest(int index, String url, File destinationFile) {
+        BatchFileRequest(int index, String url, File destinationFile, boolean useOkHttp) {
             this.index = index;
             this.url = url;
             this.destinationFile = destinationFile;
+            this.useOkHttp = useOkHttp;
+        }
+    }
+
+    private boolean startBatchChildOkHttpTransfer(
+        String batchId,
+        DownloadBatchState batchState,
+        String childId,
+        long childPendingToken,
+        BatchFileRequest fileRequest,
+        JSObject headers,
+        String network,
+        String notificationMode,
+        String title,
+        String description
+    ) {
+        if (!isTrackedDownload(childId, childPendingToken) || !ownsBatch(batchId, batchState)) {
+            releaseChildReservation(childId, childPendingToken, batchId);
+            return false;
+        }
+        if (!okHttpDownloadExecutor.isWifiSatisfied(network)) {
+            releaseChildReservation(childId, childPendingToken, batchId);
+            return false;
+        }
+        okHttpDestinationFiles.put(childId, fileRequest.destinationFile);
+        OkHttpDownloadExecutor.ActiveDownload reservation = okHttpDownloadExecutor.beginTransfer(childId);
+        if (reservation == null) {
+            okHttpDestinationFiles.remove(childId);
+            releaseChildReservation(childId, childPendingToken, batchId);
+            return false;
+        }
+        if (!downloads.replace(childId, childPendingToken, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID)) {
+            okHttpDownloadExecutor.abandonTransfer(reservation);
+            okHttpDestinationFiles.remove(childId);
+            releaseChildReservation(childId, childPendingToken, batchId);
+            return false;
+        }
+        try {
+            okHttpDownloadExecutor.start(
+                reservation,
+                fileRequest.url,
+                fileRequest.destinationFile,
+                headers,
+                network,
+                (downloadId, progress) ->
+                    handler.post(() -> {
+                        DownloadBatchState.BatchIdParts parts = DownloadBatchState.parseFileTaskId(downloadId);
+                        if (parts == null || !batchId.equals(parts.batchId)) {
+                            return;
+                        }
+                        notifyBatchProgress(parts.batchId, parts.fileIndex, progress, 0, 0);
+                    }),
+                (downloadId, success, cancelled, errorMessage) ->
+                    handler.post(() -> {
+                        DownloadBatchState.BatchIdParts parts = DownloadBatchState.parseFileTaskId(downloadId);
+                        if (parts == null || !batchId.equals(parts.batchId)) {
+                            return;
+                        }
+                        if (cancelled) {
+                            return;
+                        }
+                        if (success) {
+                            long bytesTotal = reservation.bytesTotal > 0 ? reservation.bytesTotal : reservation.bytesWritten;
+                            completeBatchFile(parts.batchId, parts.fileIndex, reservation.bytesWritten, bytesTotal);
+                        } else {
+                            failBatch(parts.batchId, errorMessage != null ? errorMessage : "Download failed", parts.fileIndex);
+                        }
+                        okHttpDestinationFiles.remove(downloadId);
+                        downloads.remove(downloadId, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID);
+                        okHttpDownloadExecutor.clearCompleted(downloadId);
+                    })
+            );
+            return true;
+        } catch (RuntimeException e) {
+            okHttpDownloadExecutor.abandonTransfer(reservation);
+            okHttpDestinationFiles.remove(childId);
+            downloads.remove(childId, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID);
+            releaseChildReservation(childId, childPendingToken, batchId);
+            return false;
         }
     }
 
@@ -1003,7 +1104,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         boolean shouldContinue = true;
         String failureMessage = DownloadManagerCursorReader.failureMessage(snapshot.status, snapshot.reason, snapshot.httpStatus);
 
-        if (DownloadManagerCursorReader.isPauseWaitingToRetry(snapshot.status, snapshot.reason)) {
+        if (snapshot.status == DownloadManager.STATUS_PAUSED) {
             int polls = downloadPauseRetryPolls.merge(id, 1, Integer::sum);
             if (polls > DownloadManagerCursorReader.DEFAULT_MAX_PAUSE_RETRY_POLLS) {
                 if (batchParts != null) {

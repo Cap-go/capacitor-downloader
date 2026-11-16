@@ -340,24 +340,6 @@ extension DownloadBackgroundSessionManager: URLSessionDownloadDelegate {
     func urlSession(
         _ session: URLSession,
         downloadTask: URLSessionDownloadTask,
-        didReceive response: URLResponse,
-        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
-    ) {
-        if let downloadDelegate {
-            downloadDelegate.urlSession?(
-                session,
-                downloadTask: downloadTask,
-                didReceive: response,
-                completionHandler: completionHandler
-            )
-            return
-        }
-        completionHandler(.allow)
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
         didWriteData bytesWritten: Int64,
         totalBytesWritten: Int64,
         totalBytesExpectedToWrite: Int64

@@ -153,6 +153,19 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         DownloadLengthHeaderStore.shared.setHeaderName(headerName, for: taskId)
     }
 
+    private func captureExpectedTotalFromResponseIfNeeded(
+        downloadId: String,
+        downloadTask: URLSessionDownloadTask
+    ) {
+        guard DownloadLengthHeaderStore.shared.expectedTotal(for: downloadId) == nil,
+              let headerName = DownloadLengthHeaderStore.shared.headerName(for: downloadId),
+              let httpResponse = downloadTask.response as? HTTPURLResponse,
+              let expected = DownloadExpectedLength.parse(from: httpResponse, headerName: headerName) else {
+            return
+        }
+        DownloadLengthHeaderStore.shared.setExpectedTotal(expected, for: downloadId)
+    }
+
     private func progressBytesAndFraction(
         downloadId: String,
         totalBytesWritten: Int64,
@@ -830,23 +843,6 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
     public func urlSession(
         _ session: URLSession,
         downloadTask: URLSessionDownloadTask,
-        didReceive response: URLResponse,
-        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
-    ) {
-        guard let id = idForTask(downloadTask),
-              let httpResponse = response as? HTTPURLResponse,
-              let headerName = DownloadLengthHeaderStore.shared.headerName(for: id),
-              let expected = DownloadExpectedLength.parse(from: httpResponse, headerName: headerName) else {
-            completionHandler(.allow)
-            return
-        }
-        DownloadLengthHeaderStore.shared.setExpectedTotal(expected, for: id)
-        completionHandler(.allow)
-    }
-
-    public func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
         didWriteData bytesWritten: Int64,
         totalBytesWritten: Int64,
         totalBytesExpectedToWrite: Int64
@@ -854,6 +850,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         guard let id = idForTask(downloadTask) else {
             return
         }
+        captureExpectedTotalFromResponseIfNeeded(downloadId: id, downloadTask: downloadTask)
 
         let progressSnapshot = progressBytesAndFraction(
             downloadId: id,

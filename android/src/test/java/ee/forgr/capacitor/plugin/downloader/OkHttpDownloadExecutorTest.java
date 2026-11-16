@@ -65,8 +65,7 @@ public class OkHttpDownloadExecutorTest {
         byte[] payload = "gzip-style-payload".getBytes(StandardCharsets.UTF_8);
         server.enqueue(
             new MockResponse()
-                .setBody(new okio.Buffer().write(payload))
-                .addHeader("Content-Encoding", "gzip")
+                .setChunkedBody(new okio.Buffer().write(payload), 4)
                 .addHeader("X-Uncompressed-Length", String.valueOf(payload.length))
         );
 
@@ -74,6 +73,7 @@ public class OkHttpDownloadExecutorTest {
         CountDownLatch finished = new CountDownLatch(1);
         AtomicBoolean success = new AtomicBoolean(false);
         AtomicReference<Float> lastProgress = new AtomicReference<>(0f);
+        AtomicReference<Long> lastBytesTotal = new AtomicReference<>(0L);
 
         OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer("length-header");
         assertNotNull(reservation);
@@ -84,7 +84,13 @@ public class OkHttpDownloadExecutorTest {
             new JSObject(),
             "cellular",
             "X-Uncompressed-Length",
-            (id, progress) -> lastProgress.set(progress),
+            (id, progress) -> {
+                lastProgress.set(progress);
+                OkHttpDownloadExecutor.ActiveDownload active = executor.getActive(id);
+                if (active != null) {
+                    lastBytesTotal.set(active.bytesTotal);
+                }
+            },
             (id, ok, cancelled, errorMessage) -> {
                 success.set(ok);
                 finished.countDown();
@@ -95,9 +101,7 @@ public class OkHttpDownloadExecutorTest {
         assertTrue(success.get());
         assertEquals(payload.length, destination.length());
         assertTrue(lastProgress.get() <= 1f);
-        OkHttpDownloadExecutor.ActiveDownload active = executor.getActive("length-header");
-        assertNotNull(active);
-        assertEquals(payload.length, active.bytesTotal);
+        assertEquals(Long.valueOf(payload.length), lastBytesTotal.get());
     }
 
     @Test(timeout = 10_000)

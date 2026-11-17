@@ -513,7 +513,7 @@ const flows = {
         }),
       ),
     );
-    const parallelWaitMs = Capacitor.getPlatform() === 'ios' ? 60_000 : 120_000;
+    const parallelWaitMs = isIos ? 45_000 : 120_000;
     for (const spec of specs) {
       await waitForDone(spec.id, parallelWaitMs);
       setSummary(`EVENT:downloadCompleted:id=${spec.id}:count=1`);
@@ -610,16 +610,10 @@ async function resumePendingDownload(flowId, payload) {
   if (payload.batch) {
     const relaunch = await readDownloadStatus(id);
     setSummary(`STATE:batch-kill-mid:relaunch:${id}:${relaunch.state}:${relaunch.progress}`);
-    if (Capacitor.getPlatform() === 'ios') {
-      const terminal = await waitForTerminal(id, 90_000);
-      if (terminal.state !== 'DONE') {
-        throw new Error(`iOS batch expected DONE after relaunch, got ${terminal.state}`);
-      }
-      return;
+    const terminal = await waitForTerminal(id, Capacitor.getPlatform() === 'ios' ? 90_000 : 120_000);
+    if (terminal.state !== 'DONE') {
+      throw new Error(`Batch expected DONE after relaunch, got ${terminal.state}`);
     }
-    await sleep(2_000);
-    const androidState = await readDownloadStatus(id);
-    setSummary(`ASSERT:batch-kill-mid:android-after-kill:${androidState.state}`);
     return;
   }
   const existing = await readDownloadStatus(id);

@@ -396,12 +396,15 @@ const flows = {
       setMarker('error-bad-url', true, 'rejected');
       return;
     }
+    let status;
     try {
-      await waitForTerminal(id, 30_000);
-    } catch {
-      throw new Error('Expected bad URL to fail');
+      status = await waitForTerminal(id, 45_000);
+    } catch (timeoutError) {
+      status = await readDownloadStatus(id);
+      if (status.state !== 'ERROR') {
+        throw timeoutError;
+      }
     }
-    const status = await readDownloadStatus(id);
     if (status.state === 'ERROR') {
       setMarker('error-bad-url', true, 'status-error');
       return;

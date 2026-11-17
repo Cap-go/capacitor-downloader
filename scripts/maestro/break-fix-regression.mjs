@@ -28,7 +28,14 @@ const regressions = {
       file: 'android/src/main/java/ee/forgr/capacitor/plugin/downloader/CapacitorDownloaderPlugin.java',
       replace: [
         'boolean cancelled = okHttpDownloadExecutor.cancel(id, destinationFile);',
-        'boolean cancelled = true; // MAESTRO_BREAK_FIX: skip OkHttp cancel cleanup',
+        'boolean cancelled = true; /* MAESTRO_BREAK_FIX: skip OkHttp cancel cleanup */',
+      ],
+    },
+    {
+      file: 'android/src/main/java/ee/forgr/capacitor/plugin/downloader/CapacitorDownloaderPlugin.java',
+      replace: [
+        'int removedDownloads = downloadManager.remove(systemDownloadId);',
+        'int removedDownloads = 0; /* MAESTRO_BREAK_FIX: skip DM remove */',
       ],
     },
     {
@@ -51,7 +58,7 @@ const regressions = {
       file: 'ios/Sources/CapacitorDownloaderPlugin/CapacitorDownloaderPlugin.swift',
       replace: [
         '!DownloadHTTPValidator.isSuccessfulStatusCode(httpResponse.statusCode)',
-        '(httpResponse.statusCode != 404 && !DownloadHTTPValidator.isSuccessfulStatusCode(httpResponse.statusCode)) // MAESTRO_BREAK_FIX',
+        '(httpResponse.statusCode != 404 && !DownloadHTTPValidator.isSuccessfulStatusCode(httpResponse.statusCode)) /* MAESTRO_BREAK_FIX */',
       ],
     },
   ],

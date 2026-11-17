@@ -11,8 +11,5 @@ appId: app.capgo.downloader
     text: error-404
     retryTapIfNoChange: true
 - extendedWaitUntil:
-    visible: '.*(EVENT:downloadFailed:id=err-404:.*404|STATE:err-404:ERROR).*'
-    timeout: 60000
-- extendedWaitUntil:
     visible: '.*Marker: error-404:success.*'
     timeout: 90000

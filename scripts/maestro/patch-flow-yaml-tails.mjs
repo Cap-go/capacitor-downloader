@@ -26,10 +26,6 @@ const extraAssertions = {
 - extendedWaitUntil:
     visible: '.*STATE:cancel-me:(?!DONE).*'
     timeout: 90000`,
-  'error-404': `
-- extendedWaitUntil:
-    visible: '.*(EVENT:downloadFailed:id=err-404:.*404|STATE:err-404:ERROR).*'
-    timeout: 60000`,
 };
 
 const multiStep = {

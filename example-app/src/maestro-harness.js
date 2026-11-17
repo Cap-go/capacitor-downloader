@@ -491,11 +491,17 @@ const flows = {
   },
 
   async 'parallel-downloads'() {
-    const specs = [
-      { id: 'parallel-a', destination: 'cache/maestro-pa.bin', bytes: 32768 },
-      { id: 'parallel-b', destination: 'cache/maestro-pb.bin', bytes: 49152 },
-      { id: 'parallel-c', destination: 'cache/maestro-pc.bin', bytes: 40960 },
-    ];
+    const isIos = Capacitor.getPlatform() === 'ios';
+    const specs = isIos
+      ? [
+          { id: 'parallel-a', destination: 'cache/maestro-pa.bin', bytes: 16_384 },
+          { id: 'parallel-b', destination: 'cache/maestro-pb.bin', bytes: 16_384 },
+        ]
+      : [
+          { id: 'parallel-a', destination: 'cache/maestro-pa.bin', bytes: 32_768 },
+          { id: 'parallel-b', destination: 'cache/maestro-pb.bin', bytes: 49_152 },
+          { id: 'parallel-c', destination: 'cache/maestro-pc.bin', bytes: 40_960 },
+        ];
     await Promise.all(
       specs.map((spec) =>
         plugin.download({

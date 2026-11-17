@@ -23,4 +23,4 @@ appId: app.capgo.downloader
       isE2E: true
 - extendedWaitUntil:
     visible: '.*Marker: background-complete:success.*'
-    timeout: 120000
+    timeout: 90000

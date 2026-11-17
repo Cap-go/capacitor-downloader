@@ -275,7 +275,7 @@ const flows = {
   async 'background-complete'() {
     const id = 'bg-complete';
     const isIos = Capacitor.getPlatform() === 'ios';
-    const url = fileUrl(isIos ? '/slow/262144' : '/slow/98304');
+    const url = fileUrl(isIos ? '/slow/131072' : '/slow/98304');
     const destination = isIos ? 'cache/maestro-bg.bin' : 'downloads/maestro-bg.bin';
     const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
     persistPending('background-complete', {
@@ -452,7 +452,8 @@ const flows = {
         notification: 'hidden',
       });
       if (!markerSet) {
-        const status = await waitForFailedEventOrTerminal(id, 60_000);
+        const failMs = Capacitor.getPlatform() === 'ios' ? 30_000 : 60_000;
+        const status = await waitForFailedEventOrTerminal(id, failMs);
         if (status.state !== 'ERROR') {
           throw new Error(`Expected ERROR for 5xx, got ${status.state}`);
         }
@@ -584,7 +585,7 @@ const flows = {
       androidHttpEngine: batchHttpEngine(),
       notification: 'hidden',
     });
-    const failMs = Capacitor.getPlatform() === 'ios' ? 90_000 : 150_000;
+    const failMs = Capacitor.getPlatform() === 'ios' ? 45_000 : 150_000;
     const status = await waitForBatchFailure(id, failMs, files.length - 1);
     if (status.state !== 'ERROR') {
       throw new Error(`Expected batch ERROR for 5xx, got ${status.state}`);

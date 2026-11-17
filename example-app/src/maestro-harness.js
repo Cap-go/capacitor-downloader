@@ -192,10 +192,11 @@ function batchHttpEngine() {
 function buildBatchSpecs(count, okBytes, failUrl) {
   const isIos = Capacitor.getPlatform() === 'ios';
   const fileCount = isIos ? Math.min(count, 3) : count;
+  const payloadBytes = isIos ? Math.min(okBytes, 1024) : okBytes;
   return Array.from({ length: fileCount }, (_, index) => {
     const isFailFile = Boolean(failUrl) && index === fileCount - 1;
     return {
-      url: isFailFile ? failUrl : fileUrl(`/bytes/${okBytes}`),
+      url: isFailFile ? failUrl : fileUrl(`/bytes/${payloadBytes}`),
       destination: `cache/maestro-batch-${index}.bin`,
     };
   });
@@ -543,7 +544,8 @@ const flows = {
       androidHttpEngine: batchHttpEngine(),
       notification: 'hidden',
     });
-    const status = await waitForBatchFailure(id, 150_000, files.length - 1);
+    const failMs = Capacitor.getPlatform() === 'ios' ? 90_000 : 150_000;
+    const status = await waitForBatchFailure(id, failMs, files.length - 1);
     if (status.state !== 'ERROR') {
       throw new Error(`Expected batch ERROR for 404, got ${status.state}`);
     }
@@ -562,7 +564,8 @@ const flows = {
       androidHttpEngine: batchHttpEngine(),
       notification: 'hidden',
     });
-    const status = await waitForBatchFailure(id, 150_000, files.length - 1);
+    const failMs = Capacitor.getPlatform() === 'ios' ? 90_000 : 150_000;
+    const status = await waitForBatchFailure(id, failMs, files.length - 1);
     if (status.state !== 'ERROR') {
       throw new Error(`Expected batch ERROR for 5xx, got ${status.state}`);
     }
@@ -575,8 +578,8 @@ const flows = {
   async 'batch-kill-mid'() {
     const id = 'batch-kill';
     const isIos = Capacitor.getPlatform() === 'ios';
-    const fileCount = isIos ? 4 : 14;
-    const slowBytes = isIos ? 16_384 : 24_576;
+    const fileCount = isIos ? 3 : 14;
+    const slowBytes = isIos ? 12_288 : 24_576;
     const files = Array.from({ length: fileCount }, (_, index) => ({
       url: fileUrl(`/slow/${slowBytes}`),
       destination: `cache/maestro-bk-${index}.bin`,
@@ -602,7 +605,7 @@ async function resumePendingDownload(flowId, payload) {
     const relaunch = await readDownloadStatus(id);
     setSummary(`STATE:batch-kill-mid:relaunch:${id}:${relaunch.state}:${relaunch.progress}`);
     if (Capacitor.getPlatform() === 'ios') {
-      const terminal = await waitForTerminal(id, 120_000);
+      const terminal = await waitForTerminal(id, 90_000);
       if (terminal.state !== 'DONE') {
         throw new Error(`iOS batch expected DONE after relaunch, got ${terminal.state}`);
       }

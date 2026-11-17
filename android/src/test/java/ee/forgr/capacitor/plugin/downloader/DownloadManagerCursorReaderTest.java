@@ -10,6 +10,14 @@ import org.junit.Test;
 public class DownloadManagerCursorReaderTest {
 
     @Test
+    public void pausedWaitingToRetryUsesPlatformConstantOne() {
+        assertEquals(1, DownloadManager.PAUSED_WAITING_TO_RETRY);
+        assertTrue(DownloadManagerCursorReader.pauseRetryPollUpdate(DownloadManager.STATUS_PAUSED, 1, 0).trackCount);
+        assertFalse(DownloadManagerCursorReader.pauseRetryPollUpdate(DownloadManager.STATUS_PAUSED, 4, 0).trackCount);
+        assertFalse(DownloadManagerCursorReader.pauseRetryPollUpdate(DownloadManager.STATUS_PAUSED, 5, 0).trackCount);
+    }
+
+    @Test
     public void failureMessageUsesHttpCodeInReasonColumn() {
         assertEquals("HTTP 500", DownloadManagerCursorReader.failureMessage(DownloadManager.STATUS_FAILED, 500, 0));
         assertEquals("HTTP 404", DownloadManagerCursorReader.failureMessage(DownloadManager.STATUS_FAILED, 404, 0));
@@ -33,10 +41,7 @@ public class DownloadManagerCursorReaderTest {
     @Test
     public void detectsPauseWaitingToRetry() {
         assertTrue(
-            DownloadManagerCursorReader.isPauseWaitingToRetry(
-                DownloadManager.STATUS_PAUSED,
-                DownloadManagerCursorReader.PAUSED_WAITING_TO_RETRY
-            )
+            DownloadManagerCursorReader.isPauseWaitingToRetry(DownloadManager.STATUS_PAUSED, DownloadManager.PAUSED_WAITING_TO_RETRY)
         );
         assertFalse(DownloadManagerCursorReader.isPauseWaitingToRetry(DownloadManager.STATUS_RUNNING, 0));
     }
@@ -46,7 +51,7 @@ public class DownloadManagerCursorReaderTest {
         int base = 10;
         DownloadManagerCursorReader.PauseRetryPollUpdate retry = DownloadManagerCursorReader.pauseRetryPollUpdate(
             DownloadManager.STATUS_PAUSED,
-            DownloadManagerCursorReader.PAUSED_WAITING_TO_RETRY,
+            DownloadManager.PAUSED_WAITING_TO_RETRY,
             base
         );
         assertTrue(retry.trackCount);
@@ -88,7 +93,7 @@ public class DownloadManagerCursorReaderTest {
         int overBudget = DownloadManagerCursorReader.DEFAULT_MAX_PAUSE_RETRY_POLLS;
         DownloadManagerCursorReader.PauseRetryPollUpdate exhausted = DownloadManagerCursorReader.pauseRetryPollUpdate(
             DownloadManager.STATUS_PAUSED,
-            DownloadManagerCursorReader.PAUSED_WAITING_TO_RETRY,
+            DownloadManager.PAUSED_WAITING_TO_RETRY,
             overBudget
         );
         assertTrue(exhausted.shouldFailExhausted);

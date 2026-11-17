@@ -6,10 +6,7 @@ import android.database.Cursor;
 /** Interprets DownloadManager provider cursor rows without extra HTTP requests. */
 final class DownloadManagerCursorReader {
 
-    /** {@link DownloadManager#COLUMN_REASON} when {@link DownloadManager#STATUS_PAUSED} and waiting to retry. */
-    static final int PAUSED_WAITING_TO_RETRY = 5;
-
-    /** Bounded cap only for {@link #PAUSED_WAITING_TO_RETRY} (1 poll per second in the plugin). */
+    /** Bounded cap only for {@link DownloadManager#PAUSED_WAITING_TO_RETRY} (1 poll per second in the plugin). */
     static final int DEFAULT_MAX_PAUSE_RETRY_POLLS = 600;
 
     private DownloadManagerCursorReader() {}
@@ -103,11 +100,11 @@ final class DownloadManagerCursorReader {
     }
 
     static boolean isPauseWaitingToRetry(int status, int reason) {
-        return status == DownloadManager.STATUS_PAUSED && reason == PAUSED_WAITING_TO_RETRY;
+        return status == DownloadManager.STATUS_PAUSED && reason == DownloadManager.PAUSED_WAITING_TO_RETRY;
     }
 
     /**
-     * Only {@link #PAUSED_WAITING_TO_RETRY} advances the retry poll counter. Any other pause reason or
+     * Only {@link DownloadManager#PAUSED_WAITING_TO_RETRY} advances the retry poll counter. Any other pause reason or
      * non-paused status clears it so wifi-only and offline pauses are never failed by this cap.
      */
     static PauseRetryPollUpdate pauseRetryPollUpdate(int status, int reason, int currentCount) {

@@ -303,6 +303,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         )
 
         var request = URLRequest(url: url)
+        request.timeoutInterval = 20
         if let headers = call.getObject("headers") as? [String: String] {
             for (key, value) in headers {
                 request.setValue(value, forHTTPHeaderField: key)
@@ -310,6 +311,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         let wifiOnly = call.getString("network") == "wifi-only"
+        let hiddenNotification = call.getString("notification") == "hidden"
         let continuedRequest = parseContinuedProcessingRequest(call)
 
         continuedProcessing.beginIfPossible(downloadId: id, request: continuedRequest) { [weak self] useForeground in
@@ -319,13 +321,17 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             self.tasksLock.lock()
             self.pendingDownloadStarts.remove(id)
             self.tasksLock.unlock()
+            let useForegroundSession = useForeground || hiddenNotification
             self.foregroundSessionLock.lock()
-            if useForeground {
+            if useForegroundSession {
                 self.foregroundSessionDownloadIds.insert(id)
             }
             self.foregroundSessionLock.unlock()
 
-            let activeSession = self.downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: useForeground)
+            let activeSession = self.downloadSession(
+                allowsCellularAccess: !wifiOnly,
+                preferForegroundCapable: useForegroundSession
+            )
             let task = activeSession.downloadTask(with: request)
             task.taskDescription = id
             self.setTask(task, for: id)
@@ -367,7 +373,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         var parsed: [(url: URL, destination: String)] = []
         let headers = call.getObject("headers") as? [String: String] ?? [:]
         let wifiOnly = call.getString("network") == "wifi-only"
-        let batchSession = downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: false)
+        let hiddenNotification = call.getString("notification") == "hidden"
+        let batchSession = downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: hiddenNotification)
 
         for fileObject in files {
             guard let urlString = fileObject["url"] as? String,
@@ -408,6 +415,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             batchCoordinator.registerChildTask(batchId: batchId, taskId: taskId, fileIndex: index)
 
             var request = URLRequest(url: entry.url)
+            request.timeoutInterval = 20
             for (key, value) in headers {
                 request.setValue(value, forHTTPHeaderField: key)
             }

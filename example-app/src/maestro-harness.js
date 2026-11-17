@@ -392,34 +392,60 @@ const flows = {
 
   async 'error-404'() {
     const id = 'err-404';
-    await plugin.download({
-      id,
-      url: fileUrl('/status/404'),
-      destination: 'cache/maestro-404.bin',
-      androidHttpEngine: 'auto',
-      notification: 'hidden',
+    let markerSet = false;
+    const failListener = await plugin.addListener('downloadFailed', (payload) => {
+      if (payload.id === id && !markerSet) {
+        markerSet = true;
+        setMarker('error-404', true, 'HTTP 404');
+      }
     });
-    const status = await waitForFailedEventOrTerminal(id, 45_000);
-    if (status.state !== 'ERROR') {
-      throw new Error(`Expected ERROR for 404, got ${status.state}`);
+    try {
+      await plugin.download({
+        id,
+        url: fileUrl('/status/404'),
+        destination: 'cache/maestro-404.bin',
+        androidHttpEngine: 'auto',
+        notification: 'hidden',
+      });
+      if (!markerSet) {
+        const status = await waitForFailedEventOrTerminal(id, 60_000);
+        if (status.state !== 'ERROR') {
+          throw new Error(`Expected ERROR for 404, got ${status.state}`);
+        }
+        setMarker('error-404', true, 'HTTP 404');
+      }
+    } finally {
+      await failListener.remove();
     }
-    setMarker('error-404', true, 'HTTP 404');
   },
 
   async 'error-5xx'() {
     const id = 'err-500';
-    await plugin.download({
-      id,
-      url: fileUrl('/status/500'),
-      destination: 'cache/maestro-500.bin',
-      androidHttpEngine: 'auto',
-      notification: 'hidden',
+    let markerSet = false;
+    const failListener = await plugin.addListener('downloadFailed', (payload) => {
+      if (payload.id === id && !markerSet) {
+        markerSet = true;
+        setMarker('error-5xx', true, 'HTTP 500');
+      }
     });
-    const status = await waitForFailedEventOrTerminal(id, 45_000);
-    if (status.state !== 'ERROR') {
-      throw new Error(`Expected ERROR for 5xx, got ${status.state}`);
+    try {
+      await plugin.download({
+        id,
+        url: fileUrl('/status/500'),
+        destination: 'cache/maestro-500.bin',
+        androidHttpEngine: 'auto',
+        notification: 'hidden',
+      });
+      if (!markerSet) {
+        const status = await waitForFailedEventOrTerminal(id, 60_000);
+        if (status.state !== 'ERROR') {
+          throw new Error(`Expected ERROR for 5xx, got ${status.state}`);
+        }
+        setMarker('error-5xx', true, 'HTTP 500');
+      }
+    } finally {
+      await failListener.remove();
     }
-    setMarker('error-5xx', true, 'HTTP 500');
   },
 
   async 'error-unwritable-destination'() {

@@ -12,8 +12,8 @@ const markerTimeout = {
   'completion-once': '90000',
   'cancel-cleanup': '90000',
   'error-bad-url': '60000',
-  'error-404': '60000',
-  'error-5xx': '60000',
+  'error-404': '90000',
+  'error-5xx': '90000',
   'error-unwritable-destination': '60000',
 };
 

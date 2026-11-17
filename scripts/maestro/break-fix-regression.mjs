@@ -110,7 +110,16 @@ function applyRegression(name) {
 }
 
 function revertAll() {
-  execSync('git checkout -- android ios', { cwd: rootDir, stdio: 'inherit' });
+  const files = new Set();
+  for (const steps of Object.values(regressions)) {
+    for (const step of steps) {
+      files.add(step.file);
+    }
+  }
+  if (files.size === 0) {
+    return;
+  }
+  execSync(`git checkout -- ${[...files].join(' ')}`, { cwd: rootDir, stdio: 'inherit' });
 }
 
 const [command, name] = process.argv.slice(2);

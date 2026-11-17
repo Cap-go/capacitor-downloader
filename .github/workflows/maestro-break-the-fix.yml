@@ -111,6 +111,10 @@ jobs:
       - name: Verify expected outcome
         run: |
           echo "BREAK_THE_FIX_RESULT regression=${{ matrix.regression }} mode=${{ matrix.mode }} maestro_exit=${{ steps.run.outcome }}"
+          if [[ ! -d maestro-results ]] || [[ -z "$(find maestro-results -type f -print -quit 2>/dev/null)" ]]; then
+            echo "Missing Maestro Android results (build/install likely failed before the flow ran)"
+            exit 1
+          fi
           if [[ "${{ steps.run.outcome }}" != "${{ matrix.expect_outcome }}" ]]; then
             echo "Expected ${{ matrix.expect_outcome }} but got ${{ steps.run.outcome }}"
             exit 1
@@ -169,6 +173,10 @@ jobs:
       - name: Verify expected outcome
         run: |
           echo "BREAK_THE_FIX_RESULT regression=${{ matrix.regression }} mode=${{ matrix.mode }} maestro_exit=${{ steps.run.outcome }}"
+          if [[ ! -d maestro-results-ios ]] || [[ -z "$(find maestro-results-ios -type f -print -quit 2>/dev/null)" ]]; then
+            echo "Missing Maestro iOS results (build/install likely failed before the flow ran)"
+            exit 1
+          fi
           if [[ "${{ steps.run.outcome }}" != "${{ matrix.expect_outcome }}" ]]; then
             echo "Expected ${{ matrix.expect_outcome }} but got ${{ steps.run.outcome }}"
             exit 1

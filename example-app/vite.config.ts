@@ -27,7 +27,9 @@ export default defineConfig(({ mode }) => {
     },
     define: {
       'import.meta.env.VITE_CAPGO_MAESTRO_BUILD': JSON.stringify(env.VITE_CAPGO_MAESTRO_BUILD ?? ''),
-      'import.meta.env.VITE_CAPGO_SERVER_URL': JSON.stringify(env.VITE_CAPGO_SERVER_URL ?? ''),
+      ...(env.VITE_CAPGO_SERVER_URL?.trim()
+        ? { 'import.meta.env.VITE_CAPGO_SERVER_URL': JSON.stringify(env.VITE_CAPGO_SERVER_URL.trim()) }
+        : {}),
     },
   };
 });

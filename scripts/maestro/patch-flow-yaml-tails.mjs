@@ -34,9 +34,8 @@ const multiStep = {
     visible: '.*PHASE:background-complete:downloading.*'
     timeout: 45000
 - pressKey: Home
-- extendedWaitUntil:
-    visible: '.*'
-    timeout: 5000
+- waitForAnimationToEnd:
+    timeout: 3000
 - launchApp:
     clearState: false
     arguments:

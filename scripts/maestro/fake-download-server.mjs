@@ -127,8 +127,9 @@ const server = createServer((req, res) => {
         'content-length': String(total),
       });
       const half = Math.max(1, Math.floor(total / 3));
-      res.write(Buffer.alloc(half, 0x33));
-      req.socket.destroy();
+      res.write(Buffer.alloc(half, 0x33), () => {
+        req.socket.destroy();
+      });
       return;
     }
     res.writeHead(200, {
@@ -148,21 +149,23 @@ const server = createServer((req, res) => {
       'content-length': String(total),
     });
     const first = Math.max(1, Math.floor(total / 4));
-    res.write(Buffer.alloc(first, 0x55));
+  let resumed = false;
     const resume = () => {
-      if (!res.writableEnded) {
-        res.end(Buffer.alloc(total - first, 0x66));
+      if (resumed || res.writableEnded) {
+        return;
       }
+      resumed = true;
+      res.end(Buffer.alloc(total - first, 0x66));
     };
     const waiters = pausedTransfers.get(token) ?? [];
     waiters.push(resume);
     pausedTransfers.set(token, waiters);
-    setTimeout(() => {
-      if (pausedTransfers.has(token)) {
+    res.write(Buffer.alloc(first, 0x55), () => {
+      setTimeout(() => {
         resume();
         pausedTransfers.delete(token);
-      }
-    }, 8_000);
+      }, 8_000);
+    });
     return;
   }
 

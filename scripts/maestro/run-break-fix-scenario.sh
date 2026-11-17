@@ -40,7 +40,7 @@ elif [[ "$PLATFORM" == "ios" ]]; then
   export CAPGO_MAESTRO_IOS_DERIVED_DATA="${CAPGO_MAESTRO_IOS_DERIVED_DATA:-$REPO_ROOT/.maestro-ios-derived-data}"
   bun scripts/maestro/prepare-maestro-app.mjs ios
   mkdir -p maestro-ios-app
-  APP_PATH="$REPO_ROOT/.maestro-ios-derived-data/Build/Products/Debug-iphonesimulator/App.app"
+  APP_PATH="$CAPGO_MAESTRO_IOS_DERIVED_DATA/Build/Products/Debug-iphonesimulator/App.app"
   ditto "$APP_PATH" maestro-ios-app/App.app
   export CAPGO_MAESTRO_IOS_APP_PATH=maestro-ios-app/App.app
   export CAPGO_MAESTRO_FLOW="$FLOW"

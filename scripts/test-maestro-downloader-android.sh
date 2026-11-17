@@ -74,6 +74,7 @@ start_fake_download_server "$ROOT_DIR/.maestro-artifacts/fake-download-server.lo
 wait_for_server
 
 wait_for_emulator_boot
+export ANDROID_SERIAL="${CAPGO_MAESTRO_ANDROID_DEVICE_ID:-$(adb get-serialno | tr -d '\r')}"
 disable_android_emulator_animations
 configure_server_routing
 
@@ -85,7 +86,7 @@ fi
 adb uninstall "$APP_ID" >/dev/null 2>&1 || true
 adb install -r "$APK_PATH" >/dev/null
 
-DEVICE_ID="${CAPGO_MAESTRO_ANDROID_DEVICE_ID:-$(adb get-serialno | tr -d '\r')}"
+DEVICE_ID="${ANDROID_SERIAL}"
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 

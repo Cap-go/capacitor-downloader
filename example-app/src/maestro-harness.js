@@ -392,10 +392,14 @@ const flows = {
         androidHttpEngine: 'auto',
         notification: 'hidden',
       });
-      await waitForTerminal(id, 30_000);
-    } catch {
+    } catch (error) {
       setMarker('error-bad-url', true, 'rejected');
       return;
+    }
+    try {
+      await waitForTerminal(id, 30_000);
+    } catch {
+      throw new Error('Expected bad URL to fail');
     }
     const status = await readDownloadStatus(id);
     if (status.state === 'ERROR') {
@@ -466,11 +470,13 @@ const flows = {
 
   async 'error-unwritable-destination'() {
     const id = 'err-write';
+    const destination =
+      Capacitor.getPlatform() === 'ios' ? 'cache/maestro/../../../escape.bin' : '';
     try {
       await plugin.download({
         id,
         url: fileUrl('/bytes/1024'),
-        destination: '',
+        destination,
         androidHttpEngine: 'auto',
         notification: 'hidden',
       });
@@ -502,6 +508,9 @@ const flows = {
     if (status.state === 'DONE') {
       throw new Error('Download still DONE after stop');
     }
+    if (status.state === 'RUNNING') {
+      throw new Error('Download still RUNNING after stop');
+    }
     setMarker('cancel-cleanup', true, status.state);
   },
 
@@ -531,7 +540,11 @@ const flows = {
     const parallelWaitMs = isIos ? 45_000 : 120_000;
     for (const spec of specs) {
       await waitForDone(spec.id, parallelWaitMs);
-      setSummary(`EVENT:downloadCompleted:id=${spec.id}:count=1`);
+      const count = completionCounts.get(spec.id) ?? 0;
+      if (count < 1) {
+        throw new Error(`Expected completion event for ${spec.id}, got count=${count}`);
+      }
+      setSummary(`EVENT:downloadCompleted:id=${spec.id}:count=${count}`);
     }
     setMarker('parallel-downloads', true);
   },
@@ -547,9 +560,12 @@ const flows = {
       notification: 'hidden',
     });
     await waitForDone(id, 90_000);
-    await sleep(2_000);
+    const eventDeadline = Date.now() + 15_000;
+    while ((completionCounts.get(id) ?? 0) < 1 && Date.now() < eventDeadline) {
+      await sleep(250);
+    }
     const count = completionCounts.get(id) ?? 0;
-  setSummary(`ASSERT:completion-count:id=${id}:count=${count}`);
+    setSummary(`ASSERT:completion-count:id=${id}:count=${count}`);
     if (count !== 1) {
       throw new Error(`Expected exactly one completion event, got ${count}`);
     }

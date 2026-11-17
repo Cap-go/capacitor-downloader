@@ -278,13 +278,6 @@ const flows = {
     const url = fileUrl(isIos ? '/slow/262144' : '/slow/98304');
     const destination = isIos ? 'cache/maestro-bg.bin' : 'downloads/maestro-bg.bin';
     const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
-    await plugin.download({
-      id,
-      url,
-      destination,
-      androidHttpEngine,
-      notification: 'hidden',
-    });
     persistPending('background-complete', {
       id,
       url,
@@ -292,9 +285,16 @@ const flows = {
       androidHttpEngine,
     });
     setSummary(`PHASE:background-complete:downloading:id=${id}`);
-    if (isIos) {
-      await sleep(2_500);
-    }
+    void plugin
+      .download({
+        id,
+        url,
+        destination,
+        androidHttpEngine,
+        notification: 'hidden',
+      })
+      .catch((error) => setMarker('background-complete', false, String(error?.message ?? error)));
+    await sleep(isIos ? 2_500 : 1_000);
   },
 
   async 'kill-relaunch-resume'() {
@@ -330,13 +330,13 @@ const flows = {
     const url = fileUrl(`/slow/${slowBytes}`);
     const destination = isIos ? 'cache/maestro-lowmem.bin' : 'downloads/maestro-lowmem.bin';
     const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
+    setSummary(`PHASE:low-memory-kill:downloading:id=${id}`);
     persistPending('low-memory-kill', {
       id,
       url,
       destination,
       androidHttpEngine,
     });
-    setSummary(`PHASE:low-memory-kill:downloading:id=${id}`);
     void plugin
       .download({
         id,

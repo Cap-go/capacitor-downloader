@@ -347,7 +347,7 @@ jobs:
           CAPGO_MAESTRO_TIMEOUT_SECONDS: 300
           CAPGO_MAESTRO_TEST_RETRIES: 1
           CAPGO_MAESTRO_LIGHT_RETRY_SLEEP_SECONDS: 2
-          MAESTRO_DRIVER_STARTUP_TIMEOUT: 120000
+          MAESTRO_DRIVER_STARTUP_TIMEOUT: 180000
         run: ./scripts/test-maestro-downloader-ios.sh
       - name: Upload Maestro artifacts
         if: failure()

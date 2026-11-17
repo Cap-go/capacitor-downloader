@@ -275,13 +275,6 @@ const flows = {
     const url = fileUrl(isIos ? '/slow/262144' : '/slow/98304');
     const destination = isIos ? 'cache/maestro-bg.bin' : 'downloads/maestro-bg.bin';
     const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
-    await plugin.download({
-      id,
-      url,
-      destination,
-      androidHttpEngine,
-      notification: 'hidden',
-    });
     persistPending('background-complete', {
       id,
       url,
@@ -289,6 +282,13 @@ const flows = {
       androidHttpEngine,
     });
     setSummary(`PHASE:background-complete:downloading:id=${id}`);
+    await plugin.download({
+      id,
+      url,
+      destination,
+      androidHttpEngine,
+      notification: 'hidden',
+    });
     if (isIos) {
       await sleep(2_500);
     }
@@ -297,17 +297,10 @@ const flows = {
   async 'kill-relaunch-resume'() {
     const id = 'kill-resume';
     const isIos = Capacitor.getPlatform() === 'ios';
-    const slowBytes = isIos ? 49_152 : 131072;
+    const slowBytes = isIos ? 98_304 : 131072;
     const destination = isIos ? 'cache/maestro-kill.bin' : 'downloads/maestro-kill.bin';
     const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
     const url = fileUrl(`/slow/${slowBytes}`);
-    await plugin.download({
-      id,
-      url,
-      destination,
-      androidHttpEngine,
-      notification: 'hidden',
-    });
     persistPending('kill-relaunch-resume', {
       id,
       url,
@@ -315,24 +308,36 @@ const flows = {
       androidHttpEngine,
     });
     setSummary(`PHASE:kill-relaunch-resume:downloading:id=${id}`);
+    await plugin.download({
+      id,
+      url,
+      destination,
+      androidHttpEngine,
+      notification: 'hidden',
+    });
   },
 
   async 'low-memory-kill'() {
     const id = 'low-mem';
-    await plugin.download({
-      id,
-      url: fileUrl('/slow/131072'),
-      destination: 'downloads/maestro-lowmem.bin',
-      androidHttpEngine: 'downloadManager',
-      notification: 'hidden',
-    });
+    const isIos = Capacitor.getPlatform() === 'ios';
+    const slowBytes = isIos ? 98_304 : 131_072;
+    const url = fileUrl(`/slow/${slowBytes}`);
+    const destination = isIos ? 'cache/maestro-lowmem.bin' : 'downloads/maestro-lowmem.bin';
+    const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
     persistPending('low-memory-kill', {
       id,
-      url: fileUrl('/slow/131072'),
-      destination: 'downloads/maestro-lowmem.bin',
-      androidHttpEngine: 'downloadManager',
+      url,
+      destination,
+      androidHttpEngine,
     });
     setSummary(`PHASE:low-memory-kill:downloading:id=${id}`);
+    await plugin.download({
+      id,
+      url,
+      destination,
+      androidHttpEngine,
+      notification: 'hidden',
+    });
   },
 
   async 'network-drop-resume'() {
@@ -584,21 +589,21 @@ const flows = {
   async 'batch-kill-mid'() {
     const id = 'batch-kill';
     const isIos = Capacitor.getPlatform() === 'ios';
-    const fileCount = isIos ? 3 : 14;
-    const slowBytes = isIos ? 12_288 : 24_576;
+    const fileCount = isIos ? 2 : 14;
+    const slowBytes = isIos ? 8_192 : 24_576;
     const files = Array.from({ length: fileCount }, (_, index) => ({
       url: fileUrl(`/slow/${slowBytes}`),
       destination: `cache/maestro-bk-${index}.bin`,
     }));
+    persistPending('batch-kill-mid', { id, batch: true, fileCount });
+    setSummary(`PHASE:batch-kill-mid:downloading:id=${id}:files=${fileCount}`);
     await plugin.download({
       id,
       files,
       androidHttpEngine: batchHttpEngine(),
       notification: 'hidden',
     });
-    persistPending('batch-kill-mid', { id, batch: true, fileCount });
-    setSummary(`PHASE:batch-kill-mid:downloading:id=${id}:files=${fileCount}`);
-    await sleep(2_000);
+    await sleep(isIos ? 1_000 : 2_000);
   },
 };
 

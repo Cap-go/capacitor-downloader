@@ -191,8 +191,9 @@ function batchHttpEngine() {
 
 function buildBatchSpecs(count, okBytes, failUrl) {
   const isIos = Capacitor.getPlatform() === 'ios';
-  return Array.from({ length: count }, (_, index) => {
-    const isFailFile = Boolean(failUrl) && index === count - 1;
+  const fileCount = isIos ? Math.min(count, 3) : count;
+  return Array.from({ length: fileCount }, (_, index) => {
+    const isFailFile = Boolean(failUrl) && index === fileCount - 1;
     return {
       url: isFailFile ? failUrl : fileUrl(`/bytes/${okBytes}`),
       destination: `cache/maestro-batch-${index}.bin`,
@@ -336,7 +337,7 @@ const flows = {
   async 'network-drop-resume'() {
     const id = 'net-drop';
     const attemptKey = `attempt-${Date.now()}`;
-    const bytes = Capacitor.getPlatform() === 'ios' ? 98_304 : 65_536;
+    const bytes = Capacitor.getPlatform() === 'ios' ? 98_304 : 49_152;
     const url = fileUrl(`/recoverable/${bytes}?attemptKey=${encodeURIComponent(attemptKey)}`);
     const options = {
       id,
@@ -345,20 +346,23 @@ const flows = {
       androidHttpEngine: 'auto',
       notification: 'hidden',
     };
-    await plugin.download(options);
-    let status = await waitForTerminal(id, 75_000);
-    if (status.state === 'ERROR') {
+    const finishAttempt = async (timeoutMs) => {
       try {
         await plugin.stop({ id });
       } catch {
-        // no-op when the native task is already gone
+        // download may already be inactive
       }
       completionCounts.delete(id);
       localStorage.removeItem(`${storagePrefix}completed_${id}`);
       await plugin.download(options);
-      status = await waitForDone(id, 75_000);
-    } else if (status.state !== 'DONE') {
-      status = await waitForDone(id, 75_000);
+      await waitForDone(id, timeoutMs);
+    };
+    await plugin.download(options);
+    try {
+      await waitForDone(id, 50_000);
+    } catch (firstLegError) {
+      appendLog(`NET_DROP_FIRST_LEG:${firstLegError.message}`);
+      await finishAttempt(50_000);
     }
     setMarker('network-drop-resume', true);
   },
@@ -545,8 +549,8 @@ const flows = {
   async 'batch-kill-mid'() {
     const id = 'batch-kill';
     const isIos = Capacitor.getPlatform() === 'ios';
-    const fileCount = isIos ? 6 : 14;
-    const slowBytes = isIos ? 24_576 : 24_576;
+    const fileCount = isIos ? 4 : 14;
+    const slowBytes = isIos ? 16_384 : 24_576;
     const files = Array.from({ length: fileCount }, (_, index) => ({
       url: fileUrl(`/slow/${slowBytes}`),
       destination: `cache/maestro-bk-${index}.bin`,

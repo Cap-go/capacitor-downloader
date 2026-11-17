@@ -27,6 +27,9 @@ function appendLog(line) {
 
 function setSummary(text) {
   e2eSummary.textContent = text;
+  if (/^(PHASE|Marker|ASSERT|EVENT|STATE|APP):/.test(text)) {
+    harnessReady.textContent = text;
+  }
   appendLog(text);
 }
 
@@ -275,13 +278,6 @@ const flows = {
     const url = fileUrl(isIos ? '/slow/262144' : '/slow/98304');
     const destination = isIos ? 'cache/maestro-bg.bin' : 'downloads/maestro-bg.bin';
     const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
-    persistPending('background-complete', {
-      id,
-      url,
-      destination,
-      androidHttpEngine,
-    });
-    setSummary(`PHASE:background-complete:downloading:id=${id}`);
     await plugin.download({
       id,
       url,
@@ -289,6 +285,13 @@ const flows = {
       androidHttpEngine,
       notification: 'hidden',
     });
+    persistPending('background-complete', {
+      id,
+      url,
+      destination,
+      androidHttpEngine,
+    });
+    setSummary(`PHASE:background-complete:downloading:id=${id}`);
     if (isIos) {
       await sleep(2_500);
     }
@@ -308,13 +311,16 @@ const flows = {
       androidHttpEngine,
     });
     setSummary(`PHASE:kill-relaunch-resume:downloading:id=${id}`);
-    await plugin.download({
-      id,
-      url,
-      destination,
-      androidHttpEngine,
-      notification: 'hidden',
-    });
+    void plugin
+      .download({
+        id,
+        url,
+        destination,
+        androidHttpEngine,
+        notification: 'hidden',
+      })
+      .catch((error) => setMarker('kill-relaunch-resume', false, String(error?.message ?? error)));
+    await sleep(2_000);
   },
 
   async 'low-memory-kill'() {
@@ -331,13 +337,16 @@ const flows = {
       androidHttpEngine,
     });
     setSummary(`PHASE:low-memory-kill:downloading:id=${id}`);
-    await plugin.download({
-      id,
-      url,
-      destination,
-      androidHttpEngine,
-      notification: 'hidden',
-    });
+    void plugin
+      .download({
+        id,
+        url,
+        destination,
+        androidHttpEngine,
+        notification: 'hidden',
+      })
+      .catch((error) => setMarker('low-memory-kill', false, String(error?.message ?? error)));
+    await sleep(2_000);
   },
 
   async 'network-drop-resume'() {
@@ -597,13 +606,15 @@ const flows = {
     }));
     persistPending('batch-kill-mid', { id, batch: true, fileCount });
     setSummary(`PHASE:batch-kill-mid:downloading:id=${id}:files=${fileCount}`);
-    await plugin.download({
-      id,
-      files,
-      androidHttpEngine: batchHttpEngine(),
-      notification: 'hidden',
-    });
-    await sleep(isIos ? 1_000 : 2_000);
+    void plugin
+      .download({
+        id,
+        files,
+        androidHttpEngine: batchHttpEngine(),
+        notification: 'hidden',
+      })
+      .catch((error) => setMarker('batch-kill-mid', false, String(error?.message ?? error)));
+    await sleep(isIos ? 2_500 : 2_000);
   },
 };
 

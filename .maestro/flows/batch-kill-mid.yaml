@@ -13,6 +13,8 @@ appId: app.capgo.downloader
 - extendedWaitUntil:
     visible: '.*PHASE:batch-kill-mid:downloading.*'
     timeout: 60000
+- waitForAnimationToEnd:
+    timeout: 5000
 - stopApp
 - launchApp:
     clearState: false

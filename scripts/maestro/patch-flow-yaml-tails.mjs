@@ -7,7 +7,7 @@ const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../.
 
 const markerTimeout = {
   'foreground-complete': '90000',
-  'network-drop-resume': '90000',
+  'network-drop-resume': '120000',
   'parallel-downloads': '90000',
   'completion-once': '90000',
   'cancel-cleanup': '90000',

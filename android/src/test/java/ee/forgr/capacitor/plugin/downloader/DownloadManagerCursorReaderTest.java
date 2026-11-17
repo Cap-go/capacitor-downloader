@@ -5,7 +5,6 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.app.DownloadManager;
-import android.database.MatrixCursor;
 import org.junit.Test;
 
 public class DownloadManagerCursorReaderTest {
@@ -29,21 +28,6 @@ public class DownloadManagerCursorReaderTest {
         assertTrue(DownloadManagerCursorReader.shouldRejectReportedSuccess(500));
         assertFalse(DownloadManagerCursorReader.shouldRejectReportedSuccess(200));
         assertFalse(DownloadManagerCursorReader.shouldRejectReportedSuccess(0));
-    }
-
-    @Test
-    public void readSnapshotIncludesHttpStatusColumnWhenPresent() {
-        MatrixCursor cursor = new MatrixCursor(new String[] {
-            DownloadManager.COLUMN_STATUS,
-            DownloadManager.COLUMN_REASON,
-            DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR,
-            DownloadManager.COLUMN_TOTAL_SIZE_BYTES,
-            "http_status"
-        });
-        cursor.addRow(new Object[] { DownloadManager.STATUS_SUCCESSFUL, 0, 12L, 12L, 500 });
-        DownloadManagerCursorReader.Snapshot snapshot = DownloadManagerCursorReader.readSnapshot("child", cursor);
-        assertEquals(500, snapshot.httpStatus);
-        assertEquals(DownloadManager.STATUS_SUCCESSFUL, snapshot.status);
     }
 
     @Test

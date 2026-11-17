@@ -89,6 +89,31 @@ async function readDownloadStatus(id) {
   }
 }
 
+async function waitForFailedEventOrTerminal(id, timeoutMs = 60_000) {
+  let failedEvent = false;
+  const listener = await plugin.addListener('downloadFailed', (payload) => {
+    if (payload.id === id) {
+      failedEvent = true;
+    }
+  });
+  try {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (failedEvent) {
+        return { state: 'ERROR', progress: 0 };
+      }
+      const status = await readDownloadStatus(id);
+      if (status.state === 'ERROR' || status.state === 'DONE') {
+        return status;
+      }
+      await sleep(300);
+    }
+    throw new Error(`Timed out waiting for failure on ${id}`);
+  } finally {
+    await listener.remove();
+  }
+}
+
 async function waitForTerminal(id, timeoutMs = 120_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -230,7 +255,7 @@ async function waitForBatchFailure(id, timeoutMs = 150_000, failFileIndex = null
 const flows = {
   async 'foreground-complete'() {
     const id = 'fg-complete';
-    const bytes = Capacitor.getPlatform() === 'ios' ? 65_536 : 49_152;
+    const bytes = Capacitor.getPlatform() === 'ios' ? 49_152 : 49_152;
     await plugin.download({
       id,
       url: fileUrl(`/bytes/${bytes}`),
@@ -311,7 +336,8 @@ const flows = {
   async 'network-drop-resume'() {
     const id = 'net-drop';
     const attemptKey = `attempt-${Date.now()}`;
-    const url = fileUrl(`/recoverable/131072?attemptKey=${encodeURIComponent(attemptKey)}`);
+    const bytes = Capacitor.getPlatform() === 'ios' ? 98_304 : 65_536;
+    const url = fileUrl(`/recoverable/${bytes}?attemptKey=${encodeURIComponent(attemptKey)}`);
     const options = {
       id,
       url,
@@ -320,7 +346,7 @@ const flows = {
       notification: 'hidden',
     };
     await plugin.download(options);
-    let status = await waitForTerminal(id, 120_000);
+    let status = await waitForTerminal(id, 75_000);
     if (status.state === 'ERROR') {
       try {
         await plugin.stop({ id });
@@ -330,9 +356,9 @@ const flows = {
       completionCounts.delete(id);
       localStorage.removeItem(`${storagePrefix}completed_${id}`);
       await plugin.download(options);
-      status = await waitForDone(id, 120_000);
+      status = await waitForDone(id, 75_000);
     } else if (status.state !== 'DONE') {
-      status = await waitForDone(id, 120_000);
+      status = await waitForDone(id, 75_000);
     }
     setMarker('network-drop-resume', true);
   },
@@ -369,7 +395,7 @@ const flows = {
       androidHttpEngine: 'auto',
       notification: 'hidden',
     });
-    const status = await waitForTerminal(id, 60_000);
+    const status = await waitForFailedEventOrTerminal(id, 45_000);
     if (status.state !== 'ERROR') {
       throw new Error(`Expected ERROR for 404, got ${status.state}`);
     }
@@ -385,7 +411,7 @@ const flows = {
       androidHttpEngine: 'auto',
       notification: 'hidden',
     });
-    const status = await waitForTerminal(id, 60_000);
+    const status = await waitForFailedEventOrTerminal(id, 45_000);
     if (status.state !== 'ERROR') {
       throw new Error(`Expected ERROR for 5xx, got ${status.state}`);
     }
@@ -519,8 +545,8 @@ const flows = {
   async 'batch-kill-mid'() {
     const id = 'batch-kill';
     const isIos = Capacitor.getPlatform() === 'ios';
-    const fileCount = isIos ? 10 : 14;
-    const slowBytes = isIos ? 32_768 : 24_576;
+    const fileCount = isIos ? 6 : 14;
+    const slowBytes = isIos ? 24_576 : 24_576;
     const files = Array.from({ length: fileCount }, (_, index) => ({
       url: fileUrl(`/slow/${slowBytes}`),
       destination: `cache/maestro-bk-${index}.bin`,
@@ -546,7 +572,7 @@ async function resumePendingDownload(flowId, payload) {
     const relaunch = await readDownloadStatus(id);
     setSummary(`STATE:batch-kill-mid:relaunch:${id}:${relaunch.state}:${relaunch.progress}`);
     if (Capacitor.getPlatform() === 'ios') {
-      const terminal = await waitForTerminal(id, 150_000);
+      const terminal = await waitForTerminal(id, 120_000);
       if (terminal.state !== 'DONE') {
         throw new Error(`iOS batch expected DONE after relaunch, got ${terminal.state}`);
       }

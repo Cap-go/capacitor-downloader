@@ -26,6 +26,9 @@ final class DownloadConnectionRetry {
     }
 
     static boolean isRetryableConnectionFailure(IOException error) {
+        if (isFilesystemIoMessage(error.getMessage())) {
+            return false;
+        }
         if (error instanceof SocketTimeoutException) {
             return true;
         }

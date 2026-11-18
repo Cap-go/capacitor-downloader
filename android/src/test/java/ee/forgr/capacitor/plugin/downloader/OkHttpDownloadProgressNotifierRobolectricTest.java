@@ -56,7 +56,7 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
     }
 
     @Test
-    public void progressModePostsSingleNotificationBeforeForegroundService() {
+    public void progressModePostsSingleSharedNotificationForOneDownload() {
         assertTrue(notifier.started("single", "Area", "Maps", "progress"));
 
         Notification pinned = OkHttpDownloadProgressNotifier.foregroundServiceNotification(context);

@@ -1,15 +1,6 @@
 name: Maestro break-the-fix validation
 
 on:
-  push:
-    branches:
-      - cursor/maestro-e2e-suite-f5f5
-    paths:
-      - .github/workflows/maestro-break-the-fix.yml
-      - scripts/maestro/**
-      - .maestro/flows/**
-      - example-app/src/maestro-harness.js
-      - ios/**
   workflow_dispatch:
     inputs:
       scenario:

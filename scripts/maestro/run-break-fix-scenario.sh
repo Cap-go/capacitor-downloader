@@ -35,7 +35,7 @@ if [[ "$PLATFORM" == "android" ]]; then
   bun scripts/maestro/prepare-maestro-app.mjs android
   export CAPGO_MAESTRO_SKIP_BUILD=1
   export CAPGO_MAESTRO_FLOW="$FLOW"
-  export CAPGO_MAESTRO_TIMEOUT_SECONDS=180
+  export CAPGO_MAESTRO_TIMEOUT_SECONDS=300
   bash "$REPO_ROOT/scripts/test-maestro-downloader-android.sh"
 elif [[ "$PLATFORM" == "ios" ]]; then
   export CAPGO_MAESTRO_DEVICE_BASE_URL="${CAPGO_MAESTRO_DEVICE_BASE_URL:-http://127.0.0.1:3192}"

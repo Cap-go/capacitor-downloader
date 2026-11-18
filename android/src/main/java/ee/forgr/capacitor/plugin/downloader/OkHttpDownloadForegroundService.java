@@ -14,7 +14,7 @@ import androidx.core.app.ServiceCompat;
  */
 public class OkHttpDownloadForegroundService extends Service {
 
-    private static final int SERVICE_NOTIFICATION_ID = 0x4f4b4854;
+    static final int SERVICE_NOTIFICATION_ID = 0x4f4b4854;
     private static final Object stateLock = new Object();
     private static boolean foregroundEstablished;
     private static boolean stopWhenForegroundReady;

@@ -39,7 +39,7 @@ public class DownloadConnectionRetryTest {
 
     @Test
     public void filesystemMessagesAreNotConnectionFailures() {
-        assertFalse(DownloadConnectionRetry.isFilesystemIoMessage("Could not create destination directory"));
+        assertTrue(DownloadConnectionRetry.isFilesystemIoMessage("Could not create destination directory"));
         assertFalse(DownloadConnectionRetry.isRetryableConnectionFailure(new IOException("Could not move downloaded file into place")));
     }
 }

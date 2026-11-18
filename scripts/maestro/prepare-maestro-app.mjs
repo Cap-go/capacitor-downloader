@@ -32,6 +32,23 @@ function run(cmd, args, cwd) {
   }
 }
 
+function runWithRetries(cmd, args, cwd, { attempts = 3, backoffMs = 5000 } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      run(cmd, args, cwd);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        console.warn(`${cmd} attempt ${attempt}/${attempts} failed; retrying in ${backoffMs}ms`);
+        spawnSync('sleep', [String(Math.max(1, Math.ceil(backoffMs / 1000)))]);
+      }
+    }
+  }
+  throw lastError;
+}
+
 function assertMaestroWebBundle() {
   const indexPath = path.join(exampleDir, 'dist/index.html');
   if (!existsSync(indexPath)) {
@@ -100,29 +117,30 @@ run('bunx', ['cap', 'sync', platform], exampleDir);
 assertSyncedWebAssets(webBundle);
 
 if (platform === 'android') {
-  run('./gradlew', ['clean', 'assembleDebug'], path.join(exampleDir, 'android'));
+  const gradleArgs =
+    process.env.CAPGO_MAESTRO_SKIP_GRADLE_CLEAN === '1' ? ['assembleDebug'] : ['clean', 'assembleDebug'];
+  runWithRetries('./gradlew', gradleArgs, path.join(exampleDir, 'android'));
   const apk = path.join(exampleDir, 'android/app/build/outputs/apk/debug/app-debug.apk');
   if (!existsSync(apk)) {
     throw new Error(`Expected APK at ${apk}`);
   }
 } else {
   const derivedData = process.env.CAPGO_MAESTRO_IOS_DERIVED_DATA ?? path.join(rootDir, '.maestro-ios-derived-data');
-  run(
-    'xcodebuild',
-    [
-      '-project',
-      'App.xcodeproj',
-      '-scheme',
-      'App',
-      '-configuration',
-      'Debug',
-      '-sdk',
-      'iphonesimulator',
-      '-derivedDataPath',
-      derivedData,
-      'clean',
-      'build',
-    ],
-    path.join(exampleDir, 'ios/App'),
-  );
+  const xcodebuildArgs = [
+    '-project',
+    'App.xcodeproj',
+    '-scheme',
+    'App',
+    '-configuration',
+    'Debug',
+    '-sdk',
+    'iphonesimulator',
+    '-derivedDataPath',
+    derivedData,
+  ];
+  if (process.env.CAPGO_MAESTRO_SKIP_XCODE_CLEAN !== '1') {
+    xcodebuildArgs.push('clean');
+  }
+  xcodebuildArgs.push('build');
+  runWithRetries('xcodebuild', xcodebuildArgs, path.join(exampleDir, 'ios/App'));
 }

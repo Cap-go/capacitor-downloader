@@ -505,16 +505,20 @@ const flows = {
       notification: 'hidden',
     });
     await sleep(1_500);
-    await plugin.stop({ id });
-    const status = await readDownloadStatus(id);
-    setSummary(`STATE:${id}:${status.state}:${status.progress}`);
-    if (status.state === 'DONE') {
-      throw new Error('Download still DONE after stop');
+    const stopResult = await plugin.stop({ id });
+    const removed = stopResult?.removed;
+    setSummary(`STOP:${id}:removed=${removed}`);
+    if (removed !== true) {
+      throw new Error(`Expected stop to cancel download (removed=true), got removed=${removed}`);
     }
-    if (status.state === 'RUNNING') {
-      throw new Error('Download still RUNNING after stop');
+    if ((completionCounts.get(id) ?? 0) > 0) {
+      throw new Error('Download completed despite stop');
     }
-    setMarker('cancel-cleanup', true, status.state);
+    await sleep(3_000);
+    if ((completionCounts.get(id) ?? 0) > 0) {
+      throw new Error('Download completed after stop');
+    }
+    setMarker('cancel-cleanup', true, `removed=${removed}`);
   },
 
   async 'parallel-downloads'() {

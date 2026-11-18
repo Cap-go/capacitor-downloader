@@ -23,7 +23,7 @@ on:
 
 concurrency:
   group: maestro-break-the-fix-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   BUN_VERSION: 1.4.2
@@ -63,6 +63,7 @@ jobs:
     timeout-minutes: 10
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
         include: ${{ fromJSON(needs.break_fix_plan.outputs.android_matrix) }}
     steps:
@@ -81,6 +82,7 @@ jobs:
         with:
           distribution: zulu
           java-version: '21'
+          cache: gradle
       - uses: ./.github/actions/setup-maestro
         with:
           maestro-version: ${{ env.MAESTRO_VERSION }}
@@ -141,6 +143,7 @@ jobs:
     timeout-minutes: 10
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include: ${{ fromJSON(needs.break_fix_plan.outputs.ios_matrix) }}
     steps:
@@ -155,6 +158,11 @@ jobs:
             node_modules
             example-app/node_modules
           install-example: 'true'
+      - name: Cache iOS DerivedData for break-fix builds
+        uses: actions/cache@v5
+        with:
+          path: .maestro-ios-derived-data
+          key: maestro-ios-derived-${{ runner.os }}-${{ hashFiles('example-app/ios/**', 'ios/**', 'example-app/bun.lock', 'Package.swift', 'android/**') }}
       - name: Select iOS simulator
         run: |
           simulator_id="$(./scripts/maestro/select-ios-simulator.sh)"

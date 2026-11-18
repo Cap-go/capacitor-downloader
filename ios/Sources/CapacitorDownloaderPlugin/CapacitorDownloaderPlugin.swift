@@ -532,7 +532,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             cancelBatchTasks(batchId: id)
             deleteDownloadedFiles(destinations: destinations)
             batchCoordinator.removeBatch(batchId: id, unregisterChildren: false)
-            call.resolve()
+            call.resolve(["removed": true])
             return
         }
 
@@ -549,7 +549,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         if let generation {
             DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
         }
-        call.resolve()
+        call.resolve(["removed": true])
     }
 
 

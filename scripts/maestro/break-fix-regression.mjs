@@ -28,7 +28,7 @@ const regressions = {
       file: 'android/src/main/java/ee/forgr/capacitor/plugin/downloader/CapacitorDownloaderPlugin.java',
       replace: [
         'boolean cancelled = okHttpDownloadExecutor.cancel(id, destinationFile);',
-        'boolean cancelled = true; /* MAESTRO_BREAK_FIX: skip OkHttp cancel cleanup */',
+        'okHttpDownloadExecutor.cancel(id, destinationFile); boolean cancelled = false; /* MAESTRO_BREAK_FIX */',
       ],
     },
     {

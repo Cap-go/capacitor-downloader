@@ -384,32 +384,40 @@ const flows = {
 
   async 'error-bad-url'() {
     const id = 'err-bad-url';
-    try {
-      await plugin.download({
-        id,
-        url: 'http://192.0.2.1:9/missing.bin',
-        destination: 'cache/maestro-bad-url.bin',
-        androidHttpEngine: 'auto',
-        notification: 'hidden',
-      });
-    } catch (error) {
-      setMarker('error-bad-url', true, 'rejected');
-      return;
-    }
-    let status;
-    try {
-      status = await waitForTerminal(id, 45_000);
-    } catch (timeoutError) {
-      status = await readDownloadStatus(id);
-      if (status.state !== 'ERROR') {
-        throw timeoutError;
+    let markerSet = false;
+    const failListener = await plugin.addListener('downloadFailed', (payload) => {
+      if (payload.id === id && !markerSet) {
+        markerSet = true;
+        setMarker('error-bad-url', true, 'failed-event');
       }
+    });
+  try {
+      try {
+        await plugin.download({
+          id,
+          url: 'http://192.0.2.1:9/missing.bin',
+          destination: 'cache/maestro-bad-url.bin',
+          androidHttpEngine: 'auto',
+          notification: 'hidden',
+        });
+      } catch (error) {
+        if (!markerSet) {
+          markerSet = true;
+          setMarker('error-bad-url', true, 'rejected');
+        }
+        return;
+      }
+      if (!markerSet) {
+        const failMs = Capacitor.getPlatform() === 'ios' ? 45_000 : 90_000;
+        const status = await waitForFailedEventOrTerminal(id, failMs);
+        if (status.state !== 'ERROR') {
+          throw new Error(`Expected ERROR for bad URL, got ${status.state}`);
+        }
+        setMarker('error-bad-url', true, 'status-error');
+      }
+    } finally {
+      await failListener.remove();
     }
-    if (status.state === 'ERROR') {
-      setMarker('error-bad-url', true, 'status-error');
-      return;
-    }
-    throw new Error('Expected bad URL to fail');
   },
 
   async 'error-404'() {

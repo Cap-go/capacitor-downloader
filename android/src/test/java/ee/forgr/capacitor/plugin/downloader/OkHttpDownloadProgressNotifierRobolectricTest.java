@@ -11,7 +11,6 @@ import android.app.Notification;
 import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
-import android.os.SystemClock;
 import com.getcapacitor.JSObject;
 import java.io.File;
 import java.nio.charset.StandardCharsets;

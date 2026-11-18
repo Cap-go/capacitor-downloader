@@ -109,12 +109,6 @@ public class OkHttpDownloadExecutor {
         }
         ActiveDownload active = reserved;
 
-        Network wifiNetwork = resolveWifiNetworkForTransfer(network);
-        if ("wifi-only".equals(network) && (wifiNetwork == null || !isWifiNetworkUsable(wifiNetwork))) {
-            activeDownloads.remove(id, active);
-            throw new IllegalStateException("Wi-Fi required for this download");
-        }
-
         boolean acquired = false;
         try {
             transferSlots.acquire();
@@ -130,11 +124,6 @@ public class OkHttpDownloadExecutor {
                 finishCancelled(active, null, id, completionListener);
                 return;
             }
-
-            if (wifiNetwork != null) {
-                active.boundWifiNetwork = wifiNetwork;
-            }
-            OkHttpClient client = buildClientForNetwork(network, wifiNetwork);
 
             try {
                 ensureDestinationParentDirectory(destinationFile);
@@ -158,6 +147,21 @@ public class OkHttpDownloadExecutor {
                             return;
                         }
                     }
+
+                    Network wifiNetwork = null;
+                    if ("wifi-only".equals(network)) {
+                        wifiNetwork = resolveWifiNetworkForTransfer(network);
+                        if (wifiNetwork == null || !isWifiNetworkUsable(wifiNetwork)) {
+                            active.state = State.ERROR;
+                            active.errorMessage = "Wi-Fi required for this download";
+                            completionListener.onFinished(id, false, false, active.errorMessage);
+                            return;
+                        }
+                        active.boundWifiNetwork = wifiNetwork;
+                    } else {
+                        active.boundWifiNetwork = null;
+                    }
+                    OkHttpClient client = buildClientForNetwork(network, wifiNetwork);
 
                     Request.Builder requestBuilder = new Request.Builder().url(url);
                     if (headers != null) {
@@ -284,6 +288,9 @@ public class OkHttpDownloadExecutor {
                     }
                     if (DownloadConnectionRetry.isRetryableConnectionFailure(e) && retriesRemaining > 0) {
                         connectionFailureAttempt++;
+                        active.bytesWritten = 0L;
+                        active.bytesTotal = 0L;
+                        active.progress = 0f;
                         reporter.reportProgress(id, 0f);
                         long delayMs = DownloadConnectionRetry.delayMillisForAttempt(connectionFailureAttempt);
                         long slept = 0L;

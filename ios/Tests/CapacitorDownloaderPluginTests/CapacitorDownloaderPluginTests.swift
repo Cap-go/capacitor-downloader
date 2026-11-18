@@ -798,6 +798,31 @@ final class DownloadHTTPValidatorTests: XCTestCase {
     }
 }
 
+final class DownloadRetryBudgetStoreTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var store: DownloadRetryBudgetStore!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: "CapacitorDownloaderRetryBudgetTests")!
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderRetryBudgetTests")
+        store = DownloadRetryBudgetStore(defaults: defaults)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderRetryBudgetTests")
+        super.tearDown()
+    }
+
+    func testSetRemoveAndRestore() {
+        let budget = DownloadConnectionRetry.Budget(remainingRetries: 2, connectionFailureCount: 1)
+        store.setBudget(budget, for: "episode")
+        XCTAssertEqual(store.allBudgets()["episode"]?.remainingRetries, 2)
+        store.removeBudget(for: "episode")
+        XCTAssertNil(store.allBudgets()["episode"])
+    }
+}
+
 final class DownloadConnectionRetryTests: XCTestCase {
     func testRetryableUrlErrorCodes() {
         let timeout = NSError(domain: NSURLErrorDomain, code: URLError.timedOut.rawValue)
@@ -816,6 +841,7 @@ final class DownloadConnectionRetryTests: XCTestCase {
     func testDelayScalesWithFailureCount() {
         XCTAssertEqual(5, DownloadConnectionRetry.delaySeconds(afterConnectionFailureCount: 1))
         XCTAssertEqual(10, DownloadConnectionRetry.delaySeconds(afterConnectionFailureCount: 2))
+        XCTAssertEqual(DownloadConnectionRetry.maxRetryDelaySeconds, DownloadConnectionRetry.delaySeconds(afterConnectionFailureCount: 121))
     }
 
     func testNormalizeRetries() {

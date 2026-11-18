@@ -28,6 +28,7 @@ public class DownloadConnectionRetryTest {
     public void delayScalesWithAttemptNumber() {
         assertEquals(5_000L, DownloadConnectionRetry.delayMillisForAttempt(1));
         assertEquals(10_000L, DownloadConnectionRetry.delayMillisForAttempt(2));
+        assertEquals(DownloadConnectionRetry.MAX_RETRY_DELAY_MS, DownloadConnectionRetry.delayMillisForAttempt(121));
     }
 
     @Test

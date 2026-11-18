@@ -30,6 +30,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private var foregroundSessionDownloadIds = Set<String>()
     private var pendingDownloadStarts = Set<String>()
     private var downloadRetryBudgets: [String: DownloadConnectionRetry.Budget] = [:]
+    private var pendingRetryWorkItems: [String: DispatchWorkItem] = [:]
     private let foregroundSessionLock = NSLock()
     internal private(set) var restoredBackgroundSessionIdentifiers: [String] = []
     internal private(set) var didRestoreGenerationsBeforeDelegateRegistration = false
@@ -62,6 +63,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         tasksLock.lock()
         downloadGenerations = DownloadIdGenerationStore.shared.allGenerations()
         taskGenerations = DownloadTaskGenerationStore.shared.allGenerations()
+        downloadRetryBudgets = DownloadRetryBudgetStore.shared.allBudgets()
         tasksLock.unlock()
         restoredBackgroundSessionIdentifiers = [
             DownloadSessionIdentifiers.main,
@@ -181,21 +183,84 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func setRetryBudget(for downloadId: String, retries: Int) {
-        guard retries > 0 else {
+        tasksLock.lock()
+        cancelPendingRetryWorkLocked(for: downloadId)
+        if retries <= 0 {
+            downloadRetryBudgets.removeValue(forKey: downloadId)
+            tasksLock.unlock()
+            DownloadRetryBudgetStore.shared.removeBudget(for: downloadId)
             return
         }
-        tasksLock.lock()
-        downloadRetryBudgets[downloadId] = DownloadConnectionRetry.Budget(
-            remainingRetries: retries,
-            connectionFailureCount: 0
-        )
+        let budget = DownloadConnectionRetry.Budget(remainingRetries: retries, connectionFailureCount: 0)
+        downloadRetryBudgets[downloadId] = budget
         tasksLock.unlock()
+        DownloadRetryBudgetStore.shared.setBudget(budget, for: downloadId)
     }
 
     private func clearRetryBudget(for downloadId: String) {
         tasksLock.lock()
+        cancelPendingRetryWorkLocked(for: downloadId)
         downloadRetryBudgets.removeValue(forKey: downloadId)
         tasksLock.unlock()
+        DownloadRetryBudgetStore.shared.removeBudget(for: downloadId)
+    }
+
+    private func cancelPendingRetryWorkLocked(for downloadId: String) {
+        pendingRetryWorkItems.removeValue(forKey: downloadId)?.cancel()
+    }
+
+    private func sessionUsesEarliestBeginDateForRetries(_ session: URLSession) -> Bool {
+        guard let identifier = session.configuration.identifier else {
+            return false
+        }
+        return DownloadSessionIdentifiers.isPluginSession(identifier)
+    }
+
+    private func emitRetryProgressReset(for downloadId: String) {
+        if let batchParts = batchCoordinator.activeChildParts(for: downloadId),
+           let batchProgress = batchCoordinator.updateFileProgress(
+               batchId: batchParts.batchId,
+               generation: batchParts.generation,
+               fileIndex: batchParts.fileIndex,
+               progress: 0
+           ) {
+            notifyListeners(
+                "downloadProgress",
+                data: [
+                    "id": batchParts.batchId,
+                    "progress": batchProgress.overall,
+                    "fileIndex": batchParts.fileIndex,
+                    "fileProgress": batchProgress.file,
+                    "bytesWritten": 0,
+                    "bytesTotal": 0
+                ]
+            )
+        } else if batchCoordinator.activeChildParts(for: downloadId) == nil {
+            notifyListeners("downloadProgress", data: ["id": downloadId, "progress": 0])
+        }
+    }
+
+    private func registerAndResumeRetryTaskIfCurrent(
+        downloadId: String,
+        retryTask: URLSessionDownloadTask,
+        session: URLSession,
+        generation: UInt64?
+    ) -> Bool {
+        tasksLock.lock()
+        let budgetPresent = downloadRetryBudgets[downloadId] != nil
+        let slotFree = tasks[downloadId] == nil
+        tasksLock.unlock()
+        guard budgetPresent, slotFree else {
+            retryTask.cancel()
+            return false
+        }
+        setTask(retryTask, for: downloadId)
+        if let generation {
+            setTaskGeneration(generation, for: retryTask, in: session)
+        }
+        retryTask.resume()
+        emitRetryProgressReset(for: downloadId)
+        return true
     }
 
     private func scheduleConnectionRetryIfPossible(
@@ -219,45 +284,46 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         let failureCount = budget.connectionFailureCount
         downloadRetryBudgets[downloadId] = budget
         tasksLock.unlock()
+        DownloadRetryBudgetStore.shared.setBudget(budget, for: downloadId)
 
         removeTask(for: downloadId, completing: failedTask, in: session)
         clearTaskGeneration(for: failedTask, in: session)
 
         let retryTask = session.downloadTask(with: request)
         retryTask.taskDescription = downloadId
-        if #available(iOS 11.0, *) {
-            retryTask.earliestBeginDate = Date().addingTimeInterval(
-                DownloadConnectionRetry.delaySeconds(afterConnectionFailureCount: failureCount)
+        let delay = DownloadConnectionRetry.delaySeconds(afterConnectionFailureCount: failureCount)
+
+        if sessionUsesEarliestBeginDateForRetries(session) {
+            if #available(iOS 11.0, *) {
+                retryTask.earliestBeginDate = Date().addingTimeInterval(delay)
+            }
+            return registerAndResumeRetryTaskIfCurrent(
+                downloadId: downloadId,
+                retryTask: retryTask,
+                session: session,
+                generation: generation
             )
         }
-        setTask(retryTask, for: downloadId)
-        if let generation {
-            setTaskGeneration(generation, for: retryTask, in: session)
-        }
-        retryTask.resume()
 
-        if let batchParts = batchCoordinator.activeChildParts(for: downloadId),
-           let batchProgress = batchCoordinator.updateFileProgress(
-               batchId: batchParts.batchId,
-               generation: batchParts.generation,
-               fileIndex: batchParts.fileIndex,
-               progress: 0
-           ) {
-            notifyListeners(
-                "downloadProgress",
-                data: [
-                    "id": batchParts.batchId,
-                    "progress": batchProgress.overall,
-                    "fileIndex": batchParts.fileIndex,
-                    "fileProgress": batchProgress.file,
-                    "bytesWritten": 0,
-                    "bytesTotal": 0
-                ]
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else {
+                return
+            }
+            _ = self.registerAndResumeRetryTaskIfCurrent(
+                downloadId: downloadId,
+                retryTask: retryTask,
+                session: session,
+                generation: generation
             )
-        } else if batchCoordinator.activeChildParts(for: downloadId) == nil {
-            notifyListeners("downloadProgress", data: ["id": downloadId, "progress": 0])
+            self.tasksLock.lock()
+            self.pendingRetryWorkItems.removeValue(forKey: downloadId)
+            self.tasksLock.unlock()
         }
-
+        tasksLock.lock()
+        cancelPendingRetryWorkLocked(for: downloadId)
+        pendingRetryWorkItems[downloadId] = workItem
+        tasksLock.unlock()
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: workItem)
         return true
     }
 
@@ -757,6 +823,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     presentFailedDownloadNotificationIfStored(downloadId: id, generation: generation)
                 }
                 notifyListeners("downloadFailed", data: ["id": id, "error": "Unable to resolve destination"])
+                clearRetryBudget(for: id)
                 markContinuedProcessingFinished(downloadId: id, success: false)
             }
             removeTask(for: id, completing: downloadTask, in: session)
@@ -784,6 +851,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     "downloadFailed",
                     data: ["id": id, "error": "HTTP \(httpResponse.statusCode)"]
                 )
+                clearRetryBudget(for: id)
                 markContinuedProcessingFinished(downloadId: id, success: false)
             }
             return
@@ -862,6 +930,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     presentFailedDownloadNotificationIfStored(downloadId: id, generation: generation)
                 }
                 notifyListeners("downloadFailed", data: ["id": id, "error": error.localizedDescription])
+                clearRetryBudget(for: id)
                 markContinuedProcessingFinished(downloadId: id, success: false)
             }
         }

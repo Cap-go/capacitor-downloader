@@ -1,6 +1,8 @@
 import Foundation
 
 enum DownloadConnectionRetry {
+    static let maxRetryDelaySeconds: TimeInterval = 600
+
     struct Budget {
         var remainingRetries: Int
         var connectionFailureCount: Int
@@ -25,7 +27,8 @@ enum DownloadConnectionRetry {
     }
 
     static func delaySeconds(afterConnectionFailureCount failureCount: Int) -> TimeInterval {
-        TimeInterval(5 * failureCount)
+        let delay = TimeInterval(5 * failureCount)
+        return min(delay, maxRetryDelaySeconds)
     }
 
     static func normalizeRetries(_ raw: Int?) -> Int {

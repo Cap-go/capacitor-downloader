@@ -9,6 +9,8 @@ import javax.net.ssl.SSLException;
 
 final class DownloadConnectionRetry {
 
+    static final long MAX_RETRY_DELAY_MS = 600_000L;
+
     private DownloadConnectionRetry() {}
 
     static int normalizeRetries(Integer raw) {
@@ -22,7 +24,8 @@ final class DownloadConnectionRetry {
     }
 
     static long delayMillisForAttempt(int connectionFailureAttempt) {
-        return 5_000L * (long) connectionFailureAttempt;
+        long delay = 5_000L * (long) connectionFailureAttempt;
+        return Math.min(delay, MAX_RETRY_DELAY_MS);
     }
 
     static boolean isRetryableConnectionFailure(IOException error) {

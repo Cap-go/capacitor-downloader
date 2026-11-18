@@ -1,6 +1,13 @@
 name: Maestro break-the-fix validation
 
 on:
+  push:
+    branches:
+      - cursor/maestro-e2e-suite-f5f5
+    paths:
+      - .github/workflows/maestro-break-the-fix.yml
+      - scripts/maestro/**
+      - example-app/src/maestro-harness.js
   workflow_dispatch:
     inputs:
       scenario:
@@ -51,8 +58,8 @@ jobs:
       - name: Build break-the-fix matrix
         id: plan
         env:
-          SCENARIO: ${{ inputs.scenario }}
-          MODE: ${{ inputs.mode }}
+          SCENARIO: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.scenario || 'all' }}
+          MODE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mode || 'both' }}
         run: bun scripts/maestro/break-fix-matrix.mjs
 
   break_fix_android:

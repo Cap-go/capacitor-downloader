@@ -139,6 +139,22 @@ export interface DownloadOptions {
    */
   downloadCompletedNotificationText?: string;
   /**
+   * Optional localized text for a system notification when the download fails.
+   *
+   * When set, iOS and Android may show a local notification after a failed download
+   * if the user granted notification permission. If permission is denied, the failure
+   * still occurs and no notification is shown. Tapping the notification reopens the app.
+   * Uses the same notification slot as `downloadCompletedNotificationText`, so a failure
+   * alert replaces a prior completion alert for the same download id instead of stacking.
+   * Not shown when the download is stopped by the app.
+   *
+   * Omitted or empty means no failure notification from the plugin (use
+   * `downloadFailed` events while the app is open).
+   *
+   * @since 8.9.0
+   */
+  downloadFailedNotificationText?: string;
+  /**
    * iOS 26 and later: opt in to a `BGContinuedProcessingTask` so the system can show download progress while the
    * device is locked. Falls back to the background URL session when the task does not launch in time. If the continued
    * processing task expires, the active transfer is cancelled with `downloadFailed` and is not resumed automatically.
@@ -265,6 +281,22 @@ export interface DownloadBatchOptions {
    * @since 8.5.0
    */
   downloadCompletedNotificationText?: string;
+  /**
+   * Optional localized text for a system notification when the batch fails.
+   *
+   * When set, iOS and Android may show a local notification after a failed batch download
+   * if the user granted notification permission. If permission is denied, the failure
+   * still occurs and no notification is shown. Tapping the notification reopens the app.
+   * Uses the same notification slot as `downloadCompletedNotificationText`, so a failure
+   * alert replaces a prior completion alert for the same batch id instead of stacking.
+   * Not shown when the batch is stopped by the app.
+   *
+   * Omitted or empty means no failure notification from the plugin (use
+   * `downloadFailed` events while the app is open).
+   *
+   * @since 8.9.0
+   */
+  downloadFailedNotificationText?: string;
   /**
    * Number of times to retry each file after a connection failure (iOS URLSession).
    *

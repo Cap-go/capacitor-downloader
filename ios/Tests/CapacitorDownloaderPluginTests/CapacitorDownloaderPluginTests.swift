@@ -290,6 +290,36 @@ final class DownloadCompletedNotificationTextTests: XCTestCase {
     }
 }
 
+final class DownloadFailedNotificationStoreTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var store: DownloadFailedNotificationStore!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: "CapacitorDownloaderFailedNotificationTests")!
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderFailedNotificationTests")
+        store = DownloadFailedNotificationStore(defaults: defaults)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderFailedNotificationTests")
+        super.tearDown()
+    }
+
+    func testSetAndTakeText() {
+        store.setText("  Tap to retry  ", for: "task-1", generation: 1)
+
+        XCTAssertEqual(store.takeText(for: "task-1", generation: 1), "Tap to retry")
+        XCTAssertNil(store.takeText(for: "task-1", generation: 1))
+    }
+
+    func testRemoveText() {
+        store.setText("Try again", for: "task-1", generation: 1)
+        store.removeText(for: "task-1", generation: 1)
+        XCTAssertNil(store.takeText(for: "task-1", generation: 1))
+    }
+}
+
 final class DownloadCompletedNotificationStoreTests: XCTestCase {
     private var defaults: UserDefaults!
     private var store: DownloadCompletedNotificationStore!

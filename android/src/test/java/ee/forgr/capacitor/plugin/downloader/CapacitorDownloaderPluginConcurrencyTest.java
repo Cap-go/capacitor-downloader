@@ -51,6 +51,7 @@ public class CapacitorDownloaderPluginConcurrencyTest {
         setField(plugin, "downloadManager", downloadManager);
         setField(plugin, "downloadManagerExecutor", downloadManagerExecutor);
         setField(plugin, "completedNotificationStore", new DownloadCompletedNotificationStore());
+        setField(plugin, "failedNotificationStore", new DownloadFailedNotificationStore());
         downloads = getDownloadsMap(plugin);
     }
 

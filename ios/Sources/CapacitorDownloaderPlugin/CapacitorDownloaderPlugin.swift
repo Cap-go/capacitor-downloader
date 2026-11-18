@@ -98,6 +98,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         DownloadDestinationStore.shared.removeDestination(for: downloadId)
         if let generation = generation(for: downloadId) {
             DownloadCompletedNotificationStore.shared.removeText(for: downloadId, generation: generation)
+            presentFailedDownloadNotificationIfStored(downloadId: downloadId, generation: generation)
         }
         clearRetryBudget(for: downloadId)
         foregroundSessionLock.lock()
@@ -380,6 +381,11 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             for: id,
             generation: generation
         )
+        DownloadFailedNotificationStore.shared.setText(
+            call.getString("downloadFailedNotificationText"),
+            for: id,
+            generation: generation
+        )
 
         var request = URLRequest(url: url)
         if let headers = call.getObject("headers") as? [String: String] {
@@ -478,6 +484,11 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
         DownloadCompletedNotificationStore.shared.setText(
             call.getString("downloadCompletedNotificationText"),
+            for: batchId,
+            generation: generation
+        )
+        DownloadFailedNotificationStore.shared.setText(
+            call.getString("downloadFailedNotificationText"),
             for: batchId,
             generation: generation
         )
@@ -590,10 +601,20 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         cancelBatchTasks(batchId: batchId)
         batchCoordinator.removeBatch(batchId: batchId, unregisterChildren: false)
+        DownloadCompletedNotificationStore.shared.removeText(for: batchId, generation: generation)
+        if let failedText = DownloadFailedNotificationStore.shared.takeText(for: batchId, generation: generation) {
+            DownloadCompletedNotificationPresenter.presentIfAllowed(downloadId: batchId, body: failedText)
+        }
         notifyListeners(
             "downloadFailed",
             data: ["id": batchId, "fileIndex": fileIndex, "error": error]
         )
+    }
+
+    private func presentFailedDownloadNotificationIfStored(downloadId: String, generation: UInt64?) {
+        if let failedText = DownloadFailedNotificationStore.shared.takeText(for: downloadId, generation: generation) {
+            DownloadCompletedNotificationPresenter.presentIfAllowed(downloadId: downloadId, body: failedText)
+        }
     }
 
     @objc func stop(_ call: CAPPluginCall) {
@@ -604,10 +625,15 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
         if batchCoordinator.isBatch(batchId: id) {
             let destinations = batchCoordinator.destinationsForCancellation(batchId: id)
+            let generation = batchCoordinator.generation(for: id)
             batchCoordinator.markCancelled(batchId: id)
             cancelBatchTasks(batchId: id)
             deleteDownloadedFiles(destinations: destinations)
             batchCoordinator.removeBatch(batchId: id, unregisterChildren: false)
+            if let generation {
+                DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+                DownloadFailedNotificationStore.shared.removeText(for: id, generation: generation)
+            }
             call.resolve()
             return
         }
@@ -625,6 +651,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         clearRetryBudget(for: id)
         if let generation {
             DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+            DownloadFailedNotificationStore.shared.removeText(for: id, generation: generation)
         }
         call.resolve()
     }
@@ -727,6 +754,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             } else {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+                    presentFailedDownloadNotificationIfStored(downloadId: id, generation: generation)
                 }
                 notifyListeners("downloadFailed", data: ["id": id, "error": "Unable to resolve destination"])
                 markContinuedProcessingFinished(downloadId: id, success: false)
@@ -750,6 +778,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             } else {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+                    presentFailedDownloadNotificationIfStored(downloadId: id, generation: generation)
                 }
                 notifyListeners(
                     "downloadFailed",
@@ -795,6 +824,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: batchId, generation: generation) {
                         DownloadCompletedNotificationPresenter.presentIfAllowed(downloadId: batchId, body: completionText)
                     }
+                    DownloadFailedNotificationStore.shared.removeText(for: batchId, generation: generation)
                 case .inProgress(let overall):
                     notifyListeners(
                         "downloadProgress",
@@ -814,6 +844,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: id, generation: generation) {
                     DownloadCompletedNotificationPresenter.presentIfAllowed(downloadId: id, body: completionText)
                 }
+                DownloadFailedNotificationStore.shared.removeText(for: id, generation: generation)
                 markContinuedProcessingFinished(downloadId: id, success: true)
             }
             clearRetryBudget(for: id)
@@ -828,6 +859,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             } else {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+                    presentFailedDownloadNotificationIfStored(downloadId: id, generation: generation)
                 }
                 notifyListeners("downloadFailed", data: ["id": id, "error": error.localizedDescription])
                 markContinuedProcessingFinished(downloadId: id, success: false)
@@ -878,6 +910,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             } else {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
+                    presentFailedDownloadNotificationIfStored(downloadId: id, generation: generation)
                 }
                 notifyListeners("downloadFailed", data: ["id": id, "error": error.localizedDescription])
                 markContinuedProcessingFinished(downloadId: id, success: false)

@@ -767,3 +767,29 @@ final class DownloadHTTPValidatorTests: XCTestCase {
         XCTAssertFalse(DownloadHTTPValidator.isSuccessfulStatusCode(500))
     }
 }
+
+final class DownloadConnectionRetryTests: XCTestCase {
+    func testRetryableUrlErrorCodes() {
+        let timeout = NSError(domain: NSURLErrorDomain, code: URLError.timedOut.rawValue)
+        let lost = NSError(domain: NSURLErrorDomain, code: URLError.networkConnectionLost.rawValue)
+        let offline = NSError(domain: NSURLErrorDomain, code: URLError.notConnectedToInternet.rawValue)
+        let dns = NSError(domain: NSURLErrorDomain, code: URLError.dnsLookupFailed.rawValue)
+        let http = NSError(domain: NSURLErrorDomain, code: URLError.badURL.rawValue)
+
+        XCTAssertTrue(DownloadConnectionRetry.isRetryableConnectionError(timeout))
+        XCTAssertTrue(DownloadConnectionRetry.isRetryableConnectionError(lost))
+        XCTAssertTrue(DownloadConnectionRetry.isRetryableConnectionError(offline))
+        XCTAssertTrue(DownloadConnectionRetry.isRetryableConnectionError(dns))
+        XCTAssertFalse(DownloadConnectionRetry.isRetryableConnectionError(http))
+    }
+
+    func testDelayScalesWithFailureCount() {
+        XCTAssertEqual(5, DownloadConnectionRetry.delaySeconds(afterConnectionFailureCount: 1))
+        XCTAssertEqual(10, DownloadConnectionRetry.delaySeconds(afterConnectionFailureCount: 2))
+    }
+
+    func testNormalizeRetries() {
+        XCTAssertEqual(0, DownloadConnectionRetry.normalizeRetries(nil))
+        XCTAssertEqual(3, DownloadConnectionRetry.normalizeRetries(3))
+    }
+}

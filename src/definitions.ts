@@ -156,6 +156,17 @@ export interface DownloadOptions {
    */
   iosContinuedProcessingSubtitle?: string;
   /**
+   * Number of times to retry the file after a connection failure (OkHttp on Android and iOS URLSession).
+   *
+   * Defaults to `0` (no retries). On a retry, the file is downloaded again from the start after a delay of
+   * 5 seconds times the attempt number (5 s, then 10 s, then 15 s, and so on). Progress for the file resets to 0.
+   * HTTP errors, cancellation, and file-system errors are not retried. Android DownloadManager and Web ignore this option.
+   *
+   * @default 0
+   * @since 8.9.0
+   */
+  retries?: number;
+  /**
    * Multi-file batches use `files` instead. Omit for single-file downloads.
    *
    * @since 8.7.0
@@ -254,6 +265,17 @@ export interface DownloadBatchOptions {
    * @since 8.5.0
    */
   downloadCompletedNotificationText?: string;
+  /**
+   * Number of times to retry each file after a connection failure (iOS URLSession).
+   *
+   * Defaults to `0` (no retries). Applied to every entry in `files`. See {@link DownloadOptions.retries} for delay and
+   * error rules. While one file retries, the batch continues and other files are unaffected. Android DownloadManager
+   * batches ignore this option.
+   *
+   * @default 0
+   * @since 8.9.0
+   */
+  retries?: number;
 }
 
 /**

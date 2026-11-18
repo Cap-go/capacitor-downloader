@@ -232,6 +232,13 @@ public class CapacitorDownloaderPlugin extends Plugin {
         final String completionNotificationText = call.getString("downloadCompletedNotificationText");
 
         if (httpEngine == AndroidHttpEngineSelector.Engine.OKHTTP) {
+            final int retries;
+            try {
+                retries = DownloadConnectionRetry.normalizeRetries(call.getInt("retries"));
+            } catch (IllegalArgumentException e) {
+                call.reject(e.getMessage(), e);
+                return;
+            }
             downloadWithOkHttp(
                 call,
                 id,
@@ -242,7 +249,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 call.getString("notification"),
                 call.getString("title"),
                 call.getString("description"),
-                completionNotificationText
+                completionNotificationText,
+                retries
             );
             return;
         }
@@ -767,7 +775,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
         String notification,
         String title,
         String description,
-        String completionNotificationText
+        String completionNotificationText,
+        int retries
     ) {
         if (notification == null) {
             notification = "completed";
@@ -833,6 +842,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         destinationFile,
                         headers,
                         network,
+                        retries,
                         (downloadId, progress) ->
                             handler.post(() -> {
                                 if (!isCurrentOkHttpDownload(downloadId) || !isCurrentOkHttpGeneration(downloadId, storedGeneration)) {

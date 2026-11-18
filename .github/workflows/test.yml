@@ -299,7 +299,7 @@ jobs:
     name: Maestro E2E iOS / ${{ matrix.flow }}
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 3
       matrix:
         flow:
           - foreground-complete

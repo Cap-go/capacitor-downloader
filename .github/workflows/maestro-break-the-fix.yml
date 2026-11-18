@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/maestro-break-the-fix.yml
       - scripts/maestro/**
+      - .maestro/flows/**
       - example-app/src/maestro-harness.js
   workflow_dispatch:
     inputs:

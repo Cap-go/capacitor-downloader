@@ -36,6 +36,9 @@ final class OkHttpDownloadProgressNotifier {
         this.context = context.getApplicationContext();
         this.notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         ensureChannel();
+        synchronized (foregroundCoordinationLock) {
+            foregroundCoordinator = this;
+        }
     }
 
     /**
@@ -114,8 +117,15 @@ final class OkHttpDownloadProgressNotifier {
             cancelServiceNotification();
             OkHttpDownloadForegroundService.notifyActiveDownloads(context, 0);
         }
+        synchronized (foregroundCoordinationLock) {
+            if (foregroundCoordinator == this) {
+                foregroundCoordinator = null;
+            }
+        }
     }
 
+    private static final Object foregroundCoordinationLock = new Object();
+    private static volatile OkHttpDownloadProgressNotifier foregroundCoordinator;
     private static volatile Notification sharedForegroundNotification;
 
     @VisibleForTesting
@@ -127,18 +137,51 @@ final class OkHttpDownloadProgressNotifier {
     }
 
     static Notification foregroundServiceNotification(Context context) {
-        Notification pinned = sharedForegroundNotification;
-        if (pinned != null) {
-            return pinned;
+        return notificationForForegroundPromotion(context);
+    }
+
+    static Notification notificationForForegroundPromotion(Context context) {
+        synchronized (foregroundCoordinationLock) {
+            OkHttpDownloadProgressNotifier coordinator = foregroundCoordinator;
+            if (coordinator != null) {
+                synchronized (coordinator.serviceLock) {
+                    if (!coordinator.entries.isEmpty()) {
+                        Notification notification = coordinator.buildAggregateNotification();
+                        coordinator.lastForegroundNotification = notification;
+                        sharedForegroundNotification = notification;
+                        return notification;
+                    }
+                }
+            }
+            Notification pinned = sharedForegroundNotification;
+            if (pinned != null) {
+                return pinned;
+            }
+            ensureChannelStatic(context);
+            return new NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setOngoing(true)
+                .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+                .setSilent(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build();
         }
-        ensureChannelStatic(context);
-        return new NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setOngoing(true)
-            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .setSilent(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build();
+    }
+
+    static void reconcileAfterForegroundPromotion(Context context) {
+        synchronized (foregroundCoordinationLock) {
+            OkHttpDownloadProgressNotifier coordinator = foregroundCoordinator;
+            if (coordinator == null) {
+                return;
+            }
+            synchronized (coordinator.serviceLock) {
+                if (coordinator.entries.isEmpty()) {
+                    coordinator.cancelServiceNotification();
+                    return;
+                }
+                coordinator.postAggregateNotification();
+            }
+        }
     }
 
     private void releaseOneActiveDownload() {

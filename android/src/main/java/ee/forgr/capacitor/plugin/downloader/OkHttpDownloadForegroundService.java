@@ -94,12 +94,13 @@ public class OkHttpDownloadForegroundService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Notification notification = OkHttpDownloadProgressNotifier.foregroundServiceNotification(this);
+        Notification notification = OkHttpDownloadProgressNotifier.notificationForForegroundPromotion(this);
         try {
             if (throwOnStartForegroundForTests) {
                 throw new RuntimeException("test: startForeground failed");
             }
             ServiceCompat.startForeground(this, SERVICE_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+            OkHttpDownloadProgressNotifier.reconcileAfterForegroundPromotion(this);
             synchronized (stateLock) {
                 foregroundEstablished = true;
                 foregroundPromotionCountForTests += 1;
@@ -123,11 +124,14 @@ public class OkHttpDownloadForegroundService extends Service {
 
     @Override
     public void onDestroy() {
+        int activeDownloadsAtDestroy;
         synchronized (stateLock) {
             foregroundEstablished = false;
             stopWhenForegroundReady = false;
+            activeDownloadsAtDestroy = lastKnownActiveDownloads;
         }
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE);
+        int stopBehavior = activeDownloadsAtDestroy > 0 ? ServiceCompat.STOP_FOREGROUND_DETACH : ServiceCompat.STOP_FOREGROUND_REMOVE;
+        ServiceCompat.stopForeground(this, stopBehavior);
         super.onDestroy();
     }
 }

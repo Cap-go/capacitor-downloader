@@ -135,6 +135,36 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
     }
 
     @Test
+    public void foregroundPromotionShowsCurrentAggregateAfterDownloadFinishes() {
+        assertTrue(notifier.started("a", "Pack A", null, "progress"));
+        assertTrue(notifier.started("b", "Pack B", null, "progress"));
+        notifier.finished("a", true);
+
+        NotificationManager notificationManager = context.getSystemService(NotificationManager.class);
+        ShadowNotificationManager shadowNotificationManager = shadowOf(notificationManager);
+        Notification beforePromotion = shadowNotificationManager.getNotification(
+            null,
+            OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID
+        );
+        assertNotNull(beforePromotion);
+        String titleBefore = beforePromotion.extras.getCharSequence(Notification.EXTRA_TITLE).toString();
+        assertEquals("Pack B", titleBefore);
+
+        OkHttpDownloadForegroundService service = Robolectric.buildService(OkHttpDownloadForegroundService.class).create().get();
+        service.onStartCommand(new Intent(), 0, 1);
+
+        Notification afterPromotion = shadowNotificationManager.getNotification(
+            null,
+            OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID
+        );
+        assertNotNull(afterPromotion);
+        String titleAfter = afterPromotion.extras.getCharSequence(Notification.EXTRA_TITLE).toString();
+        assertEquals("Pack B", titleAfter);
+        assertFalse(titleAfter.contains("Pack A"));
+        service.onDestroy();
+    }
+
+    @Test
     public void abandonDownloadReleasesForegroundSlot() {
         assertTrue(notifier.started("leak", "Title", null, "progress"));
         notifier.abandonDownload("leak");

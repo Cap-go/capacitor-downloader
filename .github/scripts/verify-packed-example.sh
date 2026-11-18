@@ -45,7 +45,20 @@ case "$platform" in
     fi
     bunx cap sync android
     cd android
-    ./gradlew build test
+    gradle_attempt=1
+    gradle_max=3
+    while (( gradle_attempt <= gradle_max )); do
+      if ./gradlew build test; then
+        break
+      fi
+      if (( gradle_attempt == gradle_max )); then
+        echo "Gradle build failed after ${gradle_max} attempts" >&2
+        exit 1
+      fi
+      echo "Gradle attempt ${gradle_attempt}/${gradle_max} failed; retrying in 15s" >&2
+      sleep 15
+      gradle_attempt=$((gradle_attempt + 1))
+    done
     ;;
   ios)
     if [ ! -d ios ]; then

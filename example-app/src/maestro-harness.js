@@ -391,7 +391,7 @@ const flows = {
         setMarker('error-bad-url', true, 'failed-event');
       }
     });
-  try {
+    try {
       try {
         await plugin.download({
           id,

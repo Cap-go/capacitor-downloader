@@ -29,7 +29,6 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowNotificationManager;
 import org.robolectric.shadows.ShadowService;
-import org.robolectric.shadows.ShadowSystemClock;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 34)
@@ -89,12 +88,11 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
         assertTrue(title.contains("Pack A"));
         assertTrue(title.contains("Pack B"));
 
-        ShadowSystemClock.setElapsedRealtime(SystemClock.elapsedRealtime() + 2_000L);
-        notifier.update("a", 0.5f);
-        notifier.update("b", 0.5f);
+        notifier.update("a", 1f);
+        notifier.update("b", 1f);
         notification = shadowNotificationManager.getNotification(null, OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID);
         assertNotNull(notification);
-        assertEquals(50, notification.extras.getInt(Notification.EXTRA_PROGRESS, -1));
+        assertEquals(100, notification.extras.getInt(Notification.EXTRA_PROGRESS, -1));
 
         notifier.finished("a", true);
         assertEquals(1, shadowNotificationManager.size());

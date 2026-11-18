@@ -30,7 +30,8 @@ on:
           - both
 
 concurrency:
-  group: maestro-break-the-fix-${{ github.ref }}
+  # One matrix per push; do not cancel an in-flight run when another push lands on the branch.
+  group: maestro-break-the-fix-${{ github.ref }}-${{ github.run_id }}
   cancel-in-progress: false
 
 env:

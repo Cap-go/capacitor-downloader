@@ -9,6 +9,7 @@ on:
       - scripts/maestro/**
       - .maestro/flows/**
       - example-app/src/maestro-harness.js
+      - ios/**
   workflow_dispatch:
     inputs:
       scenario:

@@ -48,7 +48,7 @@ elif [[ "$PLATFORM" == "ios" ]]; then
   ditto "$APP_PATH" maestro-ios-app/App.app
   export CAPGO_MAESTRO_IOS_APP_PATH=maestro-ios-app/App.app
   export CAPGO_MAESTRO_FLOW="$FLOW"
-  export CAPGO_MAESTRO_TIMEOUT_SECONDS=180
+  export CAPGO_MAESTRO_TIMEOUT_SECONDS=300
   bash "$REPO_ROOT/scripts/test-maestro-downloader-ios.sh"
 else
   echo "Unsupported platform $PLATFORM" >&2

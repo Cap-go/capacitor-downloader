@@ -11,7 +11,7 @@ appId: app.capgo.downloader
     text: cancel-cleanup
     retryTapIfNoChange: true
 - extendedWaitUntil:
-    visible: '.*STATE:cancel-me:(?!DONE).*'
+    visible: '.*STOP:cancel-me:removed=true.*'
     timeout: 90000
 - extendedWaitUntil:
     visible: '.*Marker: cancel-cleanup:success.*'

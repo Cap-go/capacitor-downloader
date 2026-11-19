@@ -8,18 +8,34 @@ source "$ROOT_DIR/scripts/maestro/disable-device-animations.sh"
 SHARD_COUNT="${CAPGO_MAESTRO_SHARD_COUNT:-4}"
 export CAPGO_MAESTRO_SHARD_COUNT="$SHARD_COUNT"
 
+POOL_MANIFEST="${CAPGO_MAESTRO_IOS_POOL_MANIFEST:-$ROOT_DIR/.maestro-artifacts/ios-simulator-pool.txt}"
+
 if ! command -v maestro >/dev/null 2>&1; then
   echo "maestro is required." >&2
   exit 1
 fi
 
+POOL_MANIFEST="$(bash "$ROOT_DIR/scripts/maestro/setup-ios-simulator-pool.sh" "$SHARD_COUNT" "$POOL_MANIFEST")"
+
+delete_pool_simulators() {
+  local simulator_id=""
+  [[ -f "$POOL_MANIFEST" ]] || return 0
+  while IFS= read -r simulator_id; do
+    [[ -n "$simulator_id" ]] || continue
+    xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true
+    xcrun simctl delete "$simulator_id" >/dev/null 2>&1 || true
+  done <"$POOL_MANIFEST"
+}
+
+trap delete_pool_simulators EXIT
+
 SIMULATOR_IDS=()
 while IFS= read -r simulator_id; do
   [[ -n "$simulator_id" ]] || continue
   SIMULATOR_IDS+=("$simulator_id")
-done < <(bash "$ROOT_DIR/scripts/maestro/setup-ios-simulator-pool.sh" "$SHARD_COUNT")
+done <"$POOL_MANIFEST"
 if ((${#SIMULATOR_IDS[@]} != SHARD_COUNT)); then
-  echo "Expected ${SHARD_COUNT} simulators, got ${#SIMULATOR_IDS[@]}" >&2
+  echo "Expected ${SHARD_COUNT} simulators in ${POOL_MANIFEST}, got ${#SIMULATOR_IDS[@]}" >&2
   exit 1
 fi
 

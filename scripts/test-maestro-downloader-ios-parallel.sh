@@ -2,6 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/maestro/disable-device-animations.sh
+source "$ROOT_DIR/scripts/maestro/disable-device-animations.sh"
+
 SHARD_COUNT="${CAPGO_MAESTRO_SHARD_COUNT:-4}"
 
 if ! command -v maestro >/dev/null 2>&1; then
@@ -9,19 +12,33 @@ if ! command -v maestro >/dev/null 2>&1; then
   exit 1
 fi
 
-IFS=',' read -r -a SIMULATOR_IDS <<<"$(bash "$ROOT_DIR/scripts/maestro/setup-ios-simulator-pool.sh")"
+mapfile -t SIMULATOR_IDS < <(bash "$ROOT_DIR/scripts/maestro/setup-ios-simulator-pool.sh")
 if ((${#SIMULATOR_IDS[@]} != SHARD_COUNT)); then
   echo "Expected ${SHARD_COUNT} simulators, got ${#SIMULATOR_IDS[@]}" >&2
   exit 1
 fi
 
+run_shard_worker() {
+  local shard_index="$1"
+  local device_id="$2"
+  CAPGO_MAESTRO_RESULTS_DIR="$ROOT_DIR/maestro-results-ios-shard-${shard_index}" \
+    bash "$ROOT_DIR/scripts/maestro/maestro-shard-worker.sh" ios "$shard_index" "$SHARD_COUNT" "$device_id"
+}
+
+boot_ios_simulator() {
+  local simulator_id="$1"
+  xcrun simctl boot "$simulator_id" >/dev/null 2>&1 || true
+  xcrun simctl bootstatus "$simulator_id" -b
+  disable_ios_simulator_animations "$simulator_id"
+}
+
 pids=()
 fail=0
-for shard_index in $(seq 0 $((SHARD_COUNT - 1))); do
+for shard_index in "${!SIMULATOR_IDS[@]}"; do
   device_id="${SIMULATOR_IDS[$shard_index]}"
   (
-    CAPGO_MAESTRO_RESULTS_DIR="$ROOT_DIR/maestro-results-ios-shard-${shard_index}" \
-      bash "$ROOT_DIR/scripts/maestro/maestro-shard-worker.sh" ios "$shard_index" "$SHARD_COUNT" "$device_id"
+    boot_ios_simulator "$device_id"
+    run_shard_worker "$shard_index" "$device_id"
   ) &
   pids+=("$!")
 done

@@ -44,30 +44,7 @@ for index in $(seq 1 $((SHARD_COUNT - 1))); do
   printf '%s\n' "$clone_id" >>"$POOL_FILE"
 done
 
-boot_pids=()
-boot_fail=0
 while IFS= read -r simulator_id; do
-  (
-    xcrun simctl boot "$simulator_id" >/dev/null 2>&1 || true
-    xcrun simctl bootstatus "$simulator_id" -b
-  ) &
-  boot_pids+=("$!")
+  printf '%s\n' "$simulator_id"
 done <"$POOL_FILE"
-for pid in "${boot_pids[@]}"; do
-  if ! wait "$pid"; then
-    boot_fail=1
-  fi
-done
-if (( boot_fail != 0 )); then
-  echo "One or more iOS simulators failed to boot." >&2
-  exit 1
-fi
-# shellcheck source=scripts/maestro/disable-device-animations.sh
-source "$ROOT_DIR/scripts/maestro/disable-device-animations.sh"
-while IFS= read -r simulator_id; do
-  disable_ios_simulator_animations "$simulator_id"
-done <"$POOL_FILE"
-
-POOL_CSV="$(paste -sd, "$POOL_FILE")"
 rm -f "$POOL_FILE"
-printf '%s\n' "$POOL_CSV"

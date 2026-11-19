@@ -501,6 +501,7 @@ public class OkHttpDownloadExecutorTest {
                     destination,
                     new JSObject(),
                     "cellular",
+                    null,
                     (id, progress) -> {},
                     (id, ok, cancelled, errorMessage) -> {
                         outcomes.add(new TransferOutcome(taskId, ok, cancelled, errorMessage));
@@ -578,6 +579,7 @@ public class OkHttpDownloadExecutorTest {
                     destination,
                     new JSObject(),
                     "cellular",
+                    null,
                     (id, progress) -> {},
                     (id, ok, cancelled, errorMessage) -> {
                         outcomes.add(new TransferOutcome(taskId, ok, cancelled, errorMessage));
@@ -623,6 +625,7 @@ public class OkHttpDownloadExecutorTest {
                     destination,
                     new JSObject(),
                     "cellular",
+                    null,
                     (id, progress) -> {},
                     (id, ok, cancelled, errorMessage) -> finished.countDown()
                 );

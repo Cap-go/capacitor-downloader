@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import android.app.DownloadManager;
 import android.content.Context;
+import android.database.MatrixCursor;
 import android.os.Looper;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.PluginCall;
@@ -85,6 +86,17 @@ public class CapacitorDownloaderPluginBatchEntryTest {
         AtomicLong nextSystemId = new AtomicLong(3000L);
         when(downloadManager.enqueue(any(DownloadManager.Request.class))).thenAnswer((invocation) -> nextSystemId.getAndIncrement());
 
+        MatrixCursor cursor = new MatrixCursor(new String[] {
+            DownloadManager.COLUMN_ID,
+            DownloadManager.COLUMN_STATUS,
+            DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR,
+            DownloadManager.COLUMN_TOTAL_SIZE_BYTES
+        });
+        for (long id = 3000L; id < 3100L; id++) {
+            cursor.addRow(new Object[] { id, DownloadManager.STATUS_RUNNING, 10L, 100L });
+        }
+        when(downloadManager.query(any())).thenReturn(cursor);
+
         PluginCall call = buildBatchCall("hundred-batch", 100);
         plugin.download(call);
         Shadows.shadowOf(Looper.getMainLooper()).idle();
@@ -92,16 +104,8 @@ public class CapacitorDownloaderPluginBatchEntryTest {
         verify(call, timeout(5000)).resolve(any());
         verify(downloadManager, times(100)).enqueue(any(DownloadManager.Request.class));
 
-        @SuppressWarnings("unchecked")
-        Map<String, Long> batchProgressPollingGeneration = (Map<String, Long>) getField(plugin, "batchProgressPollingGeneration").get(
-            plugin
-        );
-        assertEquals(1, batchProgressPollingGeneration.size());
-        assertNotNull(batchProgressPollingGeneration.get("hundred-batch"));
-
-        ExecutorService okHttpTransferExecutor = (ExecutorService) getField(plugin, "okHttpTransferExecutor").get(plugin);
-        assertTrue(okHttpTransferExecutor instanceof ThreadPoolExecutor);
-        assertEquals(4, ((ThreadPoolExecutor) okHttpTransferExecutor).getMaximumPoolSize());
+        verify(downloadManager, timeout(5000).atLeastOnce()).query(any());
+        verify(downloadManager, times(1)).query(any());
     }
 
     @Test

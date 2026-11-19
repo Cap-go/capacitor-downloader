@@ -4,7 +4,7 @@ import type { PluginListenerHandle } from '@capacitor/core';
  * Legacy batch file limit constant.
  *
  * @deprecated No longer enforced. Kept for compatibility within the Capacitor 8 line and removed in the next major.
- * Batch `download()` accepts any file count; native layers schedule transfers instead.
+ * Non-empty native batches no longer have a fixed maximum file count; native layers schedule transfers instead.
  */
 export const DOWNLOAD_BATCH_MAX_FILES = 32;
 

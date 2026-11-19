@@ -25,13 +25,24 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private var downloadGenerations: [String: UInt64] = [:]
     private var taskGenerations: [String: UInt64] = [:]
     private let tasksLock = NSLock()
-    private let batchCoordinator = DownloadBatchCoordinator()
+    private let batchCoordinator: DownloadBatchCoordinator
     private let continuedProcessing = DownloadContinuedProcessingCoordinator()
     private var foregroundSessionDownloadIds = Set<String>()
     private var pendingDownloadStarts = Set<String>()
     private let foregroundSessionLock = NSLock()
     internal private(set) var restoredBackgroundSessionIdentifiers: [String] = []
     internal private(set) var didRestoreGenerationsBeforeDelegateRegistration = false
+
+    public override init() {
+        batchCoordinator = DownloadBatchCoordinator()
+        super.init()
+    }
+
+    internal init(batchStore: DownloadBatchStore) {
+        batchCoordinator = DownloadBatchCoordinator(store: batchStore)
+        super.init()
+    }
+
     private func registerDownloadDelegateIfGenerationsRestored() {
         tasksLock.lock()
         let generationsRestored = !downloadGenerations.isEmpty
@@ -745,16 +756,11 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
             if let batchParts = batchCoordinator.activeChildParts(for: id) {
                 removeTask(for: id, completing: downloadTask, in: session)
-                batchCoordinator.recordMovedDestination(
-                    batchId: batchParts.batchId,
-                    generation: batchParts.generation,
-                    fileIndex: batchParts.fileIndex,
-                    destination: destinationURL.path
-                )
                 switch batchCoordinator.markFileCompleted(
                     batchId: batchParts.batchId,
                     generation: batchParts.generation,
-                    fileIndex: batchParts.fileIndex
+                    fileIndex: batchParts.fileIndex,
+                    movedDestination: destinationURL.path
                 ) {
                 case .allSucceeded(let batchId, let generation):
                     notifyListeners("downloadCompleted", data: ["id": batchId])

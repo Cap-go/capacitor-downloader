@@ -20,6 +20,9 @@ import java.io.File;
 import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -389,6 +392,7 @@ public class OkHttpDownloadExecutorTest {
         byte[] payload = "slot-test".getBytes(StandardCharsets.UTF_8);
         int total = successCount + http500Count + cancelCount;
         CountDownLatch finished = new CountDownLatch(total);
+        List<TransferOutcome> outcomes = Collections.synchronizedList(new ArrayList<>());
         java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(Math.max(1, total));
 
         for (int index = 0; index < successCount; index++) {
@@ -423,7 +427,10 @@ public class OkHttpDownloadExecutorTest {
                     new JSObject(),
                     "cellular",
                     (id, progress) -> {},
-                    (id, ok, cancelled, errorMessage) -> finished.countDown()
+                    (id, ok, cancelled, errorMessage) -> {
+                        outcomes.add(new TransferOutcome(taskId, ok, cancelled, errorMessage));
+                        finished.countDown();
+                    }
                 );
             });
         }
@@ -436,13 +443,49 @@ public class OkHttpDownloadExecutorTest {
         assertTrue(finished.await(25, TimeUnit.SECONDS));
         workers.shutdown();
         assertTrue(workers.awaitTermination(10, TimeUnit.SECONDS));
+        for (int index = 0; index < successCount; index++) {
+            assertOutcomePresent(outcomes, "outcome-" + index, true, false);
+        }
+        for (int index = 0; index < http500Count; index++) {
+            assertOutcomePresent(outcomes, "outcome-" + (successCount + index), false, false);
+        }
+        if (cancelCount > 0) {
+            assertOutcomePresent(outcomes, cancelTaskId, false, true);
+        }
         assertEquals(4, executor.availableTransferSlots());
+    }
+
+    private static void assertOutcomePresent(List<TransferOutcome> outcomes, String taskId, boolean success, boolean cancelled) {
+        TransferOutcome match = null;
+        for (TransferOutcome outcome : outcomes) {
+            if (taskId.equals(outcome.taskId)) {
+                match = outcome;
+                break;
+            }
+        }
+        assertNotNull("missing outcome for " + taskId, match);
+        assertEquals(success, match.success);
+        assertEquals(cancelled, match.cancelled);
+    }
+
+    private static final class TransferOutcome {
+
+        final String taskId;
+        final boolean success;
+        final boolean cancelled;
+
+        TransferOutcome(String taskId, boolean success, boolean cancelled, String errorMessage) {
+            this.taskId = taskId;
+            this.success = success;
+            this.cancelled = cancelled;
+        }
     }
 
     @Test(timeout = 60_000)
     public void transferSlotsReturnToFourAfterMixedOutcomes() throws Exception {
         byte[] payload = "slot-test".getBytes(StandardCharsets.UTF_8);
         CountDownLatch finished = new CountDownLatch(5);
+        List<TransferOutcome> outcomes = Collections.synchronizedList(new ArrayList<>());
         java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(5);
 
         for (int index = 0; index < 2; index++) {
@@ -474,7 +517,10 @@ public class OkHttpDownloadExecutorTest {
                     new JSObject(),
                     "cellular",
                     (id, progress) -> {},
-                    (id, ok, cancelled, errorMessage) -> finished.countDown()
+                    (id, ok, cancelled, errorMessage) -> {
+                        outcomes.add(new TransferOutcome(taskId, ok, cancelled, errorMessage));
+                        finished.countDown();
+                    }
                 );
             });
         }
@@ -483,6 +529,68 @@ public class OkHttpDownloadExecutorTest {
         executor.cancel("mixed-4", new File(tempDir, "mixed-4.bin"));
 
         assertTrue(finished.await(30, TimeUnit.SECONDS));
+        workers.shutdown();
+        assertTrue(workers.awaitTermination(10, TimeUnit.SECONDS));
+        assertOutcomePresent(outcomes, "mixed-0", true, false);
+        assertOutcomePresent(outcomes, "mixed-1", true, false);
+        assertOutcomePresent(outcomes, "mixed-2", false, false);
+        assertOutcomePresent(outcomes, "mixed-3", false, false);
+        assertOutcomePresent(outcomes, "mixed-4", false, true);
+        assertEquals(4, executor.availableTransferSlots());
+    }
+
+    @Test(timeout = 60_000)
+    public void fifthTransferWaitsUntilSlotOpensUnderSaturation() throws Exception {
+        byte[] payload = "saturation".getBytes(StandardCharsets.UTF_8);
+        CountDownLatch fifthSubmitted = new CountDownLatch(1);
+
+        for (int index = 0; index < 4; index++) {
+            server.enqueue(
+                new MockResponse()
+                    .setBody(new okio.Buffer().write(payload))
+                    .addHeader("Content-Length", String.valueOf(payload.length))
+                    .setBodyDelay(30, TimeUnit.SECONDS)
+            );
+        }
+        server.enqueue(
+            new MockResponse().setBody(new okio.Buffer().write(payload)).addHeader("Content-Length", String.valueOf(payload.length))
+        );
+
+        java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(5);
+        CountDownLatch finished = new CountDownLatch(5);
+
+        for (int index = 0; index < 5; index++) {
+            final int taskIndex = index;
+            workers.submit(() -> {
+                String taskId = "sat-" + taskIndex;
+                File destination = new File(tempDir, taskId + ".bin");
+                OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer(taskId);
+                assertNotNull(reservation);
+                if (taskIndex == 4) {
+                    fifthSubmitted.countDown();
+                }
+                executor.start(
+                    reservation,
+                    server.url("/sat-" + taskIndex).toString(),
+                    destination,
+                    new JSObject(),
+                    "cellular",
+                    (id, progress) -> {},
+                    (id, ok, cancelled, errorMessage) -> finished.countDown()
+                );
+            });
+        }
+
+        assertTrue(fifthSubmitted.await(10, TimeUnit.SECONDS));
+        long deadline = System.currentTimeMillis() + 15_000;
+        while (System.currentTimeMillis() < deadline && executor.availableTransferSlots() > 0) {
+            Thread.sleep(25);
+        }
+        assertEquals(0, executor.availableTransferSlots());
+
+        executor.cancel("sat-0", new File(tempDir, "sat-0.bin"));
+
+        assertTrue(finished.await(45, TimeUnit.SECONDS));
         workers.shutdown();
         assertTrue(workers.awaitTermination(10, TimeUnit.SECONDS));
         assertEquals(4, executor.availableTransferSlots());

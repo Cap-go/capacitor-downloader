@@ -45,6 +45,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private ExecutorService downloadManagerExecutor;
     private ExecutorService okHttpTransferExecutor;
     private final Map<String, Long> batchProgressPollingGeneration = new ConcurrentHashMap<>();
+    private final Object batchPollRegistrationLock = new Object();
     private OkHttpDownloadExecutor okHttpDownloadExecutor;
     private OkHttpDownloadProgressNotifier okHttpProgressNotifier;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -605,7 +606,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (batch == null) {
             return;
         }
-        stopBatchProgressPolling(batch.batchId);
+        stopBatchProgressPolling(batch.batchId, batch.generation);
         batch.rolledBack.set(true);
         if (!batches.remove(batch.batchId, batch)) {
             return;
@@ -674,7 +675,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (batch == null || batch.failed.getAndSet(true)) {
             return;
         }
-        stopBatchProgressPolling(batchId);
+        stopBatchProgressPolling(batchId, batch.generation);
         if (!batches.remove(batchId, batch)) {
             return;
         }
@@ -738,7 +739,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         if (allDone) {
             final long storedGeneration = batch.generation;
-            stopBatchProgressPolling(batchId);
+            stopBatchProgressPolling(batchId, storedGeneration);
             if (!batches.remove(batchId, batch)) {
                 return;
             }
@@ -824,9 +825,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 result.put("status", DownloadManager.STATUS_PENDING);
                 call.resolve(result);
 
-                okHttpProgressNotifier.started(id, title, description, notificationMode);
-
-                runOkHttpTransferWork(() -> {
+                boolean submitted = runOkHttpTransferWork(() -> {
+                    okHttpProgressNotifier.started(id, title, description, notificationMode);
                     try {
                         okHttpDownloadExecutor.start(
                             okHttpReservation,
@@ -888,6 +888,16 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         });
                     }
                 });
+                if (!submitted) {
+                    okHttpDownloadExecutor.abandonTransfer(okHttpReservation);
+                    handler.post(() -> {
+                        if (!isCurrentOkHttpGeneration(id, storedGeneration)) {
+                            return;
+                        }
+                        okHttpProgressNotifier.abandonDownload(id);
+                        applyOkHttpStartFailureIfCurrent(id, storedGeneration, destinationFile, "Download manager is shutting down");
+                    });
+                }
             },
             () -> {
                 downloads.remove(id, pendingToken);
@@ -910,7 +920,13 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
     private void startBatchProgressCheck(final String batchId, final DownloadBatchState batchState) {
         final long pollGeneration = batchState.generation;
-        batchProgressPollingGeneration.put(batchId, pollGeneration);
+        synchronized (batchPollRegistrationLock) {
+            DownloadBatchState current = batches.get(batchId);
+            if (current != batchState || current.generation != pollGeneration) {
+                return;
+            }
+            batchProgressPollingGeneration.put(batchId, pollGeneration);
+        }
         final Runnable[] pollHolder = new Runnable[1];
         Runnable poll = new Runnable() {
             @Override
@@ -927,6 +943,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 List<Long> downloadIds = new ArrayList<>();
                 Map<Long, String> systemIdToChild = new HashMap<>();
                 for (String childId : current.ownedChildIds) {
+                    DownloadBatchState.BatchIdParts childParts = DownloadBatchState.parseFileTaskId(childId);
+                    if (childParts != null && current.isFileCompleted(childParts.fileIndex)) {
+                        continue;
+                    }
                     Long systemDownloadId = downloads.get(childId);
                     if (
                         systemDownloadId == null ||
@@ -941,11 +961,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 }
 
                 if (downloadIds.isEmpty()) {
-                    if (
-                        Long.valueOf(pollGeneration).equals(batchProgressPollingGeneration.get(batchId)) &&
-                        batches.get(batchId) != null &&
-                        batches.get(batchId).generation == pollGeneration
-                    ) {
+                    if (shouldScheduleBatchPoll(batchId, pollGeneration)) {
                         handler.postDelayed(pollHolder[0], 1000);
                     }
                     return;
@@ -1000,11 +1016,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         }
                         handler.post(() -> {
                             deliverBatchProgressSnapshots(batchId, pollGeneration, snapshots);
-                            if (
-                                Long.valueOf(pollGeneration).equals(batchProgressPollingGeneration.get(batchId)) &&
-                                batches.get(batchId) != null &&
-                                batches.get(batchId).generation == pollGeneration
-                            ) {
+                            if (shouldScheduleBatchPoll(batchId, pollGeneration)) {
                                 handler.postDelayed(pollHolder[0], 1000);
                             }
                         });
@@ -1019,8 +1031,16 @@ public class CapacitorDownloaderPlugin extends Plugin {
         handler.post(poll);
     }
 
-    private void stopBatchProgressPolling(String batchId) {
-        batchProgressPollingGeneration.remove(batchId);
+    private void stopBatchProgressPolling(String batchId, long generation) {
+        batchProgressPollingGeneration.remove(batchId, generation);
+    }
+
+    private boolean shouldScheduleBatchPoll(String batchId, long pollGeneration) {
+        if (!Long.valueOf(pollGeneration).equals(batchProgressPollingGeneration.get(batchId))) {
+            return false;
+        }
+        DownloadBatchState current = batches.get(batchId);
+        return current != null && current.generation == pollGeneration;
     }
 
     private void deliverBatchProgressSnapshots(String batchId, long pollGeneration, List<ProgressSnapshot> snapshots) {
@@ -1029,6 +1049,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
         for (ProgressSnapshot snapshot : snapshots) {
+            DownloadBatchState.BatchIdParts parts = resolveOwnedBatchChild(snapshot.id);
+            if (parts != null && batchState.isFileCompleted(parts.fileIndex)) {
+                continue;
+            }
             Long trackedDownloadId = downloads.get(snapshot.id);
             if (
                 trackedDownloadId == null ||
@@ -1281,7 +1305,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
         batch.cancelled.set(true);
-        stopBatchProgressPolling(batchId);
+        stopBatchProgressPolling(batchId, batch.generation);
 
         List<StoppedBatchChild> stoppedChildren = new ArrayList<>();
         for (String childId : new ArrayList<>(batch.ownedChildIds)) {
@@ -1490,15 +1514,16 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
     }
 
-    private void runOkHttpTransferWork(Runnable work) {
+    private boolean runOkHttpTransferWork(Runnable work) {
         ExecutorService executor = okHttpTransferExecutor;
         if (executor == null) {
-            return;
+            return false;
         }
         try {
             executor.execute(work);
+            return true;
         } catch (RejectedExecutionException ignored) {
-            // Plugin is shutting down; OkHttp work stops quietly.
+            return false;
         }
     }
 

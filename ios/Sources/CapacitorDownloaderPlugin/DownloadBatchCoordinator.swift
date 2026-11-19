@@ -178,7 +178,7 @@ final class DownloadBatchCoordinator {
         }
         batch.paused = paused
         batches[batchId] = batch
-        schedulePersistBatchesLocked()
+        persistBatchesImmediatelyLocked()
     }
 
     func overallProgress(batchId: String) -> Float? {
@@ -247,7 +247,12 @@ final class DownloadBatchCoordinator {
         return (overall, clamped)
     }
 
-    func markFileCompleted(batchId: String, generation: UInt64, fileIndex: Int) -> BatchCompletionState? {
+    func markFileCompleted(
+        batchId: String,
+        generation: UInt64,
+        fileIndex: Int,
+        movedDestination: String? = nil
+    ) -> BatchCompletionState? {
         batchesLock.lock()
         defer { batchesLock.unlock() }
         guard var batch = batches[batchId], batch.generation == generation, !batch.failed, !batch.cancelled else {
@@ -255,6 +260,9 @@ final class DownloadBatchCoordinator {
         }
         guard fileIndex >= 0, fileIndex < batch.fileProgress.count else {
             return nil
+        }
+        if let movedDestination {
+            batch.savedDestinations[fileIndex] = movedDestination
         }
         if batch.fileCompleted[fileIndex] {
             if batch.completedCount >= batch.fileCount {
@@ -355,11 +363,24 @@ final class DownloadBatchCoordinator {
         }
     }
 
+    internal func flushPersistenceForTests() {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        persistDebounceWorkItem?.cancel()
+        persistDebounceWorkItem = nil
+        persistBatchesImmediatelyLocked()
+    }
+
     private func restorePersistedBatches() {
         batchesLock.lock()
         defer { batchesLock.unlock() }
         let records = store.load()
+        var skippedOrphan = false
         for record in records.values {
+            if record.childTaskIds.isEmpty && !record.failed && !record.cancelled && record.completedCount < record.fileCount {
+                skippedOrphan = true
+                continue
+            }
             var childSet = Set(record.childTaskIds)
             batches[record.batchId] = ActiveBatch(
                 batchId: record.batchId,
@@ -378,6 +399,9 @@ final class DownloadBatchCoordinator {
             for taskId in childSet {
                 registeredChildren[taskId] = record.batchId
             }
+        }
+        if skippedOrphan {
+            persistBatchesImmediatelyLocked()
         }
     }
 }

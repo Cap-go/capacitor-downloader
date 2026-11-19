@@ -313,20 +313,19 @@ final class DownloadBatchProgressTests: XCTestCase {
             "rapid destination updates should debounce UserDefaults writes"
         )
 
-        let expectation = expectation(description: "debounced persist")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-            XCTAssertGreaterThanOrEqual(store.saveInvocationCountForTests, 1)
-            expectation.fulfill()
-        }
-        wait(for: [expectation], timeout: 2)
+        coordinator.flushPersistenceForTests()
+
+        let stored = store.load()["debounce"]
+        XCTAssertEqual(stored?.savedDestinations.count, 40)
+        XCTAssertGreaterThanOrEqual(store.saveInvocationCountForTests, 1)
 
         coordinator.removeBatch(batchId: "debounce")
         store.clear()
     }
 
     func testDownloadBatchEnqueuesFortyFilesThroughPlugin() {
-        DownloadBatchStore.shared.clear()
-        let plugin = CapacitorDownloaderPlugin()
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let plugin = CapacitorDownloaderPlugin(batchStore: store)
         plugin.load()
         let files: JSArray = (0..<40).map { index in
             [
@@ -357,8 +356,15 @@ final class DownloadBatchProgressTests: XCTestCase {
         }
         plugin.download(call)
         wait(for: [expectation], timeout: 5)
-        XCTAssertEqual(plugin.trackedBatchFileCountForTests(batchId: "forty-batch"), 40)
+        let childIds = plugin.batchCoordinatorForTests.childTaskIds(batchId: "forty-batch")
+        XCTAssertEqual(childIds.count, 40)
+        XCTAssertEqual(plugin.batchCoordinatorForTests.fileCount(batchId: "forty-batch"), 40)
+        if let generation = plugin.batchCoordinatorForTests.generation(for: "forty-batch") {
+            let lastTaskId = plugin.batchCoordinatorForTests.fileTaskId(batchId: "forty-batch", generation: generation, fileIndex: 39)
+            XCTAssertTrue(childIds.contains(lastTaskId))
+        }
         plugin.tearDownBatchForTests(batchId: "forty-batch")
+        store.clear()
     }
 }
 

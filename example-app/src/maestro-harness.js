@@ -675,7 +675,7 @@ async function resumePendingDownload(flowId, payload) {
   if (payload.batch) {
     let relaunch = await readDownloadStatus(id);
     setSummary(`STATE:batch-kill-mid:relaunch:${id}:${relaunch.state}:${relaunch.progress}`);
-  if (relaunch.state !== 'DONE' && relaunch.state !== 'RUNNING' && payload.files?.length) {
+    if (relaunch.state !== 'DONE' && relaunch.state !== 'RUNNING' && payload.files?.length) {
       try {
         await plugin.download({
           id,

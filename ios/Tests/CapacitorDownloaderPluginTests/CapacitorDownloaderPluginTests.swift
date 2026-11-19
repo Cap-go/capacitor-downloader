@@ -823,6 +823,83 @@ final class DownloadRetryBudgetStoreTests: XCTestCase {
     }
 }
 
+final class DownloadForegroundRetryRegistrationTests: XCTestCase {
+    func testPausedBatchRetryReplacementStaysSuspended() {
+        let plugin = CapacitorDownloaderPlugin()
+        guard let childId = plugin.testing_preparePausedBatchChild(
+            batchId: "bundle",
+            fileCount: 1,
+            fileIndex: 0
+        ) else {
+            XCTFail("expected paused batch child")
+            return
+        }
+        plugin.testing_setRetryBudget(downloadId: childId, retries: 2)
+        let session = DownloadBackgroundSessionManager.shared.session(
+            allowsCellularAccess: true,
+            preferForegroundCapable: false
+        )
+        let retryTask = session.downloadTask(with: URL(string: "https://example.com/file.bin")!)
+        retryTask.taskDescription = childId
+        let registered = plugin.testing_registerAndResumeRetryTask(
+            downloadId: childId,
+            retryTask: retryTask,
+            session: session,
+            generation: 1
+        )
+        XCTAssertTrue(registered)
+        XCTAssertTrue(plugin.hasRegisteredTask(id: childId))
+        XCTAssertEqual(retryTask.state, .suspended)
+    }
+
+    func testForegroundRetryStaysRegisteredWhileDelayPending() {
+        let plugin = CapacitorDownloaderPlugin()
+        let downloadId = "episode"
+        plugin.testing_setRetryBudget(downloadId: downloadId, retries: 2)
+        let session = DownloadBackgroundSessionManager.shared.session(
+            allowsCellularAccess: true,
+            preferForegroundCapable: true
+        )
+        let retryTask = session.downloadTask(with: URL(string: "https://example.com/file.bin")!)
+        retryTask.taskDescription = downloadId
+        XCTAssertTrue(
+            plugin.testing_registerPendingForegroundRetry(
+                downloadId: downloadId,
+                retryTask: retryTask,
+                session: session,
+                generation: 1,
+                delay: 3600
+            )
+        )
+        XCTAssertTrue(plugin.hasRegisteredTask(id: downloadId))
+        XCTAssertTrue(plugin.testing_hasPendingForegroundRetry(downloadId: downloadId))
+    }
+
+    func testContinuedProcessingExpiryCancelsPendingForegroundRetry() {
+        let plugin = CapacitorDownloaderPlugin()
+        let downloadId = "episode"
+        plugin.testing_setRetryBudget(downloadId: downloadId, retries: 2)
+        let session = DownloadBackgroundSessionManager.shared.session(
+            allowsCellularAccess: true,
+            preferForegroundCapable: true
+        )
+        let retryTask = session.downloadTask(with: URL(string: "https://example.com/file.bin")!)
+        retryTask.taskDescription = downloadId
+        XCTAssertTrue(
+            plugin.testing_registerPendingForegroundRetry(
+                downloadId: downloadId,
+                retryTask: retryTask,
+                session: session,
+                generation: 1,
+                delay: 3600
+            )
+        )
+        plugin.testing_cancelDownloadFromContinuedProcessingExpiry(downloadId: downloadId)
+        XCTAssertFalse(plugin.hasRegisteredTask(id: downloadId))
+        XCTAssertFalse(plugin.testing_hasPendingForegroundRetry(downloadId: downloadId))
+    }
+}
+
 final class DownloadConnectionRetryTests: XCTestCase {
     func testRetryableUrlErrorCodes() {
         let timeout = NSError(domain: NSURLErrorDomain, code: URLError.timedOut.rawValue)

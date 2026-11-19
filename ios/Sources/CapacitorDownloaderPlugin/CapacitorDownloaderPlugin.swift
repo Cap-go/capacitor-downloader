@@ -92,7 +92,22 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func cancelDownloadFromContinuedProcessingExpiry(_ downloadId: String) {
+        tasksLock.lock()
+        let hasPendingForegroundRetry = pendingRetryWorkItems[downloadId] != nil
+        tasksLock.unlock()
         guard let task = getTask(for: downloadId) else {
+            if hasPendingForegroundRetry {
+                clearRetryBudget(for: downloadId)
+                foregroundSessionLock.lock()
+                foregroundSessionDownloadIds.remove(downloadId)
+                foregroundSessionLock.unlock()
+                DownloadDestinationStore.shared.removeDestination(for: downloadId)
+                if let generation = generation(for: downloadId) {
+                    DownloadCompletedNotificationStore.shared.removeText(for: downloadId, generation: generation)
+                    presentFailedDownloadNotificationIfStored(downloadId: downloadId, generation: generation)
+                }
+                notifyListeners("downloadFailed", data: ["id": downloadId, "error": "Continued processing task expired"])
+            }
             return
         }
         task.cancel()
@@ -247,20 +262,49 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         generation: UInt64?
     ) -> Bool {
         tasksLock.lock()
-        let budgetPresent = downloadRetryBudgets[downloadId] != nil
-        let slotFree = tasks[downloadId] == nil
-        tasksLock.unlock()
-        guard budgetPresent, slotFree else {
+        guard downloadRetryBudgets[downloadId] != nil, tasks[downloadId] == nil else {
+            tasksLock.unlock()
             retryTask.cancel()
             return false
         }
-        setTask(retryTask, for: downloadId)
+        tasks[downloadId] = retryTask
         if let generation {
-            setTaskGeneration(generation, for: retryTask, in: session)
+            let key = DownloadTaskGenerationKey.storageKey(session: session, task: retryTask)
+            taskGenerations[key] = generation
+            DownloadTaskGenerationStore.shared.setGeneration(generation, forTask: retryTask, in: session)
         }
-        retryTask.resume()
+        let pausedChild = batchCoordinator.isActiveChildPaused(taskId: downloadId)
+        tasksLock.unlock()
+        if !pausedChild {
+            retryTask.resume()
+        }
         emitRetryProgressReset(for: downloadId)
         return true
+    }
+
+    private func resumePendingForegroundRetryIfCurrent(
+        downloadId: String,
+        retryTask: URLSessionDownloadTask
+    ) {
+        tasksLock.lock()
+        guard downloadRetryBudgets[downloadId] != nil, tasks[downloadId] === retryTask else {
+            pendingRetryWorkItems.removeValue(forKey: downloadId)
+            tasksLock.unlock()
+            retryTask.cancel()
+            return
+        }
+        pendingRetryWorkItems.removeValue(forKey: downloadId)
+        let pausedChild = batchCoordinator.isActiveChildPaused(taskId: downloadId)
+        tasksLock.unlock()
+        if !pausedChild {
+            retryTask.resume()
+        }
+    }
+
+    private func isPendingForegroundRetry(downloadId: String) -> Bool {
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
+        return pendingRetryWorkItems[downloadId] != nil
     }
 
     private func scheduleConnectionRetryIfPossible(
@@ -309,20 +353,24 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let self else {
                 return
             }
-            _ = self.registerAndResumeRetryTaskIfCurrent(
-                downloadId: downloadId,
-                retryTask: retryTask,
-                session: session,
-                generation: generation
-            )
-            self.tasksLock.lock()
-            self.pendingRetryWorkItems.removeValue(forKey: downloadId)
-            self.tasksLock.unlock()
+            self.resumePendingForegroundRetryIfCurrent(downloadId: downloadId, retryTask: retryTask)
         }
         tasksLock.lock()
+        guard downloadRetryBudgets[downloadId] != nil else {
+            tasksLock.unlock()
+            retryTask.cancel()
+            return false
+        }
+        tasks[downloadId] = retryTask
+        if let generation {
+            let key = DownloadTaskGenerationKey.storageKey(session: session, task: retryTask)
+            taskGenerations[key] = generation
+            DownloadTaskGenerationStore.shared.setGeneration(generation, forTask: retryTask, in: session)
+        }
         cancelPendingRetryWorkLocked(for: downloadId)
         pendingRetryWorkItems[downloadId] = workItem
         tasksLock.unlock()
+        emitRetryProgressReset(for: downloadId)
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: workItem)
         return true
     }
@@ -613,6 +661,11 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
+        if isPendingForegroundRetry(id) {
+            call.resolve()
+            return
+        }
+
         guard let task = getTask(for: id) else {
             call.reject("Task not found")
             return
@@ -634,6 +687,11 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
+        if isPendingForegroundRetry(id) {
+            call.resolve()
+            return
+        }
+
         guard let task = getTask(for: id) else {
             call.reject("Task not found")
             return
@@ -644,15 +702,22 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func pauseBatch(batchId: String) {
-        batchCoordinator.setPaused(batchId: batchId, paused: true)
-        for taskId in batchCoordinator.childTaskIds(batchId: batchId) {
-            getTask(for: taskId)?.suspend()
+        tasksLock.lock()
+        let childTaskIds = batchCoordinator.setPausedReturningChildTaskIds(batchId: batchId, paused: true)
+        for taskId in childTaskIds {
+            tasks[taskId]?.suspend()
         }
+        tasksLock.unlock()
     }
 
     private func resumeBatch(batchId: String) {
-        batchCoordinator.setPaused(batchId: batchId, paused: false)
-        for taskId in batchCoordinator.childTaskIds(batchId: batchId) {
+        tasksLock.lock()
+        let childTaskIds = batchCoordinator.setPausedReturningChildTaskIds(batchId: batchId, paused: false)
+        tasksLock.unlock()
+        for taskId in childTaskIds {
+            if isPendingForegroundRetry(taskId) {
+                continue
+            }
             getTask(for: taskId)?.resume()
         }
     }
@@ -789,6 +854,74 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func getPluginVersion(_ call: CAPPluginCall) {
         call.resolve(["version": self.pluginVersion])
+    }
+
+    internal func testing_setRetryBudget(downloadId: String, retries: Int) {
+        setRetryBudget(for: downloadId, retries: retries)
+    }
+
+    internal func testing_preparePausedBatchChild(
+        batchId: String,
+        fileCount: Int,
+        fileIndex: Int
+    ) -> String? {
+        guard let generation = batchCoordinator.startBatch(batchId: batchId, fileCount: fileCount, singleDownloadIds: []) else {
+            return nil
+        }
+        let childTaskId = batchCoordinator.fileTaskId(batchId: batchId, generation: generation, fileIndex: fileIndex)
+        batchCoordinator.registerChildTask(batchId: batchId, taskId: childTaskId, fileIndex: fileIndex)
+        _ = batchCoordinator.setPausedReturningChildTaskIds(batchId: batchId, paused: true)
+        return childTaskId
+    }
+
+    internal func testing_registerAndResumeRetryTask(
+        downloadId: String,
+        retryTask: URLSessionDownloadTask,
+        session: URLSession,
+        generation: UInt64?
+    ) -> Bool {
+        registerAndResumeRetryTaskIfCurrent(
+            downloadId: downloadId,
+            retryTask: retryTask,
+            session: session,
+            generation: generation
+        )
+    }
+
+    internal func testing_registerPendingForegroundRetry(
+        downloadId: String,
+        retryTask: URLSessionDownloadTask,
+        session: URLSession,
+        generation: UInt64?,
+        delay: TimeInterval
+    ) -> Bool {
+        tasksLock.lock()
+        guard downloadRetryBudgets[downloadId] != nil else {
+            tasksLock.unlock()
+            return false
+        }
+        tasks[downloadId] = retryTask
+        if let generation {
+            let key = DownloadTaskGenerationKey.storageKey(session: session, task: retryTask)
+            taskGenerations[key] = generation
+            DownloadTaskGenerationStore.shared.setGeneration(generation, forTask: retryTask, in: session)
+        }
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.resumePendingForegroundRetryIfCurrent(downloadId: downloadId, retryTask: retryTask)
+        }
+        cancelPendingRetryWorkLocked(for: downloadId)
+        pendingRetryWorkItems[downloadId] = workItem
+        tasksLock.unlock()
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay, execute: workItem)
+        return true
+    }
+
+    internal func testing_hasPendingForegroundRetry(downloadId: String) -> Bool {
+        isPendingForegroundRetry(downloadId)
+    }
+
+    internal func testing_cancelDownloadFromContinuedProcessingExpiry(downloadId: String) {
+        cancelDownloadFromContinuedProcessingExpiry(downloadId)
     }
 }
 

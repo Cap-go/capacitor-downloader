@@ -34,7 +34,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
     static final int BATCH_MAX_FILES = 32;
 
-    private final String pluginVersion = "8.8.0";
+    private final String pluginVersion = "8.8.3";
 
     private DownloadManager downloadManager;
     private final Map<String, Long> downloads = new ConcurrentHashMap<>();
@@ -241,6 +241,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 resolvedDestination.file,
                 call.getObject("headers"),
                 call.getString("network"),
+                call.getString("lengthHeader"),
                 call.getString("notification"),
                 call.getString("title"),
                 call.getString("description"),
@@ -877,6 +878,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         File destinationFile,
         JSObject headers,
         String network,
+        String lengthHeader,
         String notification,
         String title,
         String description,
@@ -946,6 +948,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         destinationFile,
                         headers,
                         network,
+                        lengthHeader,
                         (downloadId, progress) ->
                             handler.post(() -> {
                                 if (!isCurrentOkHttpDownload(downloadId) || !isCurrentOkHttpGeneration(downloadId, storedGeneration)) {

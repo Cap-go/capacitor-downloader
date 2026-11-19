@@ -92,6 +92,10 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func cancelDownloadFromContinuedProcessingExpiry(_ downloadId: String) {
+        if batchCoordinator.isBatch(batchId: downloadId), let generation = batchCoordinator.generation(for: downloadId) {
+            failBatch(batchId: downloadId, generation: generation, fileIndex: nil, error: "Continued processing task expired")
+            return
+        }
         guard let task = getTask(for: downloadId) else {
             return
         }
@@ -366,15 +370,21 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// The continued processing task to run the download in: `title` and `description` with `iosContinuedProcessing`,
+    /// or the deprecated `iosContinuedProcessingTitle` and `iosContinuedProcessingSubtitle` of 8.8.0.
     private func parseContinuedProcessingRequest(_ call: CAPPluginCall) -> DownloadContinuedProcessingCoordinator.Request? {
-        guard let title = call.getString("iosContinuedProcessingTitle")?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !title.isEmpty else {
+        let useShared = call.getBool("iosContinuedProcessing") == true
+        let title = Self.nonEmpty(useShared ? call.getString("title") : call.getString("iosContinuedProcessingTitle"))
+        guard let title else {
             return nil
         }
-        let subtitle = call.getString("iosContinuedProcessingSubtitle")?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedSubtitle = (subtitle?.isEmpty == false) ? subtitle : nil
-        return DownloadContinuedProcessingCoordinator.Request(title: title, subtitle: normalizedSubtitle)
+        let subtitle = Self.nonEmpty(useShared ? call.getString("description") : call.getString("iosContinuedProcessingSubtitle"))
+        return DownloadContinuedProcessingCoordinator.Request(title: title, subtitle: subtitle)
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
     }
 
     private func markContinuedProcessingFinished(downloadId: String, success: Bool) {
@@ -394,7 +404,6 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         let headers = call.getObject("headers") as? [String: String] ?? [:]
         let lengthHeader = normalizedLengthHeader(from: call)
         let wifiOnly = call.getString("network") == "wifi-only"
-        let batchSession = downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: false)
 
         for fileObject in files {
             guard let urlString = fileObject["url"] as? String,
@@ -427,44 +436,106 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             generation: generation
         )
 
-        var stagedTasks: [(taskId: String, task: URLSessionDownloadTask)] = []
+        let continuedRequest = parseContinuedProcessingRequest(call)
+        continuedProcessing.beginIfPossible(downloadId: batchId, request: continuedRequest) { [weak self] useForeground in
+            guard let self else {
+                return
+            }
+            guard self.batchCoordinator.batchStartupSnapshot(batchId: batchId, generation: generation).allowed else {
+                self.markContinuedProcessingFinished(downloadId: batchId, success: false)
+                call.reject("Download was cancelled")
+                return
+            }
+            let batchSession = self.downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: useForeground)
+            var stagedTasks: [(taskId: String, task: URLSessionDownloadTask)] = []
+            var childRegistrations: [(taskId: String, fileIndex: Int)] = []
 
-        for (index, entry) in parsed.enumerated() {
-            let taskId = batchCoordinator.fileTaskId(batchId: batchId, generation: generation, fileIndex: index)
-            DownloadDestinationStore.shared.setDestination(entry.destination, for: taskId)
-            batchCoordinator.registerChildTask(batchId: batchId, taskId: taskId, fileIndex: index)
-            registerLengthHeaderOption(lengthHeader, for: taskId)
+            for (index, entry) in parsed.enumerated() {
+                let taskId = self.batchCoordinator.fileTaskId(batchId: batchId, generation: generation, fileIndex: index)
+                DownloadDestinationStore.shared.setDestination(entry.destination, for: taskId)
+                registerLengthHeaderOption(lengthHeader, for: taskId)
 
-            var request = URLRequest(url: entry.url)
-            for (key, value) in headers {
-                request.setValue(value, forHTTPHeaderField: key)
+                var request = URLRequest(url: entry.url)
+                for (key, value) in headers {
+                    request.setValue(value, forHTTPHeaderField: key)
+                }
+
+                let task = batchSession.downloadTask(with: request)
+                task.taskDescription = taskId
+                stagedTasks.append((taskId, task))
+                childRegistrations.append((taskId, index))
             }
 
-            let task = batchSession.downloadTask(with: request)
-            task.taskDescription = taskId
-            stagedTasks.append((taskId, task))
-        }
+            if useForeground {
+                self.foregroundSessionLock.lock()
+                stagedTasks.forEach { self.foregroundSessionDownloadIds.insert($0.taskId) }
+                self.foregroundSessionLock.unlock()
+            }
 
+            stagedTasks.forEach { self.setTask($0.task, for: $0.taskId) }
+            let startup = self.batchCoordinator.registerStartupChildren(
+                batchId: batchId,
+                generation: generation,
+                children: childRegistrations
+            )
+            guard startup.allowed else {
+                self.discardStagedBatchTasks(stagedTasks, session: batchSession)
+                self.markBatchContinuedProcessingFinished(batchId: batchId, generation: generation, success: false)
+                call.reject("Download was cancelled")
+                return
+            }
+            if !startup.paused {
+                stagedTasks.forEach { $0.task.resume() }
+            }
+            switch self.batchCoordinator.batchStartupResumeOutcome(batchId: batchId, generation: generation) {
+            case .abort:
+                self.discardStagedBatchTasks(stagedTasks, session: batchSession)
+                self.markBatchContinuedProcessingFinished(batchId: batchId, generation: generation, success: false)
+                call.reject("Download was cancelled")
+                return
+            case .proceed(let paused):
+                call.resolve([
+                    "id": batchId,
+                    "state": paused ? "PAUSED" : "RUNNING",
+                    "progress": 0
+                ])
+            }
+        }
+    }
+
+    /// Cancels the transfers of a batch that was stopped while they were being created. They are published before the
+    /// batch is checked again, so a `stop` that comes after that check cancels them itself through `cancelBatchTasks`.
+    private func discardStagedBatchTasks(_ stagedTasks: [(taskId: String, task: URLSessionDownloadTask)], session: URLSession) {
         for staged in stagedTasks {
-            setTask(staged.task, for: staged.taskId)
-            staged.task.resume()
+            staged.task.cancel()
+            removeTask(for: staged.taskId, completing: staged.task, in: session)
+            DownloadDestinationStore.shared.removeDestination(for: staged.taskId)
+            batchCoordinator.unregisterChildTask(staged.taskId)
         }
+    }
 
-        call.resolve([
-            "id": batchId,
-            "state": "RUNNING",
-            "progress": 0
-        ])
+    /// Ends the continued processing task of a batch and forgets which of its transfers ran in the in-process session,
+    /// by their id prefix since a batch that succeeded has already unregistered them.
+    private func markBatchContinuedProcessingFinished(batchId: String, generation: UInt64, success: Bool) {
+        markContinuedProcessingFinished(downloadId: batchId, success: success)
+        let childIdPrefix = batchCoordinator.fileTaskId(batchId: batchId, generation: generation, fileIndex: 0).dropLast()
+        foregroundSessionLock.lock()
+        foregroundSessionDownloadIds = foregroundSessionDownloadIds.filter { !$0.hasPrefix(childIdPrefix) }
+        foregroundSessionLock.unlock()
     }
 
     private func cancelBatchTasks(batchId: String) {
-        let taskIds = batchCoordinator.childTaskIds(batchId: batchId)
+        cancelBatchTasks(taskIds: batchCoordinator.childTaskIds(batchId: batchId))
+    }
+
+    private func cancelBatchTasks(taskIds: [String]) {
         for taskId in taskIds {
             if let task = getTask(for: taskId) {
                 task.cancel()
                 removeTask(for: taskId, completing: task, in: sessionAssumedForStoredTask(downloadId: taskId))
             }
             DownloadDestinationStore.shared.removeDestination(for: taskId)
+            batchCoordinator.unregisterChildTask(taskId)
         }
     }
 
@@ -546,16 +617,18 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         return Set(taskGenerations.keys)
     }
 
-    private func failBatch(batchId: String, generation: UInt64, fileIndex: Int, error: String) {
+    private func failBatch(batchId: String, generation: UInt64, fileIndex: Int?, error: String) {
         guard batchCoordinator.beginFailure(batchId: batchId, generation: generation) else {
             return
         }
         cancelBatchTasks(batchId: batchId)
+        markBatchContinuedProcessingFinished(batchId: batchId, generation: generation, success: false)
         batchCoordinator.removeBatch(batchId: batchId, unregisterChildren: false)
-        notifyListeners(
-            "downloadFailed",
-            data: ["id": batchId, "fileIndex": fileIndex, "error": error]
-        )
+        var data: [String: Any] = ["id": batchId, "error": error]
+        if let fileIndex {
+            data["fileIndex"] = fileIndex
+        }
+        notifyListeners("downloadFailed", data: data)
     }
 
     @objc func stop(_ call: CAPPluginCall) {
@@ -565,11 +638,13 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         if batchCoordinator.isBatch(batchId: id) {
-            let destinations = batchCoordinator.destinationsForCancellation(batchId: id)
-            batchCoordinator.markCancelled(batchId: id)
-            cancelBatchTasks(batchId: id)
-            deleteDownloadedFiles(destinations: destinations)
-            batchCoordinator.removeBatch(batchId: id, unregisterChildren: false)
+            guard let stopSnapshot = batchCoordinator.takeBatchForStop(batchId: id) else {
+                call.reject("Task not found")
+                return
+            }
+            cancelBatchTasks(taskIds: stopSnapshot.childTaskIds)
+            markBatchContinuedProcessingFinished(batchId: id, generation: stopSnapshot.generation, success: false)
+            deleteDownloadedFiles(destinations: stopSnapshot.destinations)
             call.resolve()
             return
         }
@@ -685,7 +760,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     fileIndex: batchParts.fileIndex,
                     error: "Unable to resolve destination"
                 )
-            } else {
+            } else if !batchCoordinator.isOwnedBatchChild(taskId: id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }
@@ -694,6 +769,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             }
             removeTask(for: id, completing: downloadTask, in: session)
             batchCoordinator.unregisterChildTask(id)
+            batchCoordinator.clearInactiveBatchChildTask(id)
             clearTaskGeneration(for: downloadTask, in: session)
             return
         }
@@ -708,7 +784,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     fileIndex: batchParts.fileIndex,
                     error: "HTTP \(httpResponse.statusCode)"
                 )
-            } else {
+            } else if !batchCoordinator.isOwnedBatchChild(taskId: id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }
@@ -723,29 +799,31 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
         do {
             try prepareDestinationDirectory(for: destinationURL)
-            if FileManager.default.fileExists(atPath: destinationURL.path) {
-                try FileManager.default.removeItem(at: destinationURL)
-            }
-
-            if let batchParts = batchCoordinator.childParts(for: id) {
-                guard batchCoordinator.activeChildParts(for: id) != nil else {
-                    try? FileManager.default.removeItem(at: location)
-                    removeTask(for: id, completing: downloadTask, in: session)
-                    batchCoordinator.unregisterChildTask(id)
-                    return
-                }
+            guard try batchCoordinator.prepareDestinationReplacement(taskId: id, destinationURL: destinationURL) else {
+                try? FileManager.default.removeItem(at: location)
+                removeTask(for: id, completing: downloadTask, in: session)
+                batchCoordinator.unregisterChildTask(id)
+                batchCoordinator.clearInactiveBatchChildTask(id)
+                return
             }
 
             try FileManager.default.moveItem(at: location, to: destinationURL)
 
             if let batchParts = batchCoordinator.activeChildParts(for: id) {
                 removeTask(for: id, completing: downloadTask, in: session)
-                batchCoordinator.recordMovedDestination(
+                let recorded = batchCoordinator.recordMovedDestination(
                     batchId: batchParts.batchId,
                     generation: batchParts.generation,
                     fileIndex: batchParts.fileIndex,
                     destination: destinationURL.path
                 )
+                if !recorded {
+                    try? FileManager.default.removeItem(at: destinationURL)
+                    batchCoordinator.unregisterChildTask(id)
+                    batchCoordinator.clearInactiveBatchChildTask(id)
+                    clearTaskGeneration(for: downloadTask, in: session)
+                    return
+                }
                 switch batchCoordinator.markFileCompleted(
                     batchId: batchParts.batchId,
                     generation: batchParts.generation,
@@ -756,7 +834,9 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: batchId, generation: generation) {
                         DownloadCompletedNotificationPresenter.presentIfAllowed(downloadId: batchId, body: completionText)
                     }
+                    markBatchContinuedProcessingFinished(batchId: batchId, generation: generation, success: true)
                 case .inProgress(let overall):
+                    continuedProcessing.reportProgress(downloadId: batchParts.batchId, fraction: Double(overall))
                     notifyListeners(
                         "downloadProgress",
                         data: [
@@ -770,6 +850,12 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     break
                 }
                 batchCoordinator.unregisterChildTask(id)
+                batchCoordinator.clearInactiveBatchChildTask(id)
+            } else if batchCoordinator.isOwnedBatchChild(taskId: id) {
+                try? FileManager.default.removeItem(at: destinationURL)
+                removeTask(for: id, completing: downloadTask, in: session)
+                batchCoordinator.unregisterChildTask(id)
+                batchCoordinator.clearInactiveBatchChildTask(id)
             } else {
                 notifyListeners("downloadCompleted", data: ["id": id])
                 if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: id, generation: generation) {
@@ -785,7 +871,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     fileIndex: batchParts.fileIndex,
                     error: error.localizedDescription
                 )
-            } else {
+            } else if !batchCoordinator.isOwnedBatchChild(taskId: id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }
@@ -796,6 +882,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
         if batchCoordinator.childParts(for: id) != nil {
             batchCoordinator.unregisterChildTask(id)
+            batchCoordinator.clearInactiveBatchChildTask(id)
         }
         clearTaskGeneration(for: downloadTask, in: session)
     }
@@ -828,7 +915,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     fileIndex: batchParts.fileIndex,
                     error: error.localizedDescription
                 )
-            } else {
+            } else if !batchCoordinator.isOwnedBatchChild(taskId: id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }
@@ -839,6 +926,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
         if batchCoordinator.childParts(for: id) != nil {
             batchCoordinator.unregisterChildTask(id)
+            batchCoordinator.clearInactiveBatchChildTask(id)
         }
         clearTaskGeneration(for: downloadTask, in: session)
     }
@@ -877,6 +965,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             ) else {
                 return
             }
+            continuedProcessing.reportProgress(downloadId: batchParts.batchId, fraction: Double(batchProgress.overall))
             notifyListeners(
                 "downloadProgress",
                 data: [

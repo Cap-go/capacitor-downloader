@@ -33,7 +33,7 @@ export interface DownloadFileSpec {
    * - `public-downloads/...` saves to the public Downloads folder (DownloadManager).
    * - Any other relative path saves under app external files (DownloadManager with `'auto'`).
    *
-   * Multi-file batches on Android use the same destination rules as single downloads for the batch `androidHttpEngine` value (including extended roots when `'auto'` or `'okhttp'` is set). The batch is rejected only when a file would use OkHttp (for example `cache/...` or `files/...` with `'okhttp'`).
+   * Multi-file batches on Android use the same destination rules as single downloads for the batch `androidHttpEngine` value (including extended roots when `'auto'` or `'okhttp'` is set). Since 8.9.0 a batch can use OkHttp when every file resolves to it (for example `cache/...` or `files/...`); a batch that mixes engines is rejected.
    *
    * Absolute paths and `file://` URIs are supported on iOS and on Android single downloads.
    *
@@ -93,18 +93,20 @@ export interface DownloadOptions {
    */
   notification?: 'completed' | 'progress' | 'hidden';
   /**
-   * Title shown on the Android DownloadManager progress notification.
+   * Title shown on the Android DownloadManager progress notification, and on iOS on the continued processing task
+   * when `iosContinuedProcessing` is set.
    *
    * When omitted or empty, the system uses its default (typically the destination file name).
-   * Ignored on iOS, Web, and the OkHttp Android download path.
+   * Ignored on Web and the OkHttp Android download path.
    *
    * @since 8.6.0
    */
   title?: string;
   /**
-   * Description shown on the Android DownloadManager progress notification.
+   * Description shown on the Android DownloadManager progress notification, and on iOS as the subtitle of the
+   * continued processing task when `iosContinuedProcessing` is set.
    *
-   * When omitted or empty, the system uses its default. Ignored on iOS, Web, and the OkHttp Android download path.
+   * When omitted or empty, the system uses its default. Ignored on Web and the OkHttp Android download path.
    *
    * @since 8.6.0
    */
@@ -154,19 +156,26 @@ export interface DownloadOptions {
    */
   lengthHeader?: string;
   /**
-   * iOS 26 and later: opt in to a `BGContinuedProcessingTask` so the system can show download progress while the
-   * device is locked. Falls back to the background URL session when the task does not launch in time. If the continued
-   * processing task expires, the active transfer is cancelled with `downloadFailed` and is not resumed automatically.
-   * Ignored on Android and Web. The host app must allow
-   * `$(PRODUCT_BUNDLE_IDENTIFIER).CapacitorDownloader.continuedProcessing.*` in
-   * `BGTaskSchedulerPermittedIdentifiers` (see plugin README).
+   * iOS 26 and later: run the download in a `BGContinuedProcessingTask`, which shows `title` and `description` with the
+   * download progress while the device is locked. Requires `title`. Falls back to the background URL session when the
+   * task does not launch in time. If the task expires, the download fails with `downloadFailed` and is not resumed
+   * automatically. The host app must allow `$(PRODUCT_BUNDLE_IDENTIFIER).CapacitorDownloader.continuedProcessing.*` in
+   * `BGTaskSchedulerPermittedIdentifiers` (see plugin README). Ignored on Android and Web.
    *
+   * @since 8.9.0
+   */
+  iosContinuedProcessing?: boolean;
+  /**
+   * Title of the iOS continued processing task.
+   *
+   * @deprecated Use `title` with `iosContinuedProcessing: true`.
    * @since 8.8.0
    */
   iosContinuedProcessingTitle?: string;
   /**
-   * Subtitle for the iOS continued processing task. Ignored when `iosContinuedProcessingTitle` is omitted.
+   * Subtitle of the iOS continued processing task.
    *
+   * @deprecated Use `description` with `iosContinuedProcessing: true`.
    * @since 8.8.0
    */
   iosContinuedProcessingSubtitle?: string;
@@ -181,7 +190,7 @@ export interface DownloadOptions {
 /**
  * Configuration options for a multi-file batch download.
  *
- * On Android, multi-file batches use the system DownloadManager only. Each file uses the same `androidHttpEngine` destination rules as a single download; `download()` rejects before enqueue if any file would use OkHttp.
+ * On Android, each file uses the same `androidHttpEngine` destination rules as a single download. Since 8.9.0 a batch whose files all resolve to OkHttp runs through OkHttp, with one progress notification and foreground service for the whole batch when `notification` is `'progress'`; a batch that mixes engines is rejected.
  *
  * **Process death:** On Android, batch state lives in memory only and is lost when the host process is killed (DownloadManager work may still finish, but the plugin does not rebuild batch progress). On iOS, batch metadata is persisted in `DownloadBatchStore` (UserDefaults) and restored when the plugin initializes.
  *
@@ -211,31 +220,39 @@ export interface DownloadBatchOptions {
   /** Download priority level */
   priority?: 'high' | 'normal' | 'low';
   /**
-   * Android DownloadManager notification visibility for batch transfers only (batches reject OkHttp).
+   * Android notification visibility for batch transfers.
    *
+   * DownloadManager batches:
    * - `'completed'` (default): show while downloading and keep the notification after completion.
    * - `'progress'`: show while downloading, remove the notification when finished.
    * - `'hidden'`: no DownloadManager progress notification; use plugin progress events instead.
-   *   `downloadCompletedNotificationText` can still post a completion notification when the transfer succeeds.
    *
+   * OkHttp batches:
+   * - `'completed'` (default): no notification during the transfer, one completion notification when the whole batch succeeds.
+   * - `'progress'`: one ongoing progress notification for the whole batch, from an optional foreground service that keeps the
+   *   batch going while the app is in the background. If the service cannot start, the transfers continue without it.
+   * - `'hidden'`: no notification; use plugin progress events instead.
+   *
+   * `downloadCompletedNotificationText` can still post a completion notification when the batch succeeds.
    * Ignored on iOS and Web.
    *
    * @since 8.2.0
    */
   notification?: 'completed' | 'progress' | 'hidden';
   /**
-   * Title shown on the Android DownloadManager progress notification.
+   * Title shown on the Android progress notification of the batch, and on iOS on the continued processing task when
+   * `iosContinuedProcessing` is set.
    *
-   * When omitted or empty, the system uses its default (typically the destination file name).
-   * Ignored on iOS and Web.
+   * When omitted or empty, the system uses its default (typically the destination file name). Ignored on Web.
    *
    * @since 8.6.0
    */
   title?: string;
   /**
-   * Description shown on the Android DownloadManager progress notification.
+   * Description shown on the Android progress notification of the batch, and on iOS as the subtitle of the continued
+   * processing task when `iosContinuedProcessing` is set.
    *
-   * When omitted or empty, the system uses its default. Ignored on iOS and Web.
+   * When omitted or empty, the system uses its default. Ignored on Web.
    *
    * @since 8.6.0
    */
@@ -251,7 +268,7 @@ export interface DownloadBatchOptions {
    *   in the app process and do not continue after the process is killed (unlike DownloadManager on those paths).
    * - `'downloadManager'`: always use the system DownloadManager with legacy destination resolution.
    *
-   * Ignored on iOS and Web. On Android batches, each file uses these rules; the call is rejected if any file would use OkHttp.
+   * Ignored on iOS and Web. On Android batches, each file uses these rules; the call is rejected if the files resolve to different engines.
    *
    * @since 8.5.0
    */
@@ -276,12 +293,19 @@ export interface DownloadBatchOptions {
    * When the response includes this header with a positive integer, native code uses it for
    * `downloadProgress` totals and progress is clamped at 1. Examples: `X-Uncompressed-Length`.
    *
-   * Batch downloads: iOS only (same header name applies to every file in `files`). Android batches always
-   * use DownloadManager and ignore this option. Ignored on Web.
+   * Batch downloads: iOS only (same header name applies to every file in `files`). Android OkHttp batches ignore this
+   * option. Ignored on Web.
    *
    * @since 8.9.0
    */
   lengthHeader?: string;
+  /**
+   * iOS 26 and later: run the whole batch in one `BGContinuedProcessingTask` that shows `title` and `description`, see
+   * {@link DownloadOptions.iosContinuedProcessing}. If the task expires, the batch fails with `downloadFailed`.
+   *
+   * @since 8.9.0
+   */
+  iosContinuedProcessing?: boolean;
 }
 
 /**

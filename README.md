@@ -36,7 +36,6 @@ Use this when users fetch several large files and keep using other apps:
 - **iOS paths**: `files/...` and `cache/...` stay under Documents as in 8.7.0. Use `private/...` (iOS only) for Application Support. Reject `..` in path segments.
 - **iOS 26+**: set `iosContinuedProcessingTitle` (and optional `iosContinuedProcessingSubtitle`) for a continued-processing task while the device is locked. If it expires, the download is cancelled (not resumed on relaunch).
 - **Android OkHttp**: default `notification: 'completed'` matches 8.7.0 (no ongoing notification, no foreground service). Set `notification: 'progress'` to opt in to ongoing progress and an optional `dataSync` foreground service (minSdk 24; Android 12+ may block background starts). Downloads continue if the service cannot start. The manifest merges `POST_NOTIFICATIONS`; on Android 13+ request it at runtime when you use `'progress'`.
-- **Connection retries (8.9.0)**: set `retries` on `download()` so OkHttp (Android) and the iOS background session restart a file after transient connection errors, with a 5 s times attempt delay. Batches keep other files running while one file retries.
 
 ```typescript
 await CapacitorDownloader.download({
@@ -50,8 +49,6 @@ await CapacitorDownloader.download({
   iosContinuedProcessingTitle: 'Offline maps',
   iosContinuedProcessingSubtitle: 'Pack 3 of 5',
   downloadCompletedNotificationText: 'Maps are ready',
-  downloadFailedNotificationText: 'Map download failed. Open the app to retry.',
-  retries: 2,
 });
 ```
 
@@ -88,6 +85,43 @@ For `iosContinuedProcessingTitle`, add a permitted identifier prefix to `Info.pl
 
 (Documentation: https://capgo.app/docs/plugins/downloader/)
 
+## `lengthHeader` for gzip and compressed responses
+
+> **Use this when:** the server sends `Content-Encoding: gzip` (or similar), `Content-Length` is missing or reflects **compressed** bytes, and your CDN still exposes the **uncompressed** size in a custom header (for example `X-Uncompressed-Length`).
+
+Without `lengthHeader`, `downloadProgress` can sit at `0`, jump early to `1`, or report `bytesTotal` that does not match the file on disk. With `lengthHeader`, native code reads that header from the HTTP response and uses it for progress totals. Progress is always clamped at `1`.
+
+Do not add `Accept-Encoding: gzip` (or similar) to `headers`. That disables OkHttp transparent decompression on Android and leaves `Content-Encoding` on the response, so Android OkHttp ignores `lengthHeader` and progress can stall.
+
+| Scope | `lengthHeader` |
+| --- | --- |
+| Single download, iOS | Supported |
+| Single download, Android OkHttp | `androidHttpEngine: 'okhttp'` or `'auto'` on app-private paths |
+| Batch download, iOS | Supported (one header name for every file in `files`) |
+| Batch download, Android | Ignored (batches always use DownloadManager) |
+| Android DownloadManager (single) | Ignored |
+| Web | Ignored |
+
+```typescript
+import { CapacitorDownloader } from '@capgo/capacitor-downloader';
+
+await CapacitorDownloader.addListener('downloadProgress', (event) => {
+  console.log(event.id, event.progress, event.bytesTotal, event.bytesWritten);
+});
+
+await CapacitorDownloader.download({
+  id: 'gzip-pack',
+  url: 'https://cdn.example.com/bundle.tar.gz',
+  destination: 'files/updates/bundle.tar.gz',
+  androidHttpEngine: 'okhttp',
+  lengthHeader: 'X-Uncompressed-Length',
+});
+```
+
+On iOS, batch downloads share one `lengthHeader` name for every file in `files`. Android batches always use DownloadManager and ignore `lengthHeader`.
+
+Full docs: [Capgo downloader guide](https://capgo.app/docs/plugins/downloader/getting-started/#lengthheader-for-gzip-downloads) (once released on the website). Tracked with [capacitor-downloader#144](https://github.com/Cap-go/capacitor-downloader/pull/144).
+
 ## Key features
 
 - **Downloads**: `download()` starts a task with optional HTTP headers and a `wifi-only` or cellular network rule.
@@ -98,7 +132,6 @@ For `iosContinuedProcessingTitle`, add a permitted identifier prefix to `Info.pl
 - **Android private storage**: set `androidHttpEngine: 'auto'` or `'okhttp'` and use `cache/...` or `files/...` for internal storage. `notification: 'hidden'` hides DownloadManager progress UI; `downloadCompletedNotificationText` can still alert on success.
 - **Batch downloads (8.7.0)**: pass `files` on `download()` to let native code own a multi-file batch (overall plus per-file progress, one completion when all succeed). Up to 32 files per batch.
 - **Android notification copy (8.6.0)**: optional `title` and `description` on DownloadManager progress notifications (ignored on iOS, Web, and OkHttp).
-- **Connection retries (8.9.0)**: optional `retries` on single and batch downloads (OkHttp and iOS only; default `0`).
 
 ## Multi-file batch downloads
 
@@ -159,7 +192,7 @@ await CapacitorDownloader.download({
 | `public-downloads/...` | Public Downloads folder (DownloadManager) | App external files under `public-downloads/...` (DownloadManager) |
 | Other relative paths | App external files dir (DownloadManager) | App external files dir (DownloadManager) |
 
-**Notifications on OkHttp (8.8.0):** Only `notification: 'progress'` opts in to ongoing progress and the optional `dataSync` foreground service. Default `'completed'` matches 8.7.0, including one "Download complete" notification on success via `DownloadCompletionNotifier`. `downloadCompletedNotificationText` is unchanged.
+**Notifications on OkHttp (8.8.0):** Only `notification: 'progress'` opts in to ongoing progress and the optional `dataSync` foreground service. One ongoing notification covers every concurrent `progress` download (titles and combined progress when several run at once); the foreground service reuses that same notification instead of posting an extra empty one. Default `'completed'` matches 8.7.0, including one "Download complete" notification on success via `DownloadCompletionNotifier`. `downloadCompletedNotificationText` is unchanged.
 
 **iOS paths (8.8.0):** `files/` and `cache/` still resolve under Documents. New `private/` prefix (iOS only) writes under Application Support/CapacitorDownloader/.
 
@@ -198,29 +231,6 @@ await Downloader.download({
   destination: 'podcasts/episode-12.mp3',
   notification: 'hidden',
   downloadCompletedNotificationText: t('downloads.episodeReady'),
-});
-```
-
-## Download failed notifications
-
-Background downloads can fail after connection retries are exhausted while your user is elsewhere. Set `downloadFailedNotificationText` on `download()` (or on a batch) to show an opt-in, caller-localized system notification when the transfer fails. Tapping it returns to your app so the user can retry.
-
-- **Opt in**: omit the option (or pass empty text) to rely on `downloadFailed` events only.
-- **Permissions**: same rules as `downloadCompletedNotificationText`. If the user denies notification permission, failures still occur and the plugin skips the alert.
-- **Same notification slot**: uses the same notification id as the completion alert for that download id, so failure replaces completion instead of stacking.
-- **Not on stop**: not shown when the download is stopped by the app (`stop()`).
-- **Android**: single downloads via OkHttp (including `retries`) and DownloadManager; multi-file batches via DownloadManager.
-- **iOS**: single downloads and batches via URLSession (including per-file `retries`).
-- **Web**: ignored.
-
-```typescript
-await CapacitorDownloader.download({
-  id: 'episode-12',
-  url: audioUrl,
-  destination: 'podcasts/episode-12.mp3',
-  notification: 'hidden',
-  retries: 2,
-  downloadFailedNotificationText: t('downloads.episodeFailed'),
 });
 ```
 
@@ -524,6 +534,7 @@ Configuration options for starting a single-file download.
 | **`androidHttpEngine`**                 | <code>'auto' \| 'okhttp' \| 'downloadManager'</code> | Android HTTP stack used for the download. - Omitted: always DownloadManager with legacy destination resolution (same as releases before this option). - `'auto'`: OkHttp for app-private destinations (`cache/...`, `files/...`, or an absolute path under cache/data/files when extended roots apply); DownloadManager for legacy relative paths under app external storage and `public-downloads/...`. - `'okhttp'`: always use OkHttp for extended-root destinations. Rejects `public-downloads/...` paths. Transfers run in the app process and do not continue after the process is killed (unlike DownloadManager on those paths). - `'downloadManager'`: always use the system DownloadManager with legacy destination resolution. Ignored on iOS and Web.                                                                                                                                                   |                | 8.5.0 |
 | **`downloadCompletedNotificationText`** | <code>string</code>                                  | Optional localized text for a system notification when the download finishes. When set, iOS and Android may show a local notification after a successful download if the user granted notification permission. If permission is denied, the download still completes and no notification is shown. Tapping the notification reopens the app. Omitted or empty means no completion notification from the plugin (use `downloadCompleted` events while the app is open).                                                                                                                                                                                                                                                                                                                                                                                                                                              |                | 8.5.0 |
 | **`downloadFailedNotificationText`**    | <code>string</code>                                  | Optional localized text for a system notification when the download fails. When set, iOS and Android may show a local notification after a failed download if the user granted notification permission. If permission is denied, the failure still occurs and no notification is shown. Tapping the notification reopens the app. Uses the same notification slot as `downloadCompletedNotificationText`, so a failure alert replaces a prior completion alert for the same download id instead of stacking. Not shown when the download is stopped by the app. Omitted or empty means no failure notification from the plugin (use `downloadFailed` events while the app is open).                                                                                                                                                                                                                                 |                | 8.9.0 |
+| **`lengthHeader`**                      | <code>string</code>                                  | HTTP response header that carries the uncompressed byte length when the body is transferred compressed (for example `Content-Encoding: gzip`) and `Content-Length` is missing or wrong. When the response includes this header with a positive integer, native code uses it for `downloadProgress` totals and progress is clamped at 1. Examples: `X-Uncompressed-Length`. Single downloads: Android OkHttp and iOS. Ignored on Web and Android DownloadManager. On Android OkHttp, ignored when the response still includes `Content-Encoding` (for example after setting `Accept-Encoding: gzip` on the request). Do not set request `Accept-Encoding`; OkHttp handles decompression by default.                                                                                                                                                                                                                  |                | 8.9.0 |
 | **`iosContinuedProcessingTitle`**       | <code>string</code>                                  | iOS 26 and later: opt in to a `BGContinuedProcessingTask` so the system can show download progress while the device is locked. Falls back to the background URL session when the task does not launch in time. If the continued processing task expires, the active transfer is cancelled with `downloadFailed` and is not resumed automatically. Ignored on Android and Web. The host app must allow `$(PRODUCT_BUNDLE_IDENTIFIER).CapacitorDownloader.continuedProcessing.*` in `BGTaskSchedulerPermittedIdentifiers` (see plugin README).                                                                                                                                                                                                                                                                                                                                                                        |                | 8.8.0 |
 | **`iosContinuedProcessingSubtitle`**    | <code>string</code>                                  | Subtitle for the iOS continued processing task. Ignored when `iosContinuedProcessingTitle` is omitted.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |                | 8.8.0 |
 | **`retries`**                           | <code>number</code>                                  | Number of times to retry the file after a connection failure (OkHttp on Android and iOS URLSession). Defaults to `0` (no retries). On a retry, the file is downloaded again from the start after a delay of 5 seconds times the attempt number (5 s, then 10 s, then 15 s, and so on). Progress for the file resets to 0. HTTP errors, cancellation, and file-system errors are not retried. Android DownloadManager and Web ignore this option.                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | <code>0</code> | 8.9.0 |
@@ -557,6 +568,7 @@ When one file fails, remaining transfers are cancelled. Files that already finis
 | **`androidHttpEngine`**                 | <code>'auto' \| 'okhttp' \| 'downloadManager'</code> | Android HTTP stack used for the download. - Omitted: always DownloadManager with legacy destination resolution (same as releases before this option). - `'auto'`: OkHttp for app-private destinations (`cache/...`, `files/...`, or an absolute path under cache/data/files when extended roots apply); DownloadManager for legacy relative paths under app external storage and `public-downloads/...`. - `'okhttp'`: always use OkHttp for extended-root destinations. Rejects `public-downloads/...` paths. Transfers run in the app process and do not continue after the process is killed (unlike DownloadManager on those paths). - `'downloadManager'`: always use the system DownloadManager with legacy destination resolution. Ignored on iOS and Web. On Android batches, each file uses these rules; the call is rejected if any file would use OkHttp. |                | 8.5.0 |
 | **`downloadCompletedNotificationText`** | <code>string</code>                                  | Optional localized text for a system notification when the download finishes. When set, iOS and Android may show a local notification after a successful download if the user granted notification permission. If permission is denied, the download still completes and no notification is shown. Tapping the notification reopens the app. Omitted or empty means no completion notification from the plugin (use `downloadCompleted` events while the app is open).                                                                                                                                                                                                                                                                                                                                                                                               |                | 8.5.0 |
 | **`downloadFailedNotificationText`**    | <code>string</code>                                  | Optional localized text for a system notification when the batch fails. When set, iOS and Android may show a local notification after a failed batch download if the user granted notification permission. If permission is denied, the failure still occurs and no notification is shown. Tapping the notification reopens the app. Uses the same notification slot as `downloadCompletedNotificationText`, so a failure alert replaces a prior completion alert for the same batch id instead of stacking. Not shown when the batch is stopped by the app. Omitted or empty means no failure notification from the plugin (use `downloadFailed` events while the app is open).                                                                                                                                                                                     |                | 8.9.0 |
+| **`lengthHeader`**                      | <code>string</code>                                  | HTTP response header that carries the uncompressed byte length when the body is transferred compressed (for example `Content-Encoding: gzip`) and `Content-Length` is missing or wrong. When the response includes this header with a positive integer, native code uses it for `downloadProgress` totals and progress is clamped at 1. Examples: `X-Uncompressed-Length`. Batch downloads: iOS only (same header name applies to every file in `files`). Android batches always use DownloadManager and ignore this option. Ignored on Web.                                                                                                                                                                                                                                                                                                                         |                | 8.9.0 |
 | **`retries`**                           | <code>number</code>                                  | Number of times to retry each file after a connection failure (iOS URLSession). Defaults to `0` (no retries). Applied to every entry in `files`. See {@link <a href="#downloadoptions">DownloadOptions.retries</a>} for delay and error rules. While one file retries, the batch continues and other files are unaffected. Android DownloadManager batches ignore this option.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | <code>0</code> | 8.9.0 |
 
 

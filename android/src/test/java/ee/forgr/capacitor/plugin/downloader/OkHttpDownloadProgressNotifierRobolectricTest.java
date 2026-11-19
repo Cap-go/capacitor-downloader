@@ -2,14 +2,19 @@ package ee.forgr.capacitor.plugin.downloader;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.robolectric.Shadows.shadowOf;
 
+import android.app.Notification;
+import android.app.NotificationManager;
 import android.content.Context;
 import android.content.Intent;
 import com.getcapacitor.JSObject;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -23,7 +28,9 @@ import org.robolectric.Robolectric;
 import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowNotificationManager;
 import org.robolectric.shadows.ShadowService;
+import org.robolectric.shadows.ShadowSystemClock;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 34)
@@ -46,6 +53,58 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
         OkHttpDownloadForegroundService.setThrowOnStartForegroundForTests(false);
         OkHttpDownloadProgressNotifier.setSimulateNotificationPostSecurityExceptionForTests(false);
         OkHttpDownloadForegroundService.resetLifecycleStateForTests();
+    }
+
+    @Test
+    public void progressModePostsSingleSharedNotificationForOneDownload() {
+        assertTrue(notifier.started("single", "Area", "Maps", "progress"));
+
+        Notification pinned = OkHttpDownloadProgressNotifier.foregroundServiceNotification(context);
+        assertNotNull(pinned.extras.getCharSequence(Notification.EXTRA_TITLE));
+        assertEquals("Area", pinned.extras.getCharSequence(Notification.EXTRA_TITLE).toString());
+
+        NotificationManager notificationManager = context.getSystemService(NotificationManager.class);
+        ShadowNotificationManager shadowNotificationManager = shadowOf(notificationManager);
+        assertEquals(1, shadowNotificationManager.size());
+        assertNotNull(shadowNotificationManager.getNotification(null, OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID));
+
+        notifier.finished("single", true);
+        assertNull(shadowNotificationManager.getNotification(null, OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID));
+    }
+
+    @Test
+    public void parallelProgressDownloadsUseOneCombinedNotification() {
+        assertTrue(notifier.started("a", "Pack A", null, "progress"));
+        assertTrue(notifier.started("b", "Pack B", null, "progress"));
+
+        NotificationManager notificationManager = context.getSystemService(NotificationManager.class);
+        ShadowNotificationManager shadowNotificationManager = shadowOf(notificationManager);
+        assertEquals(1, shadowNotificationManager.size());
+
+        Notification notification = shadowNotificationManager.getNotification(
+            null,
+            OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID
+        );
+        assertNotNull(notification);
+        String title = notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString();
+        assertTrue(title.contains("Pack A"));
+        assertTrue(title.contains("Pack B"));
+
+        ShadowSystemClock.advanceBy(Duration.ofMillis(2_000L));
+        notifier.update("a", 0.5f);
+        notifier.update("b", 0.5f);
+        notification = shadowNotificationManager.getNotification(null, OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID);
+        assertNotNull(notification);
+        assertEquals(50, notification.extras.getInt(Notification.EXTRA_PROGRESS, -1));
+
+        notifier.finished("a", true);
+        assertEquals(1, shadowNotificationManager.size());
+        notification = shadowNotificationManager.getNotification(null, OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID);
+        assertNotNull(notification);
+        assertEquals("Pack B", notification.extras.getCharSequence(Notification.EXTRA_TITLE).toString());
+
+        notifier.finished("b", true);
+        assertNull(shadowNotificationManager.getNotification(null, OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID));
     }
 
     @Test
@@ -72,6 +131,49 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
         assertEquals(android.app.Service.START_NOT_STICKY, startId);
         assertEquals(0, OkHttpDownloadForegroundService.peekLastKnownActiveDownloadsForTests());
         assertEquals(1, OkHttpDownloadForegroundService.peekForegroundPromotionCountForTests());
+        service.onDestroy();
+    }
+
+    @Test
+    public void onDestroyCancelsNotificationWhenNoDownloadsRemain() {
+        assertTrue(notifier.started("gone", "Title", null, "progress"));
+        OkHttpDownloadForegroundService service = Robolectric.buildService(OkHttpDownloadForegroundService.class).create().get();
+        service.onStartCommand(new Intent(), 0, 1);
+        notifier.finished("gone", true);
+
+        NotificationManager notificationManager = context.getSystemService(NotificationManager.class);
+        ShadowNotificationManager shadowNotificationManager = shadowOf(notificationManager);
+        service.onDestroy();
+        assertNull(shadowNotificationManager.getNotification(null, OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID));
+    }
+
+    @Test
+    public void foregroundPromotionShowsCurrentAggregateAfterDownloadFinishes() {
+        assertTrue(notifier.started("a", "Pack A", null, "progress"));
+        assertTrue(notifier.started("b", "Pack B", null, "progress"));
+        notifier.finished("a", true);
+
+        NotificationManager notificationManager = context.getSystemService(NotificationManager.class);
+        ShadowNotificationManager shadowNotificationManager = shadowOf(notificationManager);
+        Notification beforePromotion = shadowNotificationManager.getNotification(
+            null,
+            OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID
+        );
+        assertNotNull(beforePromotion);
+        String titleBefore = beforePromotion.extras.getCharSequence(Notification.EXTRA_TITLE).toString();
+        assertEquals("Pack B", titleBefore);
+
+        OkHttpDownloadForegroundService service = Robolectric.buildService(OkHttpDownloadForegroundService.class).create().get();
+        service.onStartCommand(new Intent(), 0, 1);
+
+        Notification afterPromotion = shadowNotificationManager.getNotification(
+            null,
+            OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID
+        );
+        assertNotNull(afterPromotion);
+        String titleAfter = afterPromotion.extras.getCharSequence(Notification.EXTRA_TITLE).toString();
+        assertEquals("Pack B", titleAfter);
+        assertFalse(titleAfter.contains("Pack A"));
         service.onDestroy();
     }
 
@@ -137,6 +239,7 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
             new JSObject(),
             "cellular",
             0,
+            null,
             (downloadId, progress) -> notifier.update(downloadId, progress),
             (downloadId, ok, cancelled, errorMessage) -> {
                 success.set(ok);

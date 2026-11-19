@@ -18,7 +18,6 @@ import android.os.Looper;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.PluginCall;
 import java.lang.reflect.Field;
-import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;

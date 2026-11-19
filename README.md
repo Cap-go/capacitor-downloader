@@ -122,6 +122,38 @@ On iOS, batch downloads share one `lengthHeader` name for every file in `files`.
 
 Full docs: [Capgo downloader guide](https://capgo.app/docs/plugins/downloader/getting-started/#lengthheader-for-gzip-downloads) (once released on the website). Tracked with [capacitor-downloader#144](https://github.com/Cap-go/capacitor-downloader/pull/144).
 
+## Retry after connection failures
+
+> **Use this when:** mobile networks drop mid-transfer and you want the plugin to restart the file after a transport error without rebuilding your own backoff loop.
+
+Set `retries` on `download()` (default `0`). Each retry downloads the file again from the start after a delay of 5 seconds times the attempt number (5 s, then 10 s, then 15 s, and so on, capped at 10 minutes). Progress for that file resets to `0` when a retry starts. HTTP errors, cancellation, and file-system errors are not retried.
+
+| Scope | `retries` |
+| --- | --- |
+| Single download, Android OkHttp | `androidHttpEngine: 'auto'` or `'okhttp'` on app-private paths |
+| Single download, iOS | URLSession (foreground and background) |
+| Batch download, iOS | Applied per file; other files keep running |
+| Android DownloadManager (single or batch) | Ignored |
+| Web | Ignored |
+
+Optional `downloadFailedNotificationText` shows a localized system notification when a download or batch ends in failure (same notification slot as `downloadCompletedNotificationText`; not shown after `stop()`).
+
+```typescript
+import { CapacitorDownloader } from '@capgo/capacitor-downloader';
+
+await CapacitorDownloader.download({
+  id: 'episode',
+  url: 'https://cdn.example.com/episode.mp4',
+  destination: 'files/episodes/episode.mp4',
+  androidHttpEngine: 'auto',
+  retries: 3,
+  downloadFailedNotificationText: 'Download failed',
+  downloadCompletedNotificationText: 'Episode is ready',
+});
+```
+
+Website docs: [Connection failure retries](https://capgo.app/docs/plugins/downloader/getting-started/#connection-failure-retries) (patch for Cap-go/website ships with [capacitor-downloader#153](https://github.com/Cap-go/capacitor-downloader/pull/153)).
+
 ## Key features
 
 - **Downloads**: `download()` starts a task with optional HTTP headers and a `wifi-only` or cellular network rule.
@@ -132,6 +164,7 @@ Full docs: [Capgo downloader guide](https://capgo.app/docs/plugins/downloader/ge
 - **Android private storage**: set `androidHttpEngine: 'auto'` or `'okhttp'` and use `cache/...` or `files/...` for internal storage. `notification: 'hidden'` hides DownloadManager progress UI; `downloadCompletedNotificationText` can still alert on success.
 - **Batch downloads (8.7.0)**: pass `files` on `download()` to let native code own a multi-file batch (overall plus per-file progress, one completion when all succeed). Up to 32 files per batch.
 - **Android notification copy (8.6.0)**: optional `title` and `description` on DownloadManager progress notifications (ignored on iOS, Web, and OkHttp).
+- **Connection retries (8.9.0)**: optional `retries` on OkHttp (Android) and URLSession (iOS); optional `downloadFailedNotificationText` for failure alerts.
 
 ## Multi-file batch downloads
 

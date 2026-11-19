@@ -647,8 +647,8 @@ const flows = {
   async 'batch-kill-mid'() {
     const id = 'batch-kill';
     const isIos = Capacitor.getPlatform() === 'ios';
-    const fileCount = isIos ? 2 : 14;
-    const slowBytes = isIos ? 8_192 : 24_576;
+    const fileCount = isIos ? 2 : 6;
+    const slowBytes = isIos ? 8_192 : 49_152;
     const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
     const files = Array.from({ length: fileCount }, (_, index) => ({
       url: fileUrl(`/slow/${slowBytes}`),

@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/maestro/disable-device-animations.sh"
 
 SHARD_COUNT="${CAPGO_MAESTRO_SHARD_COUNT:-4}"
+export CAPGO_MAESTRO_SHARD_COUNT="$SHARD_COUNT"
 
 if ! command -v maestro >/dev/null 2>&1; then
   echo "maestro is required." >&2
@@ -16,7 +17,7 @@ SIMULATOR_IDS=()
 while IFS= read -r simulator_id; do
   [[ -n "$simulator_id" ]] || continue
   SIMULATOR_IDS+=("$simulator_id")
-done < <(bash "$ROOT_DIR/scripts/maestro/setup-ios-simulator-pool.sh")
+done < <(bash "$ROOT_DIR/scripts/maestro/setup-ios-simulator-pool.sh" "$SHARD_COUNT")
 if ((${#SIMULATOR_IDS[@]} != SHARD_COUNT)); then
   echo "Expected ${SHARD_COUNT} simulators, got ${#SIMULATOR_IDS[@]}" >&2
   exit 1

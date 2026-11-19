@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SHARD_COUNT="${CAPGO_MAESTRO_SHARD_COUNT:-4}"
+SHARD_COUNT="${1:-${CAPGO_MAESTRO_SHARD_COUNT:-4}}"
 
 if ! [[ "$SHARD_COUNT" =~ ^[0-9]+$ ]] || (( SHARD_COUNT < 1 || SHARD_COUNT > 6 )); then
   echo "CAPGO_MAESTRO_SHARD_COUNT must be 1..6" >&2
@@ -27,6 +27,13 @@ simulator_id_for_name() {
   done < <(xcrun simctl list devices available)
   return 1
 }
+
+for index in $(seq 1 6); do
+  clone_name="Capgo Maestro Shard ${index}"
+  if existing="$(simulator_id_for_name "$clone_name")"; then
+    xcrun simctl delete "$existing" >/dev/null 2>&1 || true
+  fi
+done
 
 BASE_ID="$("$ROOT_DIR/scripts/maestro/select-ios-simulator.sh")"
 xcrun simctl shutdown "$BASE_ID" >/dev/null 2>&1 || true

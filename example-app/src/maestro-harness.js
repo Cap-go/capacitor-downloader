@@ -648,17 +648,18 @@ const flows = {
     const isIos = Capacitor.getPlatform() === 'ios';
     const fileCount = isIos ? 2 : 14;
     const slowBytes = isIos ? 8_192 : 24_576;
+    const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
     const files = Array.from({ length: fileCount }, (_, index) => ({
       url: fileUrl(`/slow/${slowBytes}`),
-      destination: `cache/maestro-bk-${index}.bin`,
+      destination: isIos ? `cache/maestro-bk-${index}.bin` : `downloads/maestro-bk-${index}.bin`,
     }));
-    persistPending('batch-kill-mid', { id, batch: true, fileCount });
+    persistPending('batch-kill-mid', { id, batch: true, fileCount, files, androidHttpEngine });
     setSummary(`PHASE:batch-kill-mid:downloading:id=${id}:files=${fileCount}`);
     void plugin
       .download({
         id,
         files,
-        androidHttpEngine: batchHttpEngine(),
+        androidHttpEngine,
         notification: 'hidden',
       })
       .catch((error) => setMarker('batch-kill-mid', false, String(error?.message ?? error)));
@@ -672,8 +673,25 @@ async function resumePendingDownload(flowId, payload) {
     return;
   }
   if (payload.batch) {
-    const relaunch = await readDownloadStatus(id);
+    let relaunch = await readDownloadStatus(id);
     setSummary(`STATE:batch-kill-mid:relaunch:${id}:${relaunch.state}:${relaunch.progress}`);
+  if (relaunch.state !== 'DONE' && relaunch.state !== 'RUNNING' && payload.files?.length) {
+      try {
+        await plugin.download({
+          id,
+          files: payload.files,
+          androidHttpEngine: payload.androidHttpEngine ?? batchHttpEngine(),
+          notification: 'hidden',
+        });
+      } catch (downloadError) {
+        const message = String(downloadError?.message ?? downloadError);
+        if (!/already exists/i.test(message)) {
+          throw downloadError;
+        }
+      }
+      relaunch = await readDownloadStatus(id);
+      setSummary(`STATE:batch-kill-mid:relaunch-after-retry:${id}:${relaunch.state}:${relaunch.progress}`);
+    }
     const terminal = await waitForTerminal(id, Capacitor.getPlatform() === 'ios' ? 90_000 : 120_000);
     if (terminal.state !== 'DONE') {
       throw new Error(`Batch expected DONE after relaunch, got ${terminal.state}`);

@@ -33,8 +33,10 @@ import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
 import okhttp3.tls.HandshakeCertificates;
 import okhttp3.tls.HeldCertificate;
 import org.junit.After;
@@ -395,22 +397,7 @@ public class OkHttpDownloadExecutorTest {
         List<TransferOutcome> outcomes = Collections.synchronizedList(new ArrayList<>());
         java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(Math.max(1, total));
 
-        for (int index = 0; index < successCount; index++) {
-            server.enqueue(
-                new MockResponse().setBody(new okio.Buffer().write(payload)).addHeader("Content-Length", String.valueOf(payload.length))
-            );
-        }
-        for (int index = 0; index < http500Count; index++) {
-            server.enqueue(new MockResponse().setResponseCode(500));
-        }
-        for (int index = 0; index < cancelCount; index++) {
-            server.enqueue(
-                new MockResponse()
-                    .setBody(new okio.Buffer().write(payload))
-                    .addHeader("Content-Length", String.valueOf(payload.length))
-                    .setBodyDelay(3, TimeUnit.SECONDS)
-            );
-        }
+        installOutcomeDispatcher(payload, successCount, http500Count);
 
         String cancelTaskId = "cancel-path-0";
         for (int index = 0; index < total; index++) {
@@ -420,9 +407,10 @@ public class OkHttpDownloadExecutorTest {
                 File destination = new File(tempDir, taskId + ".bin");
                 OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer(taskId);
                 assertNotNull(reservation);
+                String path = cancelCount > 0 && taskIndex == total - 1 ? "/cancel-path-0" : "/outcome-" + taskIndex;
                 executor.start(
                     reservation,
-                    server.url("/file-" + taskIndex).toString(),
+                    server.url(path).toString(),
                     destination,
                     new JSObject(),
                     "cellular",
@@ -488,20 +476,7 @@ public class OkHttpDownloadExecutorTest {
         List<TransferOutcome> outcomes = Collections.synchronizedList(new ArrayList<>());
         java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(5);
 
-        for (int index = 0; index < 2; index++) {
-            server.enqueue(
-                new MockResponse().setBody(new okio.Buffer().write(payload)).addHeader("Content-Length", String.valueOf(payload.length))
-            );
-        }
-        for (int index = 0; index < 2; index++) {
-            server.enqueue(new MockResponse().setResponseCode(500));
-        }
-        server.enqueue(
-            new MockResponse()
-                .setBody(new okio.Buffer().write(payload))
-                .addHeader("Content-Length", String.valueOf(payload.length))
-                .setBodyDelay(3, TimeUnit.SECONDS)
-        );
+        installMixedDispatcher(payload);
 
         for (int index = 0; index < 5; index++) {
             final int taskIndex = index;
@@ -512,7 +487,7 @@ public class OkHttpDownloadExecutorTest {
                 assertNotNull(reservation);
                 executor.start(
                     reservation,
-                    server.url("/file-" + taskIndex).toString(),
+                    server.url("/mixed-" + taskIndex).toString(),
                     destination,
                     new JSObject(),
                     "cellular",
@@ -542,19 +517,8 @@ public class OkHttpDownloadExecutorTest {
     @Test(timeout = 60_000)
     public void fifthTransferWaitsUntilSlotOpensUnderSaturation() throws Exception {
         byte[] payload = "saturation".getBytes(StandardCharsets.UTF_8);
-        CountDownLatch fifthSubmitted = new CountDownLatch(1);
-
-        for (int index = 0; index < 4; index++) {
-            server.enqueue(
-                new MockResponse()
-                    .setBody(new okio.Buffer().write(payload))
-                    .addHeader("Content-Length", String.valueOf(payload.length))
-                    .setBodyDelay(30, TimeUnit.SECONDS)
-            );
-        }
-        server.enqueue(
-            new MockResponse().setBody(new okio.Buffer().write(payload)).addHeader("Content-Length", String.valueOf(payload.length))
-        );
+        CountDownLatch slowTransfersHoldingSlots = new CountDownLatch(4);
+        installSaturationDispatcher(payload, slowTransfersHoldingSlots);
 
         java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(5);
         CountDownLatch finished = new CountDownLatch(5);
@@ -566,9 +530,6 @@ public class OkHttpDownloadExecutorTest {
                 File destination = new File(tempDir, taskId + ".bin");
                 OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer(taskId);
                 assertNotNull(reservation);
-                if (taskIndex == 4) {
-                    fifthSubmitted.countDown();
-                }
                 executor.start(
                     reservation,
                     server.url("/sat-" + taskIndex).toString(),
@@ -581,11 +542,7 @@ public class OkHttpDownloadExecutorTest {
             });
         }
 
-        assertTrue(fifthSubmitted.await(10, TimeUnit.SECONDS));
-        long deadline = System.currentTimeMillis() + 15_000;
-        while (System.currentTimeMillis() < deadline && executor.availableTransferSlots() > 0) {
-            Thread.sleep(25);
-        }
+        assertTrue(slowTransfersHoldingSlots.await(15, TimeUnit.SECONDS));
         assertEquals(0, executor.availableTransferSlots());
 
         executor.cancel("sat-0", new File(tempDir, "sat-0.bin"));
@@ -594,5 +551,95 @@ public class OkHttpDownloadExecutorTest {
         workers.shutdown();
         assertTrue(workers.awaitTermination(10, TimeUnit.SECONDS));
         assertEquals(4, executor.availableTransferSlots());
+    }
+
+    private void installOutcomeDispatcher(byte[] payload, int successCount, int http500Count) {
+        server.setDispatcher(
+            new Dispatcher() {
+                @Override
+                public MockResponse dispatch(RecordedRequest request) {
+                    String path = request.getPath();
+                    if (path == null) {
+                        return new MockResponse().setResponseCode(404);
+                    }
+                    if ("/cancel-path-0".equals(path)) {
+                        return new MockResponse()
+                            .setBody(new okio.Buffer().write(payload))
+                            .addHeader("Content-Length", String.valueOf(payload.length))
+                            .setBodyDelay(3, TimeUnit.SECONDS);
+                    }
+                    if (path.startsWith("/outcome-")) {
+                        int index = Integer.parseInt(path.substring("/outcome-".length()));
+                        if (index < successCount) {
+                            return new MockResponse()
+                                .setBody(new okio.Buffer().write(payload))
+                                .addHeader("Content-Length", String.valueOf(payload.length));
+                        }
+                        if (index < successCount + http500Count) {
+                            return new MockResponse().setResponseCode(500);
+                        }
+                    }
+                    return new MockResponse().setResponseCode(404);
+                }
+            }
+        );
+    }
+
+    private void installMixedDispatcher(byte[] payload) {
+        server.setDispatcher(
+            new Dispatcher() {
+                @Override
+                public MockResponse dispatch(RecordedRequest request) {
+                    String path = request.getPath();
+                    if (path == null) {
+                        return new MockResponse().setResponseCode(404);
+                    }
+                    switch (path) {
+                        case "/mixed-0":
+                        case "/mixed-1":
+                            return new MockResponse()
+                                .setBody(new okio.Buffer().write(payload))
+                                .addHeader("Content-Length", String.valueOf(payload.length));
+                        case "/mixed-2":
+                        case "/mixed-3":
+                            return new MockResponse().setResponseCode(500);
+                        case "/mixed-4":
+                            return new MockResponse()
+                                .setBody(new okio.Buffer().write(payload))
+                                .addHeader("Content-Length", String.valueOf(payload.length))
+                                .setBodyDelay(3, TimeUnit.SECONDS);
+                        default:
+                            return new MockResponse().setResponseCode(404);
+                    }
+                }
+            }
+        );
+    }
+
+    private void installSaturationDispatcher(byte[] payload, CountDownLatch slowTransfersHoldingSlots) {
+        server.setDispatcher(
+            new Dispatcher() {
+                @Override
+                public MockResponse dispatch(RecordedRequest request) {
+                    String path = request.getPath();
+                    if (path == null) {
+                        return new MockResponse().setResponseCode(404);
+                    }
+                    if (path.matches("/sat-[0-3]")) {
+                        slowTransfersHoldingSlots.countDown();
+                        return new MockResponse()
+                            .setBody(new okio.Buffer().write(payload))
+                            .addHeader("Content-Length", String.valueOf(payload.length))
+                            .setBodyDelay(60, TimeUnit.SECONDS);
+                    }
+                    if ("/sat-4".equals(path)) {
+                        return new MockResponse()
+                            .setBody(new okio.Buffer().write(payload))
+                            .addHeader("Content-Length", String.valueOf(payload.length));
+                    }
+                    return new MockResponse().setResponseCode(404);
+                }
+            }
+        );
     }
 }

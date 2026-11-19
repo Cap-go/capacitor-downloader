@@ -18,10 +18,10 @@ import android.os.Looper;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.PluginCall;
 import java.lang.reflect.Field;
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.json.JSONObject;
@@ -34,6 +34,7 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
+import org.robolectric.shadows.ShadowSystemClock;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 34)
@@ -86,16 +87,18 @@ public class CapacitorDownloaderPluginBatchEntryTest {
         AtomicLong nextSystemId = new AtomicLong(3000L);
         when(downloadManager.enqueue(any(DownloadManager.Request.class))).thenAnswer((invocation) -> nextSystemId.getAndIncrement());
 
-        MatrixCursor cursor = new MatrixCursor(new String[] {
-            DownloadManager.COLUMN_ID,
-            DownloadManager.COLUMN_STATUS,
-            DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR,
-            DownloadManager.COLUMN_TOTAL_SIZE_BYTES
+        when(downloadManager.query(any())).thenAnswer((invocation) -> {
+            MatrixCursor cursor = new MatrixCursor(new String[] {
+                DownloadManager.COLUMN_ID,
+                DownloadManager.COLUMN_STATUS,
+                DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR,
+                DownloadManager.COLUMN_TOTAL_SIZE_BYTES
+            });
+            for (long id = 3000L; id < 3100L; id++) {
+                cursor.addRow(new Object[] { id, DownloadManager.STATUS_RUNNING, 10L, 100L });
+            }
+            return cursor;
         });
-        for (long id = 3000L; id < 3100L; id++) {
-            cursor.addRow(new Object[] { id, DownloadManager.STATUS_RUNNING, 10L, 100L });
-        }
-        when(downloadManager.query(any())).thenReturn(cursor);
 
         PluginCall call = buildBatchCall("hundred-batch", 100);
         plugin.download(call);
@@ -103,6 +106,9 @@ public class CapacitorDownloaderPluginBatchEntryTest {
 
         verify(call, timeout(5000)).resolve(any());
         verify(downloadManager, times(100)).enqueue(any(DownloadManager.Request.class));
+
+        ShadowSystemClock.advance(Duration.ofMillis(1100));
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
 
         verify(downloadManager, timeout(5000).atLeastOnce()).query(any());
         verify(downloadManager, times(1)).query(any());

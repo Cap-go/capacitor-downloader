@@ -616,6 +616,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 fileRequest.destinationFile,
                 headers,
                 network,
+                null,
                 (downloadId, progress) ->
                     handler.post(() -> {
                         DownloadBatchState.BatchIdParts parts = DownloadBatchState.parseFileTaskId(downloadId);

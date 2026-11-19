@@ -144,6 +144,21 @@ export interface DownloadOptions {
    */
   downloadCompletedNotificationText?: string;
   /**
+   * HTTP response header that carries the uncompressed byte length when the body is transferred
+   * compressed (for example `Content-Encoding: gzip`) and `Content-Length` is missing or wrong.
+   *
+   * When the response includes this header with a positive integer, native code uses it for
+   * `downloadProgress` totals and progress is clamped at 1. Examples: `X-Uncompressed-Length`.
+   *
+   * Single downloads: Android OkHttp and iOS. Ignored on Web and Android DownloadManager.
+   * On Android OkHttp, ignored when the response still includes `Content-Encoding` (for example
+   * after setting `Accept-Encoding: gzip` on the request). Do not set request `Accept-Encoding`;
+   * OkHttp handles decompression by default.
+   *
+   * @since 8.9.0
+   */
+  lengthHeader?: string;
+  /**
    * iOS 26 and later: opt in to a `BGContinuedProcessingTask` so the system can show download progress while the
    * device is locked. Falls back to the background URL session when the task does not launch in time. If the continued
    * processing task expires, the active transfer is cancelled with `downloadFailed` and is not resumed automatically.
@@ -259,6 +274,19 @@ export interface DownloadBatchOptions {
    * @since 8.5.0
    */
   downloadCompletedNotificationText?: string;
+  /**
+   * HTTP response header that carries the uncompressed byte length when the body is transferred
+   * compressed (for example `Content-Encoding: gzip`) and `Content-Length` is missing or wrong.
+   *
+   * When the response includes this header with a positive integer, native code uses it for
+   * `downloadProgress` totals and progress is clamped at 1. Examples: `X-Uncompressed-Length`.
+   *
+   * Batch downloads: iOS only (same header name applies to every file in `files`). Android batches always
+   * use DownloadManager and ignore this option. Ignored on Web.
+   *
+   * @since 8.9.0
+   */
+  lengthHeader?: string;
 }
 
 /**

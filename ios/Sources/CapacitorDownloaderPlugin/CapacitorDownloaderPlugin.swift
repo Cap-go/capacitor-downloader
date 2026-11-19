@@ -83,6 +83,9 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 return
             }
             self.rehydrateBackgroundDownloadTasks(tasks)
+            let activeIds = self.singleDownloadIds()
+                .union(Set(tasks.compactMap { ($0 as? URLSessionDownloadTask)?.taskDescription }))
+            DownloadLengthHeaderStore.shared.sweepStaleEntries(keeping: activeIds)
             self.registerDownloadDelegateIfGenerationsRestored()
         }
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
@@ -147,6 +150,32 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             tasks.removeValue(forKey: id)
         }
         taskGenerations.removeValue(forKey: DownloadTaskGenerationKey.storageKey(session: session, task: task))
+        DownloadLengthHeaderStore.shared.clear(for: id)
+    }
+
+    private func normalizedLengthHeader(from call: CAPPluginCall) -> String? {
+        guard let raw = call.getString("lengthHeader")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else {
+            return nil
+        }
+        return raw
+    }
+
+    private func registerLengthHeaderOption(_ headerName: String?, for taskId: String) {
+        DownloadLengthHeaderStore.shared.setHeaderName(headerName, for: taskId)
+    }
+
+    private func captureExpectedTotalFromResponseIfNeeded(
+        downloadId: String,
+        downloadTask: URLSessionDownloadTask
+    ) {
+        guard DownloadLengthHeaderStore.shared.expectedTotal(for: downloadId) == nil,
+              let headerName = DownloadLengthHeaderStore.shared.headerName(for: downloadId),
+              let httpResponse = downloadTask.response as? HTTPURLResponse,
+              let expected = DownloadExpectedLength.parse(from: httpResponse, headerName: headerName) else {
+            return
+        }
+        DownloadLengthHeaderStore.shared.setExpectedTotal(expected, for: downloadId)
     }
 
     private func nextGeneration(for id: String) -> UInt64 {
@@ -355,6 +384,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 request.setValue(value, forHTTPHeaderField: key)
             }
         }
+        registerLengthHeaderOption(normalizedLengthHeader(from: call), for: id)
 
         let wifiOnly = call.getString("network") == "wifi-only"
         let continuedRequest = parseContinuedProcessingRequest(call)
@@ -408,6 +438,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private func downloadBatch(_ call: CAPPluginCall, batchId: String, files: [[String: Any]]) {
         var parsed: [(url: URL, destination: String)] = []
         let headers = call.getObject("headers") as? [String: String] ?? [:]
+        let lengthHeader = normalizedLengthHeader(from: call)
         let wifiOnly = call.getString("network") == "wifi-only"
         let batchSession = downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: false)
 
@@ -448,6 +479,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             let taskId = batchCoordinator.fileTaskId(batchId: batchId, generation: generation, fileIndex: index)
             DownloadDestinationStore.shared.setDestination(entry.destination, for: taskId)
             batchCoordinator.registerChildTask(batchId: batchId, taskId: taskId, fileIndex: index)
+            registerLengthHeaderOption(lengthHeader, for: taskId)
 
             var request = URLRequest(url: entry.url)
             for (key, value) in headers {
@@ -560,6 +592,24 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
     internal var mainBackgroundSessionForTests: URLSession {
         DownloadBackgroundSessionManager.shared.mainSession
+    }
+
+    internal func registerSingleDownloadForTests(
+        downloadId: String,
+        task: URLSessionDownloadTask,
+        session: URLSession,
+        generation: UInt64,
+        destination: String
+    ) {
+        DownloadDestinationStore.shared.setDestination(destination, for: downloadId)
+        setTask(task, for: downloadId)
+        setTaskGeneration(generation, for: task, in: session)
+    }
+
+    internal func registeredTaskGenerationKeysForTests() -> Set<String> {
+        tasksLock.lock()
+        defer { tasksLock.unlock() }
+        return Set(taskGenerations.keys)
     }
 
     private func failBatch(batchId: String, generation: UInt64, fileIndex: Int, error: String) {
@@ -714,7 +764,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             return
         }
 
-        if let httpResponse = downloadTask.response as? HTTPURLResponse,
+        if let httpResponse = DownloadSessionDelegateTestSupport.httpResponse(for: downloadTask),
            !DownloadHTTPValidator.isSuccessfulStatusCode(httpResponse.statusCode) {
             try? FileManager.default.removeItem(at: location)
             if let batchParts = batchCoordinator.activeChildParts(for: id) {
@@ -864,9 +914,20 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         guard let id = idForTask(downloadTask) else {
             return
         }
+        tasksLock.lock()
+        let isCurrentTask = tasks[id] === downloadTask
+        tasksLock.unlock()
+        if isCurrentTask {
+            captureExpectedTotalFromResponseIfNeeded(downloadId: id, downloadTask: downloadTask)
+        }
 
-        let bytesTotal = totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : 0
-        let progress = bytesTotal > 0 ? Float(totalBytesWritten) / Float(bytesTotal) : 0
+        let progressSnapshot = DownloadLengthHeaderProgress.bytesTotalAndProgress(
+            downloadId: id,
+            totalBytesWritten: totalBytesWritten,
+            totalBytesExpectedToWrite: totalBytesExpectedToWrite
+        )
+        let bytesTotal = progressSnapshot.bytesTotal
+        let progress = progressSnapshot.progress
 
         if let batchParts = batchCoordinator.activeChildParts(for: id) {
             guard let batchProgress = batchCoordinator.updateFileProgress(

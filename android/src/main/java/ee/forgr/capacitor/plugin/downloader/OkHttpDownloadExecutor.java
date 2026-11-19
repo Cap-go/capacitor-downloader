@@ -99,6 +99,7 @@ public class OkHttpDownloadExecutor {
         File destinationFile,
         JSObject headers,
         String network,
+        String lengthHeader,
         ProgressReporter reporter,
         CompletionListener completionListener
     ) {
@@ -217,8 +218,8 @@ public class OkHttpDownloadExecutor {
                         return;
                     }
 
-                    long total = body.contentLength();
-                    active.bytesTotal = total > 0 ? total : 0L;
+                    long total = DownloadExpectedLength.resolveTotalBytes(response, body, lengthHeader);
+                    active.bytesTotal = total;
 
                     try (InputStream input = body.byteStream(); FileOutputStream output = new FileOutputStream(tempFile)) {
                         byte[] buffer = new byte[8192];
@@ -234,7 +235,7 @@ public class OkHttpDownloadExecutor {
                             written += read;
                             active.bytesWritten = written;
                             if (total > 0) {
-                                active.progress = (float) written / (float) total;
+                                active.progress = Math.min(1f, (float) written / (float) total);
                             }
                             int percent = (int) (active.progress * 100f);
                             if (percent != lastReportedPercent) {

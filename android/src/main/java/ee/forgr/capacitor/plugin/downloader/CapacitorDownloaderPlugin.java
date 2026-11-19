@@ -242,6 +242,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 resolvedDestination.file,
                 call.getObject("headers"),
                 call.getString("network"),
+                call.getString("lengthHeader"),
                 call.getString("notification"),
                 call.getString("title"),
                 call.getString("description"),
@@ -765,6 +766,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         File destinationFile,
         JSObject headers,
         String network,
+        String lengthHeader,
         String notification,
         String title,
         String description,
@@ -834,6 +836,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             destinationFile,
                             headers,
                             network,
+                            lengthHeader,
                             (downloadId, progress) ->
                                 handler.post(() -> {
                                     if (!isCurrentOkHttpDownload(downloadId) || !isCurrentOkHttpGeneration(downloadId, storedGeneration)) {

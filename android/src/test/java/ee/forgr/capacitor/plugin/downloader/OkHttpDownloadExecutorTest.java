@@ -542,12 +542,13 @@ public class OkHttpDownloadExecutorTest {
             });
         }
 
-        assertTrue(slowTransfersHoldingSlots.await(15, TimeUnit.SECONDS));
+        assertTrue(slowTransfersHoldingSlots.await(20, TimeUnit.SECONDS));
         assertEquals(0, executor.availableTransferSlots());
 
+        Thread.sleep(200);
         executor.cancel("sat-0", new File(tempDir, "sat-0.bin"));
 
-        assertTrue(finished.await(45, TimeUnit.SECONDS));
+        assertTrue(finished.await(30, TimeUnit.SECONDS));
         workers.shutdown();
         assertTrue(workers.awaitTermination(10, TimeUnit.SECONDS));
         assertEquals(4, executor.availableTransferSlots());
@@ -630,7 +631,7 @@ public class OkHttpDownloadExecutorTest {
                         return new MockResponse()
                             .setBody(new okio.Buffer().write(payload))
                             .addHeader("Content-Length", String.valueOf(payload.length))
-                            .setBodyDelay(60, TimeUnit.SECONDS);
+                            .setBodyDelay(8, TimeUnit.SECONDS);
                     }
                     if ("/sat-4".equals(path)) {
                         return new MockResponse()

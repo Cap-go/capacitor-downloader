@@ -10,7 +10,7 @@ SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
 EMULATOR="${SDK_ROOT}/emulator/emulator"
 ADB="${SDK_ROOT}/platform-tools/adb"
 EMULATOR_BOOT_TIMEOUT_SECONDS="${CAPGO_MAESTRO_EMULATOR_BOOT_TIMEOUT_SECONDS:-90}"
-EMULATOR_EXTRA_FLAGS=(-no-window -no-boot-anim -gpu swiftshader_indirect -no-audio -camera-back none -cores 2 -memory 2048)
+EMULATOR_EXTRA_FLAGS=(-read-only -no-window -no-boot-anim -gpu swiftshader_indirect -no-audio -camera-back none -cores 2 -memory 2048)
 
 if ! command -v maestro >/dev/null 2>&1; then
   echo "maestro is required." >&2
@@ -52,44 +52,14 @@ run_shard_worker() {
     bash "$ROOT_DIR/scripts/maestro/maestro-shard-worker.sh" android "$shard_index" "$SHARD_COUNT" "$device_id"
 }
 
-ensure_shard_avd() {
-  local base_avd="$1"
-  local port="$2"
-  local shard_avd="capgo_maestro_${port}"
-  if "$EMULATOR" -list-avds | grep -qx "$shard_avd"; then
-    printf '%s\n' "$shard_avd"
-    return 0
-  fi
-  local avd_home="${ANDROID_AVD_HOME:-$HOME/.android/avd}"
-  local src_dir="${avd_home}/${base_avd}.avd"
-  local dst_dir="${avd_home}/${shard_avd}.avd"
-  if [[ ! -d "$src_dir" ]]; then
-    echo "Base AVD directory missing: ${src_dir}" >&2
-    return 1
-  fi
-  cp -a "$src_dir" "$dst_dir"
-  if [[ -f "${avd_home}/${base_avd}.ini" ]]; then
-    cp "${avd_home}/${base_avd}.ini" "${avd_home}/${shard_avd}.ini"
-    sed -i "s/${base_avd}/${shard_avd}/g" "${avd_home}/${shard_avd}.ini"
-  fi
-  if [[ -f "${dst_dir}/config.ini" ]]; then
-    sed -i "s/${base_avd}/${shard_avd}/g" "${dst_dir}/config.ini" || true
-  fi
-  printf '%s\n' "$shard_avd"
-}
-
 start_extra_emulator() {
   local port="$1"
   local avd_name="$2"
-  local shard_avd=""
   local serial="emulator-${port}"
   local log_file="$ROOT_DIR/.maestro-artifacts/emulator-${port}.log"
   mkdir -p "$ROOT_DIR/.maestro-artifacts"
-  if ! shard_avd="$(ensure_shard_avd "$avd_name" "$port")"; then
-    return 1
-  fi
   set +e
-  "$EMULATOR" -avd "$shard_avd" -port "$port" "${EMULATOR_EXTRA_FLAGS[@]}" >"$log_file" 2>&1 &
+  "$EMULATOR" -avd "$avd_name" -port "$port" "${EMULATOR_EXTRA_FLAGS[@]}" >"$log_file" 2>&1 &
   local emu_pid=$!
   set -e
   if ! wait_for_android_boot "$serial" "$emu_pid"; then

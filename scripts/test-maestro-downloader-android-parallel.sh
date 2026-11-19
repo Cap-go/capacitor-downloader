@@ -43,6 +43,7 @@ else
   avd_name="$("$EMULATOR" -list-avds | head -n 1 || true)"
 fi
 
+ports_to_boot=()
 while ((${#serial_list[@]} < SHARD_COUNT)); do
   shard_index="${#serial_list[@]}"
   port=$((5554 + shard_index * 2))
@@ -55,22 +56,38 @@ while ((${#serial_list[@]} < SHARD_COUNT)); do
     echo "Need CAPGO_MAESTRO_AVD or a listed AVD to start extra emulators." >&2
     break
   fi
-  "$EMULATOR" -avd "$avd_name" -port "$port" -no-window -no-snapshot -no-boot-anim -gpu swiftshader_indirect -no-audio -camera-back none &
-  "$ADB" -s "$serial" wait-for-device
-  booted=""
-  for _ in $(seq 1 90); do
-    booted="$("$ADB" -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
-    if [[ "$booted" == "1" ]]; then
-      break
-    fi
-    sleep 2
-  done
-  if [[ "$booted" != "1" ]]; then
-    echo "Emulator ${serial} failed to boot." >&2
-    exit 1
-  fi
+  ports_to_boot+=("$port")
   serial_list+=("$serial")
 done
+
+if ((${#ports_to_boot[@]} > 0)); then
+  for port in "${ports_to_boot[@]}"; do
+    "$EMULATOR" -avd "$avd_name" -port "$port" -no-window -no-snapshot -no-boot-anim -gpu swiftshader_indirect -no-audio -camera-back none &
+  done
+  boot_fail=0
+  for port in "${ports_to_boot[@]}"; do
+    serial="emulator-${port}"
+    if ! "$ADB" -s "$serial" wait-for-device; then
+      boot_fail=1
+      continue
+    fi
+    booted=""
+    for _ in $(seq 1 90); do
+      booted="$("$ADB" -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+      if [[ "$booted" == "1" ]]; then
+        break
+      fi
+      sleep 2
+    done
+    if [[ "$booted" != "1" ]]; then
+      echo "Emulator ${serial} failed to boot." >&2
+      boot_fail=1
+    fi
+  done
+  if (( boot_fail != 0 )); then
+    exit 1
+  fi
+fi
 
 effective_shards="${#serial_list[@]}"
 if (( effective_shards < SHARD_COUNT )); then

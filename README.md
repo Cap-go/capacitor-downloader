@@ -192,7 +192,7 @@ await CapacitorDownloader.download({
 | `public-downloads/...` | Public Downloads folder (DownloadManager) | App external files under `public-downloads/...` (DownloadManager) |
 | Other relative paths | App external files dir (DownloadManager) | App external files dir (DownloadManager) |
 
-**Notifications on OkHttp (8.8.0):** Only `notification: 'progress'` opts in to ongoing progress and the optional `dataSync` foreground service. Default `'completed'` matches 8.7.0, including one "Download complete" notification on success via `DownloadCompletionNotifier`. `downloadCompletedNotificationText` is unchanged.
+**Notifications on OkHttp (8.8.0):** Only `notification: 'progress'` opts in to ongoing progress and the optional `dataSync` foreground service. One ongoing notification covers every concurrent `progress` download (titles and combined progress when several run at once); the foreground service reuses that same notification instead of posting an extra empty one. Default `'completed'` matches 8.7.0, including one "Download complete" notification on success via `DownloadCompletionNotifier`. `downloadCompletedNotificationText` is unchanged.
 
 **iOS paths (8.8.0):** `files/` and `cache/` still resolve under Documents. New `private/` prefix (iOS only) writes under Application Support/CapacitorDownloader/.
 

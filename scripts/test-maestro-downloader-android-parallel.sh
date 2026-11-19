@@ -142,8 +142,13 @@ mkdir -p "$ROOT_DIR/maestro-results"
 rm -rf "$ROOT_DIR/maestro-results"/*
 for shard_index in $(seq 0 $((SHARD_COUNT - 1))); do
   src="$ROOT_DIR/maestro-results-shard-${shard_index}"
+  dst="$ROOT_DIR/maestro-results/shard-${shard_index}"
   if [[ -d "$src" ]]; then
-    cp -R "$src/." "$ROOT_DIR/maestro-results/" 2>/dev/null || true
+    mkdir -p "$dst"
+    cp -R "$src/." "$dst/" 2>/dev/null || true
+    if [[ -f "$src/junit.xml" ]]; then
+      cp "$src/junit.xml" "$ROOT_DIR/maestro-results/junit-shard-${shard_index}.xml"
+    fi
   fi
 done
 

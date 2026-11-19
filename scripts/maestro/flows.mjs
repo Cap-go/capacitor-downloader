@@ -1,6 +1,7 @@
 /** @type {readonly string[]} */
 export const MAESTRO_E2E_FLOWS = [
   'foreground-complete',
+  'batch-kill-mid',
   'background-complete',
   'kill-relaunch-resume',
   'low-memory-kill',
@@ -14,7 +15,6 @@ export const MAESTRO_E2E_FLOWS = [
   'completion-once',
   'batch-error-404',
   'batch-error-5xx',
-  'batch-kill-mid',
 ];
 
 export function flowYamlPath(flowId, rootDir) {

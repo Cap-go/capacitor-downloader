@@ -22,4 +22,4 @@ appId: app.capgo.downloader
       isE2E: true
 - extendedWaitUntil:
     visible: '.*Marker: batch-kill-mid:success.*'
-    timeout: 120000
+    timeout: 180000

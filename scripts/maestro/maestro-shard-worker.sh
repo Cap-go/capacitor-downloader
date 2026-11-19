@@ -73,7 +73,19 @@ else
   adb -s "$DEVICE_ID" reverse --remove "tcp:${APP_PORT}" >/dev/null 2>&1 || true
   adb -s "$DEVICE_ID" reverse "tcp:${APP_PORT}" "tcp:${HOST_PORT}" >/dev/null
   adb -s "$DEVICE_ID" uninstall "$APP_ID" >/dev/null 2>&1 || true
-  adb -s "$DEVICE_ID" install -r "$APK_PATH" >/dev/null
+  apk_install_attempt=1
+  while (( apk_install_attempt <= 3 )); do
+    if adb -s "$DEVICE_ID" install -r "$APK_PATH" >/dev/null 2>&1; then
+      break
+    fi
+    if (( apk_install_attempt == 3 )); then
+      adb -s "$DEVICE_ID" install -r "$APK_PATH" >&2
+      exit 1
+    fi
+    adb -s "$DEVICE_ID" wait-for-device
+    sleep 2
+    apk_install_attempt=$((apk_install_attempt + 1))
+  done
 fi
 
 rm -rf "$RESULTS_DIR"

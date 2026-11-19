@@ -20,18 +20,21 @@ create_pool_device() {
   bash "$ROOT_DIR/scripts/maestro/create-ios-simulator-named.sh" "$display_name"
 }
 
-base_id="$(create_pool_device 0)"
+base_id="$(create_pool_device 0 | head -n 1 | tr -d '\r')"
+if [[ -z "$base_id" ]]; then
+  echo "Failed to create base iOS simulator for the pool." >&2
+  exit 1
+fi
 printf '%s\n' "$base_id" >>"$POOL_MANIFEST"
 
 if (( SHARD_COUNT > 1 )); then
   xcrun simctl shutdown "$base_id" >/dev/null 2>&1 || true
+  for (( index = 1; index < SHARD_COUNT; index++ )); do
+    clone_name="Capgo Maestro Pool ${MAESTRO_POOL_TOKEN}-${index}"
+    clone_id="$(xcrun simctl clone "$base_id" "$clone_name" | head -n 1 | tr -d '\r')"
+    printf '%s\n' "$clone_id" >>"$POOL_MANIFEST"
+  done
 fi
-
-for index in $(seq 1 $((SHARD_COUNT - 1))); do
-  clone_name="Capgo Maestro Pool ${MAESTRO_POOL_TOKEN}-${index}"
-  clone_id="$(xcrun simctl clone "$base_id" "$clone_name")"
-  printf '%s\n' "$clone_id" >>"$POOL_MANIFEST"
-done
 
 manifest_lines="$(wc -l <"$POOL_MANIFEST" | tr -d '[:space:]')"
 if [[ "$manifest_lines" != "$SHARD_COUNT" ]]; then

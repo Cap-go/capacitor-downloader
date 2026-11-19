@@ -112,7 +112,7 @@ const server = createServer((req, res) => {
       'content-type': 'application/octet-stream',
       'content-length': String(total),
     });
-    sendBytes(res, total, 8 * 1024, 40);
+    sendBytes(res, total, 8 * 1024, 60);
     return;
   }
 

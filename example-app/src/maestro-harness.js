@@ -3,7 +3,23 @@ import { Capacitor } from '@capacitor/core';
 import { CapacitorDownloader } from '@capgo/capacitor-downloader';
 
 const plugin = CapacitorDownloader;
-const serverUrl = import.meta.env.VITE_CAPGO_SERVER_URL ?? 'http://127.0.0.1:3192';
+
+function resolveMaestroServerUrl() {
+  if (typeof window.__capgoMaestroServerUrl === 'string' && window.__capgoMaestroServerUrl.length > 0) {
+    return window.__capgoMaestroServerUrl;
+  }
+  const rawPort = window.__capgoMaestroServerPort;
+  const port = typeof rawPort === 'number' ? rawPort : Number(rawPort);
+  if (Number.isFinite(port) && port > 0) {
+    if (Capacitor.getPlatform() === 'android') {
+      return `http://10.0.2.2:${port}`;
+    }
+    return `http://127.0.0.1:${port}`;
+  }
+  return import.meta.env.VITE_CAPGO_SERVER_URL ?? 'http://127.0.0.1:3192';
+}
+
+const serverUrl = resolveMaestroServerUrl();
 const storagePrefix = '__capgo_dl_maestro_';
 const completionCounts = new Map();
 
@@ -275,7 +291,7 @@ const flows = {
   async 'background-complete'() {
     const id = 'bg-complete';
     const isIos = Capacitor.getPlatform() === 'ios';
-    const url = fileUrl(isIos ? '/slow/131072' : '/slow/98304');
+    const url = fileUrl(isIos ? '/slow/786432' : '/slow/98304');
     const destination = isIos ? 'cache/maestro-bg.bin' : 'downloads/maestro-bg.bin';
     const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
     persistPending('background-complete', {

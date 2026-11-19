@@ -211,7 +211,8 @@ final class DownloadBatchProgressTests: XCTestCase {
     }
 
     func testLoadRestoresGenerationsBeforeRegisteringDelegate() {
-        DownloadIdGenerationStore.shared.setGeneration(11, forDownloadId: "episode")
+        let downloadId = "episode-load-restore-\(UUID().uuidString)"
+        DownloadIdGenerationStore.shared.setGeneration(11, forDownloadId: downloadId)
         let plugin = CapacitorDownloaderPlugin()
         plugin.load()
         XCTAssertTrue(plugin.didRestoreGenerationsBeforeDelegateRegistration)

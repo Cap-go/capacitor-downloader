@@ -12,6 +12,9 @@ export const MAESTRO_E2E_FLOWS = [
   'cancel-cleanup',
   'parallel-downloads',
   'completion-once',
+  'batch-error-404',
+  'batch-error-5xx',
+  'batch-kill-mid',
 ];
 
 export function flowYamlPath(flowId, rootDir) {

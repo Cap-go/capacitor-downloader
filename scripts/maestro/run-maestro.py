@@ -45,11 +45,16 @@ FLOWS = {
 }
 
 
-def run(timeout, scenario, device, platform='android', results_dir=None):
+def run(timeout, scenarios, device, platform='android', results_dir=None):
     if not 0 < timeout <= 600:
         raise ValueError('Maestro timeout must be between 0 and 600 seconds')
-    if scenario not in FLOWS:
-        raise ValueError('Unknown Maestro E2E flow')
+    if isinstance(scenarios, str):
+        scenario_list = [scenarios]
+    else:
+        scenario_list = list(scenarios)
+    for scenario in scenario_list:
+        if scenario not in FLOWS:
+            raise ValueError(f'Unknown Maestro E2E flow: {scenario}')
     if platform not in {'android', 'ios'}:
         raise ValueError('Maestro platform must be android or ios')
     if not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}', device):
@@ -59,14 +64,14 @@ def run(timeout, scenario, device, platform='android', results_dir=None):
     )
     results.mkdir(exist_ok=True)
     report = results / 'junit.xml'
+    flow_paths = [str(FLOWS[scenario]) for scenario in scenario_list]
     command = [
-        'maestro', 'test', '--config', str(ROOT / '.maestro/config.yaml'), str(FLOWS[scenario]),
+        'maestro', 'test', '--config', str(ROOT / '.maestro/config.yaml'), *flow_paths,
         '--platform', platform, '--udid', device,
         '--format', 'junit', '--output', str(report),
         '--debug-output', str(results / 'debug'), '--flatten-debug-output',
         '--test-output-dir', str(results / 'artifacts'),
     ]
-    # A report from an earlier attempt must never authorize success.
     try:
         os.remove(report)
     except FileNotFoundError:
@@ -82,7 +87,6 @@ def run_command(command, report, timeout):
         nonlocal termination_signal
         termination_signal = signum
 
-    # Record cancellation instead of raising during Popen or interrupting cleanup.
     previous_handler = signal.signal(signal.SIGTERM, request_termination)
     try:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
@@ -144,7 +148,6 @@ def stop_process(process):
         process.wait(timeout=2)
     except subprocess.TimeoutExpired:
         pass
-    # Descendants may outlive the CLI and keep its output pipe or device session open.
     signal_process_group(process, signal.SIGKILL)
     process.wait()
     os.set_blocking(process.stdout.fileno(), False)
@@ -155,6 +158,21 @@ def stop_process(process):
 
 
 if __name__ == '__main__':
-    platform = sys.argv[4] if len(sys.argv) > 4 else 'android'
-    results_dir = sys.argv[5] if len(sys.argv) > 5 else None
-    sys.exit(run(float(sys.argv[1]), sys.argv[2], sys.argv[3], platform, results_dir))
+    if len(sys.argv) < 5:
+        raise SystemExit(
+            'Usage: run-maestro.py <timeout> <flow> [more-flows...] <device> <platform> [results_dir]'
+        )
+    timeout = float(sys.argv[1])
+    if sys.argv[-1] in {'android', 'ios'}:
+        platform = sys.argv[-1]
+        device = sys.argv[-2]
+        flow_args = sys.argv[2:-2]
+        results_dir_arg = None
+    else:
+        platform = sys.argv[-2]
+        device = sys.argv[-3]
+        flow_args = sys.argv[2:-3]
+        results_dir_arg = sys.argv[-1]
+    if not flow_args:
+        raise SystemExit('At least one flow id is required')
+    sys.exit(run(timeout, flow_args, device, platform, results_dir_arg))

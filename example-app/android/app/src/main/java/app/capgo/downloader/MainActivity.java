@@ -10,6 +10,18 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     private static final String E2E_JS_FLAG = "window.__capgoMaestroIsE2E=true;";
 
+    private String buildMaestroPublishJs(Intent intent) {
+        StringBuilder js = new StringBuilder(E2E_JS_FLAG);
+        if (intent == null) {
+            return js.toString();
+        }
+        String serverPort = intent.getStringExtra("maestroServerPort");
+        if (serverPort != null && !serverPort.isEmpty()) {
+            js.append("window.__capgoMaestroServerPort=").append(serverPort).append(";");
+        }
+        return js.toString();
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -41,7 +53,7 @@ public class MainActivity extends BridgeActivity {
             return;
         }
 
-        bridge.eval(E2E_JS_FLAG, null);
+        bridge.eval(buildMaestroPublishJs(intent), null);
     }
 
     private void publishDebugMaestroFlag() {
@@ -52,7 +64,7 @@ public class MainActivity extends BridgeActivity {
         if (bridge == null) {
             return;
         }
-        bridge.eval(E2E_JS_FLAG, null);
+        bridge.eval(buildMaestroPublishJs(getIntent()), null);
     }
 
     private boolean isDebuggableBuild() {

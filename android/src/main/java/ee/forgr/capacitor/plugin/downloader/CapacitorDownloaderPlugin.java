@@ -49,6 +49,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private BroadcastReceiver downloadReceiver;
     private DownloadCompletedNotificationStore completedNotificationStore;
+    private DownloadFailedNotificationStore failedNotificationStore;
 
     @Override
     public void load() {
@@ -57,7 +58,29 @@ public class CapacitorDownloaderPlugin extends Plugin {
         okHttpDownloadExecutor = new OkHttpDownloadExecutor(getContext());
         okHttpProgressNotifier = new OkHttpDownloadProgressNotifier(getContext());
         completedNotificationStore = new DownloadCompletedNotificationStore(getContext());
+        failedNotificationStore = new DownloadFailedNotificationStore(getContext());
         registerDownloadReceiver();
+    }
+
+    private void setDownloadNotificationTexts(String downloadId, String completionText, String failedText, long generation) {
+        completedNotificationStore.setText(downloadId, completionText, generation);
+        failedNotificationStore.setText(downloadId, failedText, generation);
+    }
+
+    private void removeDownloadNotificationTexts(String downloadId, long generation) {
+        completedNotificationStore.remove(downloadId, generation);
+        failedNotificationStore.remove(downloadId, generation);
+    }
+
+    private void presentFailedDownloadNotification(String downloadId, long generation) {
+        String failedText = failedNotificationStore.takeText(downloadId, generation);
+        if (failedText != null) {
+            DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), downloadId, failedText);
+        }
+    }
+
+    private void discardFailedNotificationText(String downloadId, long generation) {
+        failedNotificationStore.remove(downloadId, generation);
     }
 
     private void registerDownloadReceiver() {
@@ -166,6 +189,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         downloads.remove(id, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID);
         okHttpDestinationFiles.remove(id, destinationFile);
         completedNotificationStore.remove(id, storedGeneration);
+        presentFailedDownloadNotification(id, storedGeneration);
         JSObject failedData = new JSObject();
         failedData.put("id", id);
         failedData.put("error", errorMessage != null ? errorMessage : "Download failed");
@@ -230,8 +254,16 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         final String completionNotificationText = call.getString("downloadCompletedNotificationText");
+        final String failedNotificationText = call.getString("downloadFailedNotificationText");
 
         if (httpEngine == AndroidHttpEngineSelector.Engine.OKHTTP) {
+            final int retries;
+            try {
+                retries = DownloadConnectionRetry.normalizeRetries(call.getInt("retries"));
+            } catch (IllegalArgumentException e) {
+                call.reject(e.getMessage(), e);
+                return;
+            }
             downloadWithOkHttp(
                 call,
                 id,
@@ -243,7 +275,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 call.getString("notification"),
                 call.getString("title"),
                 call.getString("description"),
-                completionNotificationText
+                completionNotificationText,
+                failedNotificationText,
+                retries
             );
             return;
         }
@@ -256,7 +290,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
             call.getObject("headers"),
             call.getString("network"),
             call.getString("notification"),
-            completionNotificationText
+            completionNotificationText,
+            failedNotificationText
         );
     }
 
@@ -268,7 +303,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
         JSObject headers,
         String network,
         String notification,
-        String completionNotificationText
+        String completionNotificationText,
+        String failedNotificationText
     ) {
         final DownloadManager.Request request;
         try {
@@ -305,12 +341,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
         final long downloadGeneration = nextGeneration(id);
-        completedNotificationStore.setText(id, completionNotificationText, downloadGeneration);
+        setDownloadNotificationTexts(id, completionNotificationText, failedNotificationText, downloadGeneration);
         runDownloadManagerWork(
             call,
             () -> {
                 if (!isTrackedDownload(id, pendingToken)) {
-                    completedNotificationStore.remove(id, downloadGeneration);
+                    removeDownloadNotificationTexts(id, downloadGeneration);
                     call.reject("Download was cancelled");
                     return;
                 }
@@ -320,7 +356,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     downloadId = downloadManager.enqueue(request);
                 } catch (SecurityException e) {
                     downloads.remove(id, pendingToken);
-                    completedNotificationStore.remove(id, downloadGeneration);
+                    removeDownloadNotificationTexts(id, downloadGeneration);
                     if ("hidden".equals(notification)) {
                         call.reject("Hidden downloads require android.permission.DOWNLOAD_WITHOUT_NOTIFICATION in the app manifest", e);
                     } else {
@@ -329,7 +365,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     return;
                 } catch (RuntimeException e) {
                     downloads.remove(id, pendingToken);
-                    completedNotificationStore.remove(id, downloadGeneration);
+                    removeDownloadNotificationTexts(id, downloadGeneration);
                     call.reject("Download could not be enqueued", e);
                     return;
                 }
@@ -338,11 +374,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     try {
                         downloadManager.remove(downloadId);
                     } catch (RuntimeException e) {
-                        completedNotificationStore.remove(id, downloadGeneration);
+                        removeDownloadNotificationTexts(id, downloadGeneration);
                         call.reject("Download was cancelled", e);
                         return;
                     }
-                    completedNotificationStore.remove(id, downloadGeneration);
+                    removeDownloadNotificationTexts(id, downloadGeneration);
                     call.reject("Download was cancelled");
                     return;
                 }
@@ -356,7 +392,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             },
             () -> {
                 downloads.remove(id, pendingToken);
-                completedNotificationStore.remove(id, downloadGeneration);
+                removeDownloadNotificationTexts(id, downloadGeneration);
             }
         );
     }
@@ -375,11 +411,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
         final String notification = call.getString("notification");
         final long batchGeneration = nextGeneration(batchId);
         final String completionNotificationText = call.getString("downloadCompletedNotificationText");
-        completedNotificationStore.setText(batchId, completionNotificationText, batchGeneration);
+        final String failedNotificationText = call.getString("downloadFailedNotificationText");
+        setDownloadNotificationTexts(batchId, completionNotificationText, failedNotificationText, batchGeneration);
 
         final DownloadBatchState batchState = new DownloadBatchState(batchId, files.length(), batchGeneration, notification);
         if (batches.putIfAbsent(batchId, batchState) != null) {
-            completedNotificationStore.remove(batchId, batchGeneration);
+            removeDownloadNotificationTexts(batchId, batchGeneration);
             call.reject("Download already exists");
             return;
         }
@@ -464,7 +501,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             clearChildOwnersForBatch(batchId);
                             removeSystemDownloads(enqueuedIds);
                             rollbackBatch(batchState);
-                            completedNotificationStore.remove(batchId, batchState.generation);
+                            removeDownloadNotificationTexts(batchId, batchState.generation);
                             call.reject("Download was cancelled");
                             return;
                         }
@@ -617,7 +654,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             unregisterBatchChild(batch.batchId, childId);
         }
         batch.ownedChildIds.clear();
-        completedNotificationStore.remove(batch.batchId, batch.generation);
+        removeDownloadNotificationTexts(batch.batchId, batch.generation);
     }
 
     private void unregisterBatchChild(String batchId, String childId) {
@@ -699,7 +736,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
         batch.ownedChildIds.clear();
         removeSystemDownloads(childDownloadIds);
-        completedNotificationStore.remove(batchId, batch.generation);
+        final long storedGeneration = batch.generation;
+        completedNotificationStore.remove(batchId, storedGeneration);
+        presentFailedDownloadNotification(batchId, storedGeneration);
 
         JSObject failedData = new JSObject();
         failedData.put("id", batchId);
@@ -755,6 +794,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             if (completionText != null) {
                 DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), batchId, completionText);
             }
+            discardFailedNotificationText(batchId, storedGeneration);
         }
     }
 
@@ -769,7 +809,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
         String notification,
         String title,
         String description,
-        String completionNotificationText
+        String completionNotificationText,
+        String failedNotificationText,
+        int retries
     ) {
         if (notification == null) {
             notification = "completed";
@@ -782,7 +824,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
         okHttpDestinationFiles.put(id, destinationFile);
         final long downloadGeneration = nextGeneration(id);
-        completedNotificationStore.setText(id, completionNotificationText, downloadGeneration);
+        setDownloadNotificationTexts(id, completionNotificationText, failedNotificationText, downloadGeneration);
 
         final String notificationMode = notification;
         final long storedGeneration = downloadGeneration;
@@ -791,7 +833,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             () -> {
                 if (!isTrackedDownload(id, pendingToken)) {
                     okHttpDestinationFiles.remove(id);
-                    completedNotificationStore.remove(id, storedGeneration);
+                    removeDownloadNotificationTexts(id, storedGeneration);
                     call.reject("Download was cancelled");
                     return;
                 }
@@ -799,7 +841,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 if (!okHttpDownloadExecutor.isWifiSatisfied(network)) {
                     downloads.remove(id, pendingToken);
                     okHttpDestinationFiles.remove(id);
-                    completedNotificationStore.remove(id, storedGeneration);
+                    removeDownloadNotificationTexts(id, storedGeneration);
                     call.reject("Wi-Fi required for this download");
                     return;
                 }
@@ -808,7 +850,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 if (okHttpReservation == null) {
                     downloads.remove(id, pendingToken);
                     okHttpDestinationFiles.remove(id);
-                    completedNotificationStore.remove(id, storedGeneration);
+                    removeDownloadNotificationTexts(id, storedGeneration);
                     call.reject("Download already exists");
                     return;
                 }
@@ -816,7 +858,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 if (!downloads.replace(id, pendingToken, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID)) {
                     okHttpDownloadExecutor.abandonTransfer(okHttpReservation);
                     okHttpDestinationFiles.remove(id, destinationFile);
-                    completedNotificationStore.remove(id, storedGeneration);
+                    removeDownloadNotificationTexts(id, storedGeneration);
                     call.reject("Download was cancelled");
                     return;
                 }
@@ -835,6 +877,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         destinationFile,
                         headers,
                         network,
+                        retries,
                         lengthHeader,
                         (downloadId, progress) ->
                             handler.post(() -> {
@@ -868,10 +911,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                     if (completionText != null) {
                                         DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), downloadId, completionText);
                                     }
+                                    discardFailedNotificationText(downloadId, storedGeneration);
                                 } else {
                                     okHttpProgressNotifier.finished(downloadId, false);
                                     okHttpDestinationFiles.remove(downloadId, destinationFile);
                                     completedNotificationStore.remove(downloadId, storedGeneration);
+                                    presentFailedDownloadNotification(downloadId, storedGeneration);
                                     JSObject failedData = new JSObject();
                                     failedData.put("id", downloadId);
                                     failedData.put("error", errorMessage != null ? errorMessage : "Download failed");
@@ -888,7 +933,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             () -> {
                 downloads.remove(id, pendingToken);
                 okHttpDestinationFiles.remove(id);
-                completedNotificationStore.remove(id, storedGeneration);
+                removeDownloadNotificationTexts(id, storedGeneration);
             }
         );
     }
@@ -1001,6 +1046,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 if (completionText != null) {
                     DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), snapshot.id, completionText);
                 }
+                if (capturedGeneration != null) {
+                    discardFailedNotificationText(snapshot.id, capturedGeneration);
+                }
                 shouldContinue = false;
             } else if (snapshot.status == DownloadManager.STATUS_FAILED) {
                 JSObject failedData = new JSObject();
@@ -1009,6 +1057,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 notifyListeners("downloadFailed", failedData);
                 if (capturedGeneration != null) {
                     completedNotificationStore.remove(snapshot.id, capturedGeneration);
+                    presentFailedDownloadNotification(snapshot.id, capturedGeneration);
                 }
                 shouldContinue = false;
             }
@@ -1085,7 +1134,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (isPendingDownload(downloadId)) {
             okHttpDestinationFiles.remove(id);
             if (stoppedGeneration != null) {
-                completedNotificationStore.remove(id, stoppedGeneration);
+                removeDownloadNotificationTexts(id, stoppedGeneration);
             }
             call.resolve(new JSObject().put("removed", false));
             return;
@@ -1097,7 +1146,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             okHttpProgressNotifier.finished(id, false);
             okHttpDownloadExecutor.clearCompleted(id);
             if (stoppedGeneration != null) {
-                completedNotificationStore.remove(id, stoppedGeneration);
+                removeDownloadNotificationTexts(id, stoppedGeneration);
             }
             call.resolve(new JSObject().put("removed", cancelled));
             return;
@@ -1112,7 +1161,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 try {
                     int removedDownloads = downloadManager.remove(systemDownloadId);
                     if (stoppedGeneration != null) {
-                        completedNotificationStore.remove(stoppedId, generation);
+                        removeDownloadNotificationTexts(stoppedId, generation);
                     }
                     call.resolve(new JSObject().put("removed", removedDownloads > 0));
                 } catch (RuntimeException e) {
@@ -1187,7 +1236,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     }
                     batch.ownedChildIds.clear();
                     clearChildOwnersForBatch(batchId);
-                    completedNotificationStore.remove(batchId, storedGeneration);
+                    removeDownloadNotificationTexts(batchId, storedGeneration);
                     call.resolve(new JSObject().put("removed", !systemDownloadIds.isEmpty()));
                 } catch (RuntimeException e) {
                     restoreStoppedBatchChildren(batch, batchId, stoppedChildren);

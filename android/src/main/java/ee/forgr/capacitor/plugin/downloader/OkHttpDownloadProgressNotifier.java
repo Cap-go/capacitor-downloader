@@ -169,6 +169,14 @@ final class OkHttpDownloadProgressNotifier {
     }
 
     static void reconcileAfterForegroundPromotion(Context context) {
+        reconcileForegroundNotificationOwnership(context);
+    }
+
+    static void reconcileAfterForegroundServiceStop(Context context) {
+        reconcileForegroundNotificationOwnership(context);
+    }
+
+    private static void reconcileForegroundNotificationOwnership(Context context) {
         synchronized (foregroundCoordinationLock) {
             OkHttpDownloadProgressNotifier coordinator = foregroundCoordinator;
             if (coordinator == null) {

@@ -135,6 +135,19 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
     }
 
     @Test
+    public void onDestroyCancelsNotificationWhenNoDownloadsRemain() {
+        assertTrue(notifier.started("gone", "Title", null, "progress"));
+        OkHttpDownloadForegroundService service = Robolectric.buildService(OkHttpDownloadForegroundService.class).create().get();
+        service.onStartCommand(new Intent(), 0, 1);
+        notifier.finished("gone", true);
+
+        NotificationManager notificationManager = context.getSystemService(NotificationManager.class);
+        ShadowNotificationManager shadowNotificationManager = shadowOf(notificationManager);
+        service.onDestroy();
+        assertNull(shadowNotificationManager.getNotification(null, OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID));
+    }
+
+    @Test
     public void foregroundPromotionShowsCurrentAggregateAfterDownloadFinishes() {
         assertTrue(notifier.started("a", "Pack A", null, "progress"));
         assertTrue(notifier.started("b", "Pack B", null, "progress"));

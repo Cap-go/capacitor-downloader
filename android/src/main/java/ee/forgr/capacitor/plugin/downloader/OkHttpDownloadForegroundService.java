@@ -124,14 +124,12 @@ public class OkHttpDownloadForegroundService extends Service {
 
     @Override
     public void onDestroy() {
-        int activeDownloadsAtDestroy;
         synchronized (stateLock) {
             foregroundEstablished = false;
             stopWhenForegroundReady = false;
-            activeDownloadsAtDestroy = lastKnownActiveDownloads;
         }
-        int stopBehavior = activeDownloadsAtDestroy > 0 ? ServiceCompat.STOP_FOREGROUND_DETACH : ServiceCompat.STOP_FOREGROUND_REMOVE;
-        ServiceCompat.stopForeground(this, stopBehavior);
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_DETACH);
+        OkHttpDownloadProgressNotifier.reconcileAfterForegroundServiceStop(this);
         super.onDestroy();
     }
 }

@@ -34,7 +34,6 @@ import org.robolectric.RobolectricTestRunner;
 import org.robolectric.RuntimeEnvironment;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowSystemClock;
 
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = 34)
@@ -107,7 +106,7 @@ public class CapacitorDownloaderPluginBatchEntryTest {
         verify(call, timeout(5000)).resolve(any());
         verify(downloadManager, times(100)).enqueue(any(DownloadManager.Request.class));
 
-        ShadowSystemClock.advance(Duration.ofMillis(1100));
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(1100, TimeUnit.MILLISECONDS);
         Shadows.shadowOf(Looper.getMainLooper()).idle();
 
         verify(downloadManager, timeout(5000).atLeastOnce()).query(any());

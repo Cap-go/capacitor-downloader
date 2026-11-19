@@ -29,10 +29,18 @@ run_shard_worker() {
     bash "$ROOT_DIR/scripts/maestro/maestro-shard-worker.sh" ios "$shard_index" "$SHARD_COUNT" "$device_id"
 }
 
+IOS_BOOT_TIMEOUT_SECONDS="${CAPGO_MAESTRO_IOS_BOOT_TIMEOUT_SECONDS:-120}"
+
 boot_ios_simulator() {
   local simulator_id="$1"
   xcrun simctl boot "$simulator_id" >/dev/null 2>&1 || true
-  xcrun simctl bootstatus "$simulator_id" -b
+  if ! python3 -c "
+import subprocess, sys
+subprocess.run(['xcrun', 'simctl', 'bootstatus', sys.argv[1], '-b'], timeout=int(sys.argv[2]), check=True)
+" "$simulator_id" "$IOS_BOOT_TIMEOUT_SECONDS"; then
+    echo "Simulator ${simulator_id} failed to boot within ${IOS_BOOT_TIMEOUT_SECONDS}s." >&2
+    exit 1
+  fi
   disable_ios_simulator_animations "$simulator_id"
 }
 

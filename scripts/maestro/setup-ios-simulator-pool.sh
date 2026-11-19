@@ -39,7 +39,6 @@ for index in $(seq 1 $((SHARD_COUNT - 1))); do
   if existing="$(simulator_id_for_name "$clone_name")"; then
     xcrun simctl delete "$existing" >/dev/null 2>&1 || true
   fi
-  xcrun simctl shutdown "$BASE_ID" >/dev/null 2>&1 || true
   clone_id="$(xcrun simctl clone "$BASE_ID" "$clone_name")"
   printf '%s\n' "$clone_id" >>"$POOL_FILE"
 done

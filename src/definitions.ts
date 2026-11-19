@@ -141,6 +141,21 @@ export interface DownloadOptions {
    */
   downloadCompletedNotificationText?: string;
   /**
+   * HTTP response header that carries the uncompressed byte length when the body is transferred
+   * compressed (for example `Content-Encoding: gzip`) and `Content-Length` is missing or wrong.
+   *
+   * When the response includes this header with a positive integer, native code uses it for
+   * `downloadProgress` totals and progress is clamped at 1. Examples: `X-Uncompressed-Length`.
+   *
+   * Single downloads: Android OkHttp and iOS. Ignored on Web and Android DownloadManager.
+   * On Android OkHttp, ignored when the response still includes `Content-Encoding` (for example
+   * after setting `Accept-Encoding: gzip` on the request). Do not set request `Accept-Encoding`;
+   * OkHttp handles decompression by default.
+   *
+   * @since 8.9.0
+   */
+  lengthHeader?: string;
+  /**
    * iOS 26 and later: run the download in a `BGContinuedProcessingTask`, which shows `title` and `description` with the
    * download progress while the device is locked. Requires `title`. Falls back to the background URL session when the
    * task does not launch in time. If the task expires, the download fails with `downloadFailed` and is not resumed
@@ -271,6 +286,19 @@ export interface DownloadBatchOptions {
    * @since 8.5.0
    */
   downloadCompletedNotificationText?: string;
+  /**
+   * HTTP response header that carries the uncompressed byte length when the body is transferred
+   * compressed (for example `Content-Encoding: gzip`) and `Content-Length` is missing or wrong.
+   *
+   * When the response includes this header with a positive integer, native code uses it for
+   * `downloadProgress` totals and progress is clamped at 1. Examples: `X-Uncompressed-Length`.
+   *
+   * Batch downloads: iOS only (same header name applies to every file in `files`). Android OkHttp batches ignore this
+   * option. Ignored on Web.
+   *
+   * @since 8.9.0
+   */
+  lengthHeader?: string;
   /**
    * iOS 26 and later: run the whole batch in one `BGContinuedProcessingTask` that shows `title` and `description`, see
    * {@link DownloadOptions.iosContinuedProcessing}. If the task expires, the batch fails with `downloadFailed`.

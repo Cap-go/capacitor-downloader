@@ -14,7 +14,7 @@ import androidx.core.app.ServiceCompat;
  */
 public class OkHttpDownloadForegroundService extends Service {
 
-    private static final int SERVICE_NOTIFICATION_ID = 0x4f4b4854;
+    static final int SERVICE_NOTIFICATION_ID = 0x4f4b4854;
     private static final Object stateLock = new Object();
     private static boolean foregroundEstablished;
     private static boolean stopWhenForegroundReady;
@@ -94,12 +94,13 @@ public class OkHttpDownloadForegroundService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Notification notification = OkHttpDownloadProgressNotifier.foregroundServiceNotification(this);
+        Notification notification = OkHttpDownloadProgressNotifier.notificationForForegroundPromotion(this);
         try {
             if (throwOnStartForegroundForTests) {
                 throw new RuntimeException("test: startForeground failed");
             }
             ServiceCompat.startForeground(this, SERVICE_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+            OkHttpDownloadProgressNotifier.reconcileAfterForegroundPromotion(this);
             synchronized (stateLock) {
                 foregroundEstablished = true;
                 foregroundPromotionCountForTests += 1;
@@ -127,7 +128,8 @@ public class OkHttpDownloadForegroundService extends Service {
             foregroundEstablished = false;
             stopWhenForegroundReady = false;
         }
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE);
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_DETACH);
+        OkHttpDownloadProgressNotifier.reconcileAfterForegroundServiceStop(this);
         super.onDestroy();
     }
 }

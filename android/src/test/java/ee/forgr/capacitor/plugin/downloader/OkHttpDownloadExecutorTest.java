@@ -21,7 +21,11 @@ import java.io.File;
 import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -31,8 +35,10 @@ import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
+import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
+import okhttp3.mockwebserver.RecordedRequest;
 import okhttp3.tls.HandshakeCertificates;
 import okhttp3.tls.HeldCertificate;
 import org.junit.After;
@@ -445,5 +451,286 @@ public class OkHttpDownloadExecutorTest {
         OkHttpDownloadExecutor.ActiveDownload next = executor.beginTransfer("shared-id");
         assertNotNull(next);
         assertNotSame(current, next);
+    }
+
+    @Test
+    public void transferSlotsUseFairSemaphoreAndFourConcurrentCap() throws Exception {
+        Field field = OkHttpDownloadExecutor.class.getDeclaredField("transferSlots");
+        field.setAccessible(true);
+        Semaphore semaphore = (Semaphore) field.get(executor);
+        assertTrue(semaphore.isFair());
+        assertEquals(4, semaphore.availablePermits());
+    }
+
+    @Test(timeout = 30_000)
+    public void transferSlotsReturnAfterConcurrentSuccesses() throws Exception {
+        assertTransferSlotsReturnAfterOutcomes(2, 0, 0);
+    }
+
+    @Test(timeout = 30_000)
+    public void transferSlotsReturnAfterConcurrentHttp500() throws Exception {
+        assertTransferSlotsReturnAfterOutcomes(0, 2, 0);
+    }
+
+    @Test(timeout = 30_000)
+    public void transferSlotsReturnAfterCancelDuringTransfer() throws Exception {
+        assertTransferSlotsReturnAfterOutcomes(0, 0, 1);
+    }
+
+    private void assertTransferSlotsReturnAfterOutcomes(int successCount, int http500Count, int cancelCount) throws Exception {
+        byte[] payload = "slot-test".getBytes(StandardCharsets.UTF_8);
+        int total = successCount + http500Count + cancelCount;
+        CountDownLatch finished = new CountDownLatch(total);
+        List<TransferOutcome> outcomes = Collections.synchronizedList(new ArrayList<>());
+        java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(Math.max(1, total));
+
+        installOutcomeDispatcher(payload, successCount, http500Count);
+
+        String cancelTaskId = "cancel-path-0";
+        for (int index = 0; index < total; index++) {
+            final int taskIndex = index;
+            final String taskId = cancelCount > 0 && index == total - 1 ? cancelTaskId : "outcome-" + taskIndex;
+            workers.submit(() -> {
+                File destination = new File(tempDir, taskId + ".bin");
+                OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer(taskId);
+                assertNotNull(reservation);
+                String path = cancelCount > 0 && taskIndex == total - 1 ? "/cancel-path-0" : "/outcome-" + taskIndex;
+                executor.start(
+                    reservation,
+                    server.url(path).toString(),
+                    destination,
+                    new JSObject(),
+                    "cellular",
+                    null,
+                    (id, progress) -> {},
+                    (id, ok, cancelled, errorMessage) -> {
+                        outcomes.add(new TransferOutcome(taskId, ok, cancelled, errorMessage));
+                        finished.countDown();
+                    }
+                );
+            });
+        }
+
+        if (cancelCount > 0) {
+            Thread.sleep(300);
+            executor.cancel(cancelTaskId, new File(tempDir, cancelTaskId + ".bin"));
+        }
+
+        assertTrue(finished.await(25, TimeUnit.SECONDS));
+        workers.shutdown();
+        assertTrue(workers.awaitTermination(10, TimeUnit.SECONDS));
+        for (int index = 0; index < successCount; index++) {
+            assertOutcomePresent(outcomes, "outcome-" + index, true, false);
+        }
+        for (int index = 0; index < http500Count; index++) {
+            assertOutcomePresent(outcomes, "outcome-" + (successCount + index), false, false);
+        }
+        if (cancelCount > 0) {
+            assertOutcomePresent(outcomes, cancelTaskId, false, true);
+        }
+        assertEquals(4, executor.availableTransferSlots());
+    }
+
+    private static void assertOutcomePresent(List<TransferOutcome> outcomes, String taskId, boolean success, boolean cancelled) {
+        TransferOutcome match = null;
+        for (TransferOutcome outcome : outcomes) {
+            if (taskId.equals(outcome.taskId)) {
+                match = outcome;
+                break;
+            }
+        }
+        assertNotNull("missing outcome for " + taskId, match);
+        assertEquals(success, match.success);
+        assertEquals(cancelled, match.cancelled);
+    }
+
+    private static final class TransferOutcome {
+
+        final String taskId;
+        final boolean success;
+        final boolean cancelled;
+
+        TransferOutcome(String taskId, boolean success, boolean cancelled, String errorMessage) {
+            this.taskId = taskId;
+            this.success = success;
+            this.cancelled = cancelled;
+        }
+    }
+
+    @Test(timeout = 60_000)
+    public void transferSlotsReturnToFourAfterMixedOutcomes() throws Exception {
+        byte[] payload = "slot-test".getBytes(StandardCharsets.UTF_8);
+        CountDownLatch finished = new CountDownLatch(5);
+        List<TransferOutcome> outcomes = Collections.synchronizedList(new ArrayList<>());
+        java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(5);
+
+        installMixedDispatcher(payload);
+
+        for (int index = 0; index < 5; index++) {
+            final int taskIndex = index;
+            workers.submit(() -> {
+                String taskId = "mixed-" + taskIndex;
+                File destination = new File(tempDir, taskId + ".bin");
+                OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer(taskId);
+                assertNotNull(reservation);
+                executor.start(
+                    reservation,
+                    server.url("/mixed-" + taskIndex).toString(),
+                    destination,
+                    new JSObject(),
+                    "cellular",
+                    null,
+                    (id, progress) -> {},
+                    (id, ok, cancelled, errorMessage) -> {
+                        outcomes.add(new TransferOutcome(taskId, ok, cancelled, errorMessage));
+                        finished.countDown();
+                    }
+                );
+            });
+        }
+
+        Thread.sleep(300);
+        executor.cancel("mixed-4", new File(tempDir, "mixed-4.bin"));
+
+        assertTrue(finished.await(30, TimeUnit.SECONDS));
+        workers.shutdown();
+        assertTrue(workers.awaitTermination(10, TimeUnit.SECONDS));
+        assertOutcomePresent(outcomes, "mixed-0", true, false);
+        assertOutcomePresent(outcomes, "mixed-1", true, false);
+        assertOutcomePresent(outcomes, "mixed-2", false, false);
+        assertOutcomePresent(outcomes, "mixed-3", false, false);
+        assertOutcomePresent(outcomes, "mixed-4", false, true);
+        assertEquals(4, executor.availableTransferSlots());
+    }
+
+    @Test(timeout = 60_000)
+    public void fifthTransferWaitsUntilSlotOpensUnderSaturation() throws Exception {
+        byte[] payload = "saturation".getBytes(StandardCharsets.UTF_8);
+        CountDownLatch slowTransfersHoldingSlots = new CountDownLatch(4);
+        installSaturationDispatcher(payload, slowTransfersHoldingSlots);
+
+        java.util.concurrent.ExecutorService workers = java.util.concurrent.Executors.newFixedThreadPool(5);
+        CountDownLatch finished = new CountDownLatch(5);
+
+        for (int index = 0; index < 5; index++) {
+            final int taskIndex = index;
+            workers.submit(() -> {
+                String taskId = "sat-" + taskIndex;
+                File destination = new File(tempDir, taskId + ".bin");
+                OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer(taskId);
+                assertNotNull(reservation);
+                executor.start(
+                    reservation,
+                    server.url("/sat-" + taskIndex).toString(),
+                    destination,
+                    new JSObject(),
+                    "cellular",
+                    null,
+                    (id, progress) -> {},
+                    (id, ok, cancelled, errorMessage) -> finished.countDown()
+                );
+            });
+        }
+
+        assertTrue(slowTransfersHoldingSlots.await(20, TimeUnit.SECONDS));
+        assertEquals(0, executor.availableTransferSlots());
+
+        Thread.sleep(200);
+        executor.cancel("sat-0", new File(tempDir, "sat-0.bin"));
+
+        assertTrue(finished.await(30, TimeUnit.SECONDS));
+        workers.shutdown();
+        assertTrue(workers.awaitTermination(10, TimeUnit.SECONDS));
+        assertEquals(4, executor.availableTransferSlots());
+    }
+
+    private void installOutcomeDispatcher(byte[] payload, int successCount, int http500Count) {
+        server.setDispatcher(
+            new Dispatcher() {
+                @Override
+                public MockResponse dispatch(RecordedRequest request) {
+                    String path = request.getPath();
+                    if (path == null) {
+                        return new MockResponse().setResponseCode(404);
+                    }
+                    if ("/cancel-path-0".equals(path)) {
+                        return new MockResponse()
+                            .setBody(new okio.Buffer().write(payload))
+                            .addHeader("Content-Length", String.valueOf(payload.length))
+                            .setBodyDelay(3, TimeUnit.SECONDS);
+                    }
+                    if (path.startsWith("/outcome-")) {
+                        int index = Integer.parseInt(path.substring("/outcome-".length()));
+                        if (index < successCount) {
+                            return new MockResponse()
+                                .setBody(new okio.Buffer().write(payload))
+                                .addHeader("Content-Length", String.valueOf(payload.length));
+                        }
+                        if (index < successCount + http500Count) {
+                            return new MockResponse().setResponseCode(500);
+                        }
+                    }
+                    return new MockResponse().setResponseCode(404);
+                }
+            }
+        );
+    }
+
+    private void installMixedDispatcher(byte[] payload) {
+        server.setDispatcher(
+            new Dispatcher() {
+                @Override
+                public MockResponse dispatch(RecordedRequest request) {
+                    String path = request.getPath();
+                    if (path == null) {
+                        return new MockResponse().setResponseCode(404);
+                    }
+                    switch (path) {
+                        case "/mixed-0":
+                        case "/mixed-1":
+                            return new MockResponse()
+                                .setBody(new okio.Buffer().write(payload))
+                                .addHeader("Content-Length", String.valueOf(payload.length));
+                        case "/mixed-2":
+                        case "/mixed-3":
+                            return new MockResponse().setResponseCode(500);
+                        case "/mixed-4":
+                            return new MockResponse()
+                                .setBody(new okio.Buffer().write(payload))
+                                .addHeader("Content-Length", String.valueOf(payload.length))
+                                .setBodyDelay(3, TimeUnit.SECONDS);
+                        default:
+                            return new MockResponse().setResponseCode(404);
+                    }
+                }
+            }
+        );
+    }
+
+    private void installSaturationDispatcher(byte[] payload, CountDownLatch slowTransfersHoldingSlots) {
+        server.setDispatcher(
+            new Dispatcher() {
+                @Override
+                public MockResponse dispatch(RecordedRequest request) {
+                    String path = request.getPath();
+                    if (path == null) {
+                        return new MockResponse().setResponseCode(404);
+                    }
+                    if (path.matches("/sat-[0-3]")) {
+                        slowTransfersHoldingSlots.countDown();
+                        return new MockResponse()
+                            .setBody(new okio.Buffer().write(payload))
+                            .addHeader("Content-Length", String.valueOf(payload.length))
+                            .setBodyDelay(8, TimeUnit.SECONDS);
+                    }
+                    if ("/sat-4".equals(path)) {
+                        return new MockResponse()
+                            .setBody(new okio.Buffer().write(payload))
+                            .addHeader("Content-Length", String.valueOf(payload.length));
+                    }
+                    return new MockResponse().setResponseCode(404);
+                }
+            }
+        );
     }
 }

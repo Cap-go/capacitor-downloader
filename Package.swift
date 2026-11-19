@@ -30,7 +30,10 @@ let package = Package(
             ]),
         .testTarget(
             name: "CapacitorDownloaderPluginTests",
-            dependencies: ["CapacitorDownloaderPlugin"],
+            dependencies: [
+                "CapacitorDownloaderPlugin",
+                .product(name: "Capacitor", package: "capacitor-swift-pm"),
+            ],
             path: "ios/Tests/CapacitorDownloaderPluginTests")
     ]
 )

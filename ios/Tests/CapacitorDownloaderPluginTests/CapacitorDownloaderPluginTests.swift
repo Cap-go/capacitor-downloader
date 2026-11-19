@@ -355,6 +355,23 @@ final class DownloadBatchProgressTests: XCTestCase {
         store.clear()
     }
 
+    func testPrepareDestinationReplacementAllowsBatchShapedSingleDownloadId() throws {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        let taskId = "report#1:0"
+        XCTAssertFalse(coordinator.isOwnedBatchChild(taskId: taskId))
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let destination = directory.appendingPathComponent("file.bin")
+        try Data("keep".utf8).write(to: destination)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        XCTAssertTrue(try coordinator.prepareDestinationReplacement(taskId: taskId, destinationURL: destination))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        store.clear()
+    }
+
     func testPrepareDestinationReplacementRejectsCancelledBatchChild() throws {
         let store = DownloadBatchStore(defaults: batchDefaults)
         let coordinator = DownloadBatchCoordinator(store: store)

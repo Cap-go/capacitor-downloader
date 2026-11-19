@@ -760,7 +760,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     fileIndex: batchParts.fileIndex,
                     error: "Unable to resolve destination"
                 )
-            } else if !batchCoordinator.isBatchFormattedTaskId(id) {
+            } else if !batchCoordinator.isOwnedBatchChild(taskId: id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }
@@ -769,6 +769,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
             }
             removeTask(for: id, completing: downloadTask, in: session)
             batchCoordinator.unregisterChildTask(id)
+            batchCoordinator.clearInactiveBatchChildTask(id)
             clearTaskGeneration(for: downloadTask, in: session)
             return
         }
@@ -783,7 +784,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     fileIndex: batchParts.fileIndex,
                     error: "HTTP \(httpResponse.statusCode)"
                 )
-            } else if !batchCoordinator.isBatchFormattedTaskId(id) {
+            } else if !batchCoordinator.isOwnedBatchChild(taskId: id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }
@@ -802,6 +803,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 try? FileManager.default.removeItem(at: location)
                 removeTask(for: id, completing: downloadTask, in: session)
                 batchCoordinator.unregisterChildTask(id)
+                batchCoordinator.clearInactiveBatchChildTask(id)
                 return
             }
 
@@ -818,6 +820,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 if !recorded {
                     try? FileManager.default.removeItem(at: destinationURL)
                     batchCoordinator.unregisterChildTask(id)
+                    batchCoordinator.clearInactiveBatchChildTask(id)
                     clearTaskGeneration(for: downloadTask, in: session)
                     return
                 }
@@ -847,10 +850,12 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     break
                 }
                 batchCoordinator.unregisterChildTask(id)
-            } else if batchCoordinator.isBatchFormattedTaskId(id) {
+                batchCoordinator.clearInactiveBatchChildTask(id)
+            } else if batchCoordinator.isOwnedBatchChild(taskId: id) {
                 try? FileManager.default.removeItem(at: destinationURL)
                 removeTask(for: id, completing: downloadTask, in: session)
                 batchCoordinator.unregisterChildTask(id)
+                batchCoordinator.clearInactiveBatchChildTask(id)
             } else {
                 notifyListeners("downloadCompleted", data: ["id": id])
                 if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: id, generation: generation) {
@@ -866,7 +871,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     fileIndex: batchParts.fileIndex,
                     error: error.localizedDescription
                 )
-            } else if !batchCoordinator.isBatchFormattedTaskId(id) {
+            } else if !batchCoordinator.isOwnedBatchChild(taskId: id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }
@@ -877,6 +882,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
         if batchCoordinator.childParts(for: id) != nil {
             batchCoordinator.unregisterChildTask(id)
+            batchCoordinator.clearInactiveBatchChildTask(id)
         }
         clearTaskGeneration(for: downloadTask, in: session)
     }
@@ -909,7 +915,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     fileIndex: batchParts.fileIndex,
                     error: error.localizedDescription
                 )
-            } else if !batchCoordinator.isBatchFormattedTaskId(id) {
+            } else if !batchCoordinator.isOwnedBatchChild(taskId: id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 }
@@ -920,6 +926,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
         if batchCoordinator.childParts(for: id) != nil {
             batchCoordinator.unregisterChildTask(id)
+            batchCoordinator.clearInactiveBatchChildTask(id)
         }
         clearTaskGeneration(for: downloadTask, in: session)
     }

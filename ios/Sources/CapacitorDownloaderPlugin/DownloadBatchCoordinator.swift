@@ -18,6 +18,8 @@ final class DownloadBatchCoordinator {
     private var batches: [String: ActiveBatch] = [:]
     private var batchGenerations: [String: UInt64] = [:]
     private var registeredChildren: [String: String] = [:]
+    /// Batch child ids unregistered while still finishing on the URLSession delegate queue.
+    private var inactiveBatchChildTaskIds: Set<String> = []
     /// Batch generations that finished before the download() promise resolved startup.
     private var startupCompletedBeforeResolve: [String: UInt64] = [:]
     private let batchesLock = NSLock()
@@ -60,11 +62,18 @@ final class DownloadBatchCoordinator {
         return parsedBatchChildTaskId(taskId) != nil
     }
 
+    func isOwnedBatchChild(taskId: String) -> Bool {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        return registeredChildren[taskId] != nil || inactiveBatchChildTaskIds.contains(taskId)
+    }
+
     /// Verifies a batch child is still active, then removes an existing destination file under the batch lock.
     func prepareDestinationReplacement(taskId: String, destinationURL: URL) throws -> Bool {
         batchesLock.lock()
         defer { batchesLock.unlock() }
-        if parsedBatchChildTaskId(taskId) != nil {
+        let ownedBatchChild = registeredChildren[taskId] != nil || inactiveBatchChildTaskIds.contains(taskId)
+        if ownedBatchChild {
             guard activeChildPartsUnlocked(for: taskId) != nil else {
                 return false
             }
@@ -156,7 +165,15 @@ final class DownloadBatchCoordinator {
     func unregisterChildTask(_ taskId: String) {
         batchesLock.lock()
         defer { batchesLock.unlock() }
-        registeredChildren.removeValue(forKey: taskId)
+        if registeredChildren.removeValue(forKey: taskId) != nil, parsedBatchChildTaskId(taskId) != nil {
+            inactiveBatchChildTaskIds.insert(taskId)
+        }
+    }
+
+    func clearInactiveBatchChildTask(_ taskId: String) {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        inactiveBatchChildTaskIds.remove(taskId)
     }
 
     func isBatch(batchId: String) -> Bool {

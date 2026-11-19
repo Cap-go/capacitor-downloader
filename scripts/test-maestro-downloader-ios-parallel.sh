@@ -61,19 +61,29 @@ subprocess.run(['xcrun', 'simctl', 'bootstatus', sys.argv[1], '-b'], timeout=int
   disable_ios_simulator_animations "$simulator_id"
 }
 
-for simulator_id in "${SIMULATOR_IDS[@]}"; do
-  boot_ios_simulator "$simulator_id"
-done
-
 pids=()
 fail=0
-for shard_index in "${!SIMULATOR_IDS[@]}"; do
-  device_id="${SIMULATOR_IDS[$shard_index]}"
+if ((${#SIMULATOR_IDS[@]} == 1)); then
+  boot_ios_simulator "${SIMULATOR_IDS[0]}"
   (
-    run_shard_worker "$shard_index" "$device_id"
+    run_shard_worker 0 "${SIMULATOR_IDS[0]}"
   ) &
   pids+=("$!")
-done
+else
+  boot_ios_simulator "${SIMULATOR_IDS[0]}"
+  (
+    run_shard_worker 0 "${SIMULATOR_IDS[0]}"
+  ) &
+  pids+=("$!")
+  for (( shard_index = 1; shard_index < SHARD_COUNT; shard_index++ )); do
+    device_id="${SIMULATOR_IDS[$shard_index]}"
+    boot_ios_simulator "$device_id"
+    (
+      run_shard_worker "$shard_index" "$device_id"
+    ) &
+    pids+=("$!")
+  done
+fi
 
 for pid in "${pids[@]}"; do
   if ! wait "$pid"; then

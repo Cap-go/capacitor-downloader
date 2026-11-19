@@ -16,6 +16,7 @@ import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.NetworkCapabilities;
 import com.getcapacitor.JSObject;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.lang.reflect.Field;
 import java.net.InetAddress;
@@ -24,6 +25,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.zip.GZIPOutputStream;
 import javax.net.SocketFactory;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
@@ -61,6 +63,86 @@ public class OkHttpDownloadExecutorTest {
     }
 
     @Test(timeout = 10_000)
+    public void usesLengthHeaderWhenContentLengthMissing() throws Exception {
+        byte[] payload = "gzip-style-payload".getBytes(StandardCharsets.UTF_8);
+        server.enqueue(
+            new MockResponse()
+                .setChunkedBody(new okio.Buffer().write(payload), 8)
+                .addHeader("X-Uncompressed-Length", String.valueOf(payload.length))
+        );
+
+        File destination = new File(tempDir, "length-header.bin");
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicBoolean success = new AtomicBoolean(false);
+        java.util.List<Float> progressSamples = new java.util.ArrayList<>();
+        AtomicReference<Long> lastBytesTotal = new AtomicReference<>(0L);
+
+        OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer("length-header");
+        assertNotNull(reservation);
+        executor.start(
+            reservation,
+            server.url("/file").toString(),
+            destination,
+            new JSObject(),
+            "cellular",
+            "X-Uncompressed-Length",
+            (id, progress) -> {
+                progressSamples.add(progress);
+                OkHttpDownloadExecutor.ActiveDownload active = executor.getActive(id);
+                if (active != null) {
+                    lastBytesTotal.set(active.bytesTotal);
+                }
+            },
+            (id, ok, cancelled, errorMessage) -> {
+                success.set(ok);
+                finished.countDown();
+            }
+        );
+
+        assertTrue(finished.await(5, TimeUnit.SECONDS));
+        assertTrue(success.get());
+        assertEquals(payload.length, destination.length());
+        assertFalse(progressSamples.isEmpty());
+        for (Float sample : progressSamples) {
+            assertTrue("progress must stay <= 1 (sample=" + sample + ")", sample <= 1f);
+        }
+        assertEquals(Long.valueOf(payload.length), lastBytesTotal.get());
+    }
+
+    @Test(timeout = 10_000)
+    public void clampsProgressWhenLengthHeaderSmallerThanDecodedBody() throws Exception {
+        byte[] payload = new byte[4096];
+        for (int i = 0; i < payload.length; i++) {
+            payload[i] = (byte) (i % 251);
+        }
+        server.enqueue(new MockResponse().setBody(new okio.Buffer().write(payload)).addHeader("X-Uncompressed-Length", "100"));
+
+        File destination = new File(tempDir, "length-header-clamp.bin");
+        CountDownLatch finished = new CountDownLatch(1);
+        java.util.List<Float> progressSamples = new java.util.ArrayList<>();
+
+        OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer("length-header-clamp");
+        assertNotNull(reservation);
+        executor.start(
+            reservation,
+            server.url("/clamp").toString(),
+            destination,
+            new JSObject(),
+            "cellular",
+            "X-Uncompressed-Length",
+            (id, progress) -> progressSamples.add(progress),
+            (id, ok, cancelled, errorMessage) -> finished.countDown()
+        );
+
+        assertTrue(finished.await(5, TimeUnit.SECONDS));
+        assertEquals(payload.length, destination.length());
+        assertFalse(progressSamples.isEmpty());
+        for (Float sample : progressSamples) {
+            assertTrue("progress must stay <= 1 (sample=" + sample + ")", sample <= 1f);
+        }
+    }
+
+    @Test(timeout = 10_000)
     public void downloadsBytesToDestination() throws Exception {
         byte[] payload = "offline-package".getBytes(StandardCharsets.UTF_8);
         server.enqueue(
@@ -80,6 +162,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            null,
             (id, progress) -> {},
             (id, ok, cancelled, errorMessage) -> {
                 success.set(ok);
@@ -114,6 +197,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            null,
             (id, progress) -> {},
             (id, ok, cancelled, errorMessage) -> {
                 success.set(ok);
@@ -239,6 +323,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "wifi-only",
+            null,
             (id, progress) -> {},
             (id, ok, cancelled, errorMessage) -> {
                 success.set(ok);
@@ -272,6 +357,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            null,
             (id, progress) -> {},
             (id, ok, cancelled, errorMessage) -> {
                 success.set(ok);
@@ -325,6 +411,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            null,
             (id, progress) -> {},
             (id, ok, cancelledFlag, errorMessage) -> {
                 success.set(ok);

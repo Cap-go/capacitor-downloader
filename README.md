@@ -36,6 +36,7 @@ Use this when users fetch several large files and keep using other apps:
 - **iOS paths**: `files/...` and `cache/...` stay under Documents as in 8.7.0. Use `private/...` (iOS only) for Application Support. Reject `..` in path segments.
 - **iOS 26+**: set `iosContinuedProcessing: true` to run the download in a continued-processing task that shows `title` and `description` while the device is locked. If it expires, the download is cancelled (not resumed on relaunch).
 - **Android OkHttp**: default `notification: 'completed'` matches 8.7.0 (no ongoing notification, no foreground service). Set `notification: 'progress'` to opt in to ongoing progress and an optional `dataSync` foreground service (minSdk 24; Android 12+ may block background starts). Downloads continue if the service cannot start. The manifest merges `POST_NOTIFICATIONS`; on Android 13+ request it at runtime when you use `'progress'`.
+- **Multi-file batches (8.9.0)**: same background options apply to a batch `id`. On iOS set `iosContinuedProcessing: true` for one continued processing task for the whole batch. On Android, when every file resolves to OkHttp (`cache/...`, `files/...`, or `'okhttp'`), set `notification: 'progress'` for one shared progress notification and optional foreground service for the batch.
 
 ```typescript
 await CapacitorDownloader.download({

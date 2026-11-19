@@ -21,12 +21,7 @@ create_pool_device() {
 }
 
 for (( index = 0; index < SHARD_COUNT; index++ )); do
-  if [[ -n "${CAPGO_MAESTRO_SHARD_INDEX:-}" ]]; then
-    device_suffix="$CAPGO_MAESTRO_SHARD_INDEX"
-  else
-    device_suffix="$index"
-  fi
-  device_id="$(create_pool_device "$device_suffix" | head -n 1 | tr -d '\r')"
+  device_id="$(create_pool_device "$index" | head -n 1 | tr -d '\r')"
   if [[ -z "$device_id" ]]; then
     echo "Failed to create iOS simulator shard ${index} for the pool." >&2
     exit 1

@@ -10,6 +10,8 @@ import android.os.Build;
 import android.os.SystemClock;
 import androidx.annotation.VisibleForTesting;
 import androidx.core.app.NotificationCompat;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -20,7 +22,7 @@ final class OkHttpDownloadProgressNotifier {
 
     static final String CHANNEL_ID = "capgo_capacitor_downloader_okhttp";
     private static final String CHANNEL_NAME = "Downloads";
-    private static final int NOTIFICATION_ID = 0x44554f57;
+    private static final int COMPLETED_NOTIFICATION_ID_BASE = 0x44554f57;
     private static final long UPDATE_INTERVAL_MS = 1_000L;
 
     private final Context context;
@@ -34,6 +36,9 @@ final class OkHttpDownloadProgressNotifier {
         this.context = context.getApplicationContext();
         this.notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
         ensureChannel();
+        synchronized (foregroundCoordinationLock) {
+            foregroundCoordinator = this;
+        }
     }
 
     /**
@@ -45,12 +50,12 @@ final class OkHttpDownloadProgressNotifier {
             return true;
         }
         synchronized (serviceLock) {
-            entries.put(downloadId, new ProgressEntry(title, description, notificationMode));
+            entries.put(downloadId, new ProgressEntry(title, description, notificationMode, SystemClock.elapsedRealtime(), 0f));
             activeDownloads.incrementAndGet();
+            postAggregateNotification();
             OkHttpDownloadForegroundService.notifyActiveDownloads(context, activeDownloads.get());
             OkHttpDownloadForegroundService.requestStart(context);
         }
-        postProgress(downloadId, 0f, true);
         return true;
     }
 
@@ -59,11 +64,14 @@ final class OkHttpDownloadProgressNotifier {
         if (entry == null) {
             return;
         }
+        entry.progress = Math.min(Math.max(progress, 0f), 1f);
         long now = SystemClock.elapsedRealtime();
         if (now - entry.lastPostedAt < UPDATE_INTERVAL_MS && progress < 1f) {
             return;
         }
-        postProgress(downloadId, progress, false);
+        synchronized (serviceLock) {
+            postAggregateNotification();
+        }
         entry.lastPostedAt = now;
     }
 
@@ -74,9 +82,12 @@ final class OkHttpDownloadProgressNotifier {
                 return;
             }
             releaseOneActiveDownload();
-            if (!success || "progress".equals(entry.notificationMode)) {
-                cancelNotification(downloadId);
-            } else if (success) {
+            if (entries.isEmpty()) {
+                cancelServiceNotification();
+            } else {
+                postAggregateNotification();
+            }
+            if (success && !"progress".equals(entry.notificationMode)) {
                 postCompleted(downloadId, entry);
             }
             scheduleForegroundStopIfIdle();
@@ -87,7 +98,11 @@ final class OkHttpDownloadProgressNotifier {
         synchronized (serviceLock) {
             if (entries.remove(downloadId) != null) {
                 releaseOneActiveDownload();
-                cancelNotification(downloadId);
+                if (entries.isEmpty()) {
+                    cancelServiceNotification();
+                } else {
+                    postAggregateNotification();
+                }
                 scheduleForegroundStopIfIdle();
             }
         }
@@ -95,17 +110,22 @@ final class OkHttpDownloadProgressNotifier {
 
     void shutdown() {
         synchronized (serviceLock) {
-            for (String downloadId : entries.keySet()) {
-                cancelNotification(downloadId);
-            }
             entries.clear();
             activeDownloads.set(0);
             lastForegroundNotification = null;
             sharedForegroundNotification = null;
+            cancelServiceNotification();
             OkHttpDownloadForegroundService.notifyActiveDownloads(context, 0);
+        }
+        synchronized (foregroundCoordinationLock) {
+            if (foregroundCoordinator == this) {
+                foregroundCoordinator = null;
+            }
         }
     }
 
+    private static final Object foregroundCoordinationLock = new Object();
+    private static volatile OkHttpDownloadProgressNotifier foregroundCoordinator;
     private static volatile Notification sharedForegroundNotification;
 
     @VisibleForTesting
@@ -117,18 +137,59 @@ final class OkHttpDownloadProgressNotifier {
     }
 
     static Notification foregroundServiceNotification(Context context) {
-        Notification pinned = sharedForegroundNotification;
-        if (pinned != null) {
-            return pinned;
+        return notificationForForegroundPromotion(context);
+    }
+
+    static Notification notificationForForegroundPromotion(Context context) {
+        synchronized (foregroundCoordinationLock) {
+            OkHttpDownloadProgressNotifier coordinator = foregroundCoordinator;
+            if (coordinator != null) {
+                synchronized (coordinator.serviceLock) {
+                    if (!coordinator.entries.isEmpty()) {
+                        Notification notification = coordinator.buildAggregateNotification();
+                        coordinator.lastForegroundNotification = notification;
+                        sharedForegroundNotification = notification;
+                        return notification;
+                    }
+                }
+            }
+            Notification pinned = sharedForegroundNotification;
+            if (pinned != null) {
+                return pinned;
+            }
+            ensureChannelStatic(context);
+            return new NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setOngoing(true)
+                .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+                .setSilent(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build();
         }
-        ensureChannelStatic(context);
-        return new NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setOngoing(true)
-            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .setSilent(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build();
+    }
+
+    static void reconcileAfterForegroundPromotion(Context context) {
+        reconcileForegroundNotificationOwnership(context);
+    }
+
+    static void reconcileAfterForegroundServiceStop(Context context) {
+        reconcileForegroundNotificationOwnership(context);
+    }
+
+    private static void reconcileForegroundNotificationOwnership(Context context) {
+        synchronized (foregroundCoordinationLock) {
+            OkHttpDownloadProgressNotifier coordinator = foregroundCoordinator;
+            if (coordinator == null) {
+                return;
+            }
+            synchronized (coordinator.serviceLock) {
+                if (coordinator.entries.isEmpty()) {
+                    coordinator.cancelServiceNotification();
+                    return;
+                }
+                coordinator.postAggregateNotification();
+            }
+        }
     }
 
     private void releaseOneActiveDownload() {
@@ -139,47 +200,89 @@ final class OkHttpDownloadProgressNotifier {
         OkHttpDownloadForegroundService.notifyActiveDownloads(context, activeDownloads.get());
     }
 
-    private void postProgress(String downloadId, float progress, boolean force) {
-        ProgressEntry entry = entries.get(downloadId);
-        if (entry == null) {
+    private void postAggregateNotification() {
+        if (entries.isEmpty()) {
             return;
         }
-        int percentage = Math.round(Math.min(Math.max(progress, 0f), 1f) * 100f);
-        String contentTitle = resolveTitle(entry);
-        String contentText = percentage + "%";
-        if (entry.description != null && !entry.description.isEmpty()) {
-            contentText = entry.description + " · " + contentText;
-        }
-        Notification notification = new NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle(contentTitle)
-            .setContentText(contentText)
-            .setProgress(100, percentage, false)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
-            .setContentIntent(launchIntent())
-            .setWhen(entry.startedAt)
-            .build();
+        Notification notification = buildAggregateNotification();
         try {
             if (simulateNotificationPostSecurityExceptionForTests) {
                 throw new SecurityException("test: POST_NOTIFICATIONS denied");
             }
-            notificationManager.notify(notificationTagFor(downloadId), NOTIFICATION_ID, notification);
+            notificationManager.notify(null, OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID, notification);
             lastForegroundNotification = notification;
             sharedForegroundNotification = notification;
         } catch (SecurityException ignored) {
-            handleNotificationPostFailure(downloadId);
+            handleNotificationPostFailure();
         }
     }
 
-    private void handleNotificationPostFailure(String downloadId) {
+    private void handleNotificationPostFailure() {
         synchronized (serviceLock) {
-            if (entries.remove(downloadId) != null) {
-                releaseOneActiveDownload();
-                scheduleForegroundStopIfIdle();
-            }
+            entries.clear();
+            activeDownloads.set(0);
+            sharedForegroundNotification = null;
+            lastForegroundNotification = null;
+            scheduleForegroundStopIfIdle();
         }
+    }
+
+    private Notification buildAggregateNotification() {
+        List<ProgressEntry> snapshot = new ArrayList<>(entries.values());
+        int count = snapshot.size();
+        if (count == 1) {
+            ProgressEntry entry = snapshot.get(0);
+            int percentage = Math.round(entry.progress * 100f);
+            String contentTitle = resolveTitle(entry);
+            String contentText = percentage + "%";
+            if (entry.description != null && !entry.description.isEmpty()) {
+                contentText = entry.description + " · " + contentText;
+            }
+            return new NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle(contentTitle)
+                .setContentText(contentText)
+                .setProgress(100, percentage, false)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+                .setContentIntent(launchIntent())
+                .setWhen(entry.startedAt)
+                .build();
+        }
+
+        StringBuilder titleBuilder = new StringBuilder();
+        float progressSum = 0f;
+        for (int i = 0; i < snapshot.size(); i++) {
+            if (i > 0) {
+                titleBuilder.append('\n');
+            }
+            titleBuilder.append(resolveTitle(snapshot.get(i)));
+            progressSum += snapshot.get(i).progress;
+        }
+        int averagePercentage = Math.round((progressSum / count) * 100f);
+        String contentText = count + " downloads · " + averagePercentage + "%";
+        long sortWhen = earliestStartedAt(snapshot);
+        return new NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle(titleBuilder.toString())
+            .setContentText(contentText)
+            .setProgress(100, averagePercentage, false)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(titleBuilder.toString()))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setContentIntent(launchIntent())
+            .setWhen(sortWhen)
+            .build();
+    }
+
+    private static long earliestStartedAt(List<ProgressEntry> snapshot) {
+        long earliest = Long.MAX_VALUE;
+        for (ProgressEntry entry : snapshot) {
+            earliest = Math.min(earliest, entry.startedAt);
+        }
+        return earliest;
     }
 
     private void postCompleted(String downloadId, ProgressEntry entry) {
@@ -193,14 +296,17 @@ final class OkHttpDownloadProgressNotifier {
             .setWhen(entry.startedAt)
             .build();
         try {
-            notificationManager.notify(notificationTagFor(downloadId), NOTIFICATION_ID, notification);
+            int notificationId = notificationIdForCompletedDownload(downloadId);
+            notificationManager.notify(notificationTagForCompletedDownload(downloadId), notificationId, notification);
         } catch (SecurityException ignored) {
             return;
         }
     }
 
-    private void cancelNotification(String downloadId) {
-        notificationManager.cancel(notificationTagFor(downloadId), NOTIFICATION_ID);
+    private void cancelServiceNotification() {
+        notificationManager.cancel(null, OkHttpDownloadForegroundService.SERVICE_NOTIFICATION_ID);
+        sharedForegroundNotification = null;
+        lastForegroundNotification = null;
     }
 
     private String resolveTitle(ProgressEntry entry) {
@@ -214,20 +320,16 @@ final class OkHttpDownloadProgressNotifier {
         return "progress".equals(notificationMode);
     }
 
-    static String notificationTagForDownload(String downloadId) {
-        return "capgo_okhttp_" + (downloadId != null ? downloadId : "");
+    static String notificationTagForCompletedDownload(String downloadId) {
+        return "capgo_okhttp_done_" + (downloadId != null ? downloadId : "");
     }
 
-    static int notificationIdForDownload(String downloadId) {
-        return NOTIFICATION_ID;
+    static int notificationIdForCompletedDownload(String downloadId) {
+        return COMPLETED_NOTIFICATION_ID_BASE ^ (downloadId != null ? downloadId.hashCode() : 0);
     }
 
     private boolean shouldShowProgress(String notificationMode) {
         return shouldShowProgressForMode(notificationMode);
-    }
-
-    private String notificationTagFor(String downloadId) {
-        return notificationTagForDownload(downloadId);
     }
 
     private PendingIntent launchIntent() {
@@ -263,13 +365,15 @@ final class OkHttpDownloadProgressNotifier {
         /** Wall-clock download start; keeps parallel progress notifications sorted by start order. */
         final long startedAt;
         long lastPostedAt;
+        float progress;
 
-        ProgressEntry(String title, String description, String notificationMode) {
+        ProgressEntry(String title, String description, String notificationMode, long lastPostedAt, float progress) {
             this.title = title;
             this.description = description;
             this.notificationMode = notificationMode;
             this.startedAt = System.currentTimeMillis();
-            this.lastPostedAt = SystemClock.elapsedRealtime();
+            this.lastPostedAt = lastPostedAt;
+            this.progress = progress;
         }
     }
 }

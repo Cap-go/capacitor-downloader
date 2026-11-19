@@ -251,4 +251,32 @@ if (errors.length) {
   process.exit(1);
 }
 
+const lengthHeaderRules = [
+  {
+    path: path.join(pluginDir, "android/src/main/java/ee/forgr/capacitor/plugin/downloader/CapacitorDownloaderPlugin.java"),
+    mustInclude: ['call.getString("lengthHeader")', "lengthHeader,"],
+    label: "Android CapacitorDownloaderPlugin must pass lengthHeader to OkHttp downloads",
+  },
+  {
+    path: path.join(pluginDir, "ios/Sources/CapacitorDownloaderPlugin/CapacitorDownloaderPlugin.swift"),
+    mustInclude: [
+      "DownloadLengthHeaderStore.shared.clear(for: id)",
+      "captureExpectedTotalFromResponseIfNeeded",
+    ],
+    label: "iOS CapacitorDownloaderPlugin must clear lengthHeader state and capture response totals",
+  },
+];
+
+for (const rule of lengthHeaderRules) {
+  if (!exists(rule.path)) continue;
+  const text = readText(rule.path);
+  for (const needle of rule.mustInclude) {
+    if (!text.includes(needle)) {
+      console.error(`[wiring] FAIL in ${path.relative(process.cwd(), pluginDir) || "."}`);
+      console.error(`- ${rule.label} (missing ${JSON.stringify(needle)})`);
+      process.exit(1);
+    }
+  }
+}
+
 process.exit(0);

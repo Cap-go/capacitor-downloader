@@ -10,10 +10,11 @@ function resolveMaestroServerUrl() {
   }
   const rawPort = window.__capgoMaestroServerPort;
   const port = typeof rawPort === 'number' ? rawPort : Number(rawPort);
+  if (Capacitor.getPlatform() === 'android') {
+    // Maestro CI adb reverse maps device localhost:3192 to each shard host port.
+    return 'http://127.0.0.1:3192';
+  }
   if (Number.isFinite(port) && port > 0) {
-    if (Capacitor.getPlatform() === 'android') {
-      return `http://10.0.2.2:${port}`;
-    }
     return `http://127.0.0.1:${port}`;
   }
   return import.meta.env.VITE_CAPGO_SERVER_URL ?? 'http://127.0.0.1:3192';

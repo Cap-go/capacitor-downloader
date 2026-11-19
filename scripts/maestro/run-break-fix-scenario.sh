@@ -31,7 +31,7 @@ if [[ "${CAPGO_MAESTRO_BREAK_FIX_MAESTRO_ONLY:-}" != "1" ]]; then
 fi
 
 if [[ "$PLATFORM" == "android" ]]; then
-  export CAPGO_MAESTRO_DEVICE_BASE_URL="${CAPGO_MAESTRO_DEVICE_BASE_URL:-http://10.0.2.2:3192}"
+  export CAPGO_MAESTRO_DEVICE_BASE_URL="${CAPGO_MAESTRO_DEVICE_BASE_URL:-http://127.0.0.1:3192}"
   export CAPGO_MAESTRO_SKIP_GRADLE_CLEAN=1
   export CAPGO_MAESTRO_TEST_RETRIES=1
   bun scripts/maestro/prepare-maestro-app.mjs android

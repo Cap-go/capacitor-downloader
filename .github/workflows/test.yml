@@ -145,7 +145,7 @@ jobs:
           cache: gradle
       - name: Build Android Maestro example app
         env:
-          CAPGO_MAESTRO_DEVICE_BASE_URL: http://10.0.2.2:3192
+          CAPGO_MAESTRO_DEVICE_BASE_URL: http://127.0.0.1:3192
         run: bun scripts/maestro/prepare-maestro-app.mjs android
       - name: Upload Android Maestro app
         uses: actions/upload-artifact@v7

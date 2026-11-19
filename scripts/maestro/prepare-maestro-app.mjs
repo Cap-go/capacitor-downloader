@@ -13,7 +13,7 @@ if (!platform || !['android', 'ios'].includes(platform)) {
 
 const deviceBaseUrl =
   process.env.CAPGO_MAESTRO_DEVICE_BASE_URL ??
-  (platform === 'android' ? 'http://10.0.2.2:3192' : 'http://127.0.0.1:3192');
+  (platform === 'android' ? 'http://127.0.0.1:3192' : 'http://127.0.0.1:3192');
 
 const buildEnv = {
   ...process.env,

@@ -66,6 +66,9 @@ boot_ios_simulator() {
     disable_ios_simulator_animations "$simulator_id"
     return 0
   fi
+  if [[ "${CAPGO_MAESTRO_IOS_SKIP_BOOT:-}" == 1 ]]; then
+    echo "Pre-booted simulator ${simulator_id} is not responsive; performing full boot." >&2
+  fi
   local attempt=1
   while (( attempt <= 2 )); do
     xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true

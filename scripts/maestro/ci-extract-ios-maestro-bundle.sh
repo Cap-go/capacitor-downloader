@@ -25,3 +25,4 @@ mv App.app maestro-ios-app/App.app
 echo "$HOME/.maestro/bin" >>"$GITHUB_PATH"
 
 wait "$BOOT_PID"
+touch "${POOL_MANIFEST%.txt}.prebooted"

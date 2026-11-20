@@ -79,15 +79,8 @@ if [[ -n "$SHARD_INDEX" ]]; then
   fi
 else
   boot_fail=0
-  boot_pids=()
   for simulator_id in "${SIMULATOR_IDS[@]}"; do
-    (
-      boot_ios_simulator "$simulator_id"
-    ) &
-    boot_pids+=("$!")
-  done
-  for boot_pid in "${boot_pids[@]}"; do
-    if ! wait "$boot_pid"; then
+    if ! boot_ios_simulator "$simulator_id"; then
       boot_fail=1
     fi
   done

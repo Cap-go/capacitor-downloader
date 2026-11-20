@@ -5,9 +5,9 @@ const shardCount = Number(process.argv[3] ?? 1);
 
 /** @type {readonly (readonly string[])[]} */
 const IOS_MAESTRO_SHARDS = [
-  ['error-5xx', 'foreground-complete', 'completion-once'],
-  ['background-complete', 'error-bad-url', 'error-unwritable-destination', 'batch-kill-mid'],
-  ['low-memory-kill', 'kill-relaunch-resume', 'cancel-cleanup', 'parallel-downloads'],
+  ['error-5xx', 'completion-once'],
+  ['foreground-complete', 'background-complete', 'error-bad-url', 'error-unwritable-destination', 'parallel-downloads'],
+  ['batch-kill-mid', 'low-memory-kill', 'kill-relaunch-resume', 'cancel-cleanup'],
   ['network-drop-resume', 'error-404', 'batch-error-404', 'batch-error-5xx'],
 ];
 

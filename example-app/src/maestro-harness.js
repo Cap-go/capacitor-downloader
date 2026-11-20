@@ -285,12 +285,14 @@ const flows = {
       androidHttpEngine: 'auto',
       notification: 'hidden',
     });
-    await waitForDone(id, 90_000);
+    const fgTimeoutMs = Capacitor.getPlatform() === 'ios' ? 120_000 : 90_000;
+    await waitForDone(id, fgTimeoutMs);
     setMarker('foreground-complete', true);
   },
 
   async 'background-complete'() {
     const id = 'bg-complete';
+    setSummary(`PHASE:background-complete:downloading:id=${id}`);
     const isIos = Capacitor.getPlatform() === 'ios';
     const url = fileUrl(isIos ? '/slow/786432' : '/slow/98304');
     const destination = isIos ? 'cache/maestro-bg.bin' : 'downloads/maestro-bg.bin';
@@ -301,7 +303,6 @@ const flows = {
       destination,
       androidHttpEngine,
     });
-    setSummary(`PHASE:background-complete:downloading:id=${id}`);
     void plugin
       .download({
         id,

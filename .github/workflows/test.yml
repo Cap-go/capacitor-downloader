@@ -320,7 +320,6 @@ jobs:
       contents: read
     needs:
       - maestro_build_ios_app
-      - maestro_e2e_ios_a
     timeout-minutes: 10
     runs-on: macOS-latest
     name: Maestro E2E iOS (b)
@@ -367,7 +366,6 @@ jobs:
       contents: read
     needs:
       - maestro_build_ios_app
-      - maestro_e2e_ios_b
     timeout-minutes: 10
     runs-on: macOS-latest
     name: Maestro E2E iOS (c)
@@ -414,7 +412,6 @@ jobs:
       contents: read
     needs:
       - maestro_build_ios_app
-      - maestro_e2e_ios_c
     timeout-minutes: 10
     runs-on: macOS-latest
     name: Maestro E2E iOS (d)

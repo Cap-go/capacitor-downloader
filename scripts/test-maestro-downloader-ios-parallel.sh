@@ -60,6 +60,10 @@ IOS_BOOT_TIMEOUT_SECONDS="${CAPGO_MAESTRO_IOS_BOOT_TIMEOUT_SECONDS:-120}"
 
 boot_ios_simulator() {
   local simulator_id="$1"
+  if xcrun simctl spawn "$simulator_id" true >/dev/null 2>&1; then
+    disable_ios_simulator_animations "$simulator_id"
+    return 0
+  fi
   local attempt=1
   while (( attempt <= 2 )); do
     xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true

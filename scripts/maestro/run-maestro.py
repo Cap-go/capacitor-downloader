@@ -45,41 +45,6 @@ FLOWS = {
 }
 
 
-def merge_junit_reports(flow_reports, destination):
-    suites = []
-    for report_path in flow_reports:
-        if not report_path.is_file():
-            continue
-        suites.extend(ET.parse(report_path).getroot().findall('testsuite'))
-    if not suites:
-        return
-    combined = ET.Element('testsuites')
-    for suite in suites:
-        combined.append(suite)
-    ET.ElementTree(combined).write(destination, encoding='utf-8', xml_declaration=True)
-
-
-def run_single_flow(scenario, device, platform, results, flow_timeout):
-    report = results / f'junit-{scenario}.xml'
-    debug_dir = results / 'debug' / scenario
-    artifacts_dir = results / 'artifacts' / scenario
-    debug_dir.mkdir(parents=True, exist_ok=True)
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-    command = [
-        'maestro', 'test', '--config', str(ROOT / '.maestro/config.yaml'), str(FLOWS[scenario]),
-        '--platform', platform, '--udid', device,
-        '--format', 'junit', '--output', str(report),
-        '--debug-output', str(debug_dir), '--flatten-debug-output',
-        '--test-output-dir', str(artifacts_dir),
-    ]
-    try:
-        os.remove(report)
-    except FileNotFoundError:
-        pass
-    print(f'Maestro flow {scenario} (timeout={flow_timeout:.0f}s)', flush=True)
-    return run_command(command, report, flow_timeout)
-
-
 def run(timeout, scenarios, device, platform='android', results_dir=None):
     if not 0 < timeout <= 600:
         raise ValueError('Maestro timeout must be between 0 and 600 seconds')
@@ -98,23 +63,20 @@ def run(timeout, scenarios, device, platform='android', results_dir=None):
         'maestro-results-ios' if platform == 'ios' else 'maestro-results'
     )
     results.mkdir(exist_ok=True)
-    combined_report = results / 'junit.xml'
-    deadline = time.monotonic() + timeout
-    flow_reports = []
-    exit_status = 0
-    for index, scenario in enumerate(scenario_list):
-        remaining = deadline - time.monotonic()
-        flows_left = len(scenario_list) - index
-        flow_timeout = max(45, remaining / flows_left)
-        if flow_timeout < 45:
-            exit_status = exit_status or 124
-            break
-        flow_status = run_single_flow(scenario, device, platform, results, flow_timeout)
-        flow_reports.append(results / f'junit-{scenario}.xml')
-        if flow_status != 0:
-            exit_status = flow_status
-    merge_junit_reports(flow_reports, combined_report)
-    return exit_status
+    report = results / 'junit.xml'
+    flow_paths = [str(FLOWS[scenario]) for scenario in scenario_list]
+    command = [
+        'maestro', 'test', '--config', str(ROOT / '.maestro/config.yaml'), *flow_paths,
+        '--platform', platform, '--udid', device,
+        '--format', 'junit', '--output', str(report),
+        '--debug-output', str(results / 'debug'), '--flatten-debug-output',
+        '--test-output-dir', str(results / 'artifacts'),
+    ]
+    try:
+        os.remove(report)
+    except FileNotFoundError:
+        pass
+    return run_command(command, report, timeout)
 
 
 def run_command(command, report, timeout):

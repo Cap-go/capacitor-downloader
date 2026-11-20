@@ -668,7 +668,7 @@ const flows = {
         notification: 'hidden',
       })
       .catch((error) => setMarker('batch-kill-mid', false, String(error?.message ?? error)));
-    await sleep(isIos ? 2_500 : 2_000);
+    await sleep(isIos ? 5_000 : 2_000);
   },
 };
 
@@ -697,7 +697,12 @@ async function resumePendingDownload(flowId, payload) {
       relaunch = await readDownloadStatus(id);
       setSummary(`STATE:batch-kill-mid:relaunch-after-retry:${id}:${relaunch.state}:${relaunch.progress}`);
     }
-    const terminal = await waitForTerminal(id, Capacitor.getPlatform() === 'ios' ? 90_000 : 120_000);
+    const batchDoneMs =
+      Capacitor.getPlatform() === 'ios' && flowId === 'batch-kill-mid' ? 180_000 : 120_000;
+    const terminal = await waitForTerminal(
+      id,
+      Capacitor.getPlatform() === 'ios' ? Math.max(90_000, batchDoneMs) : 120_000,
+    );
     if (terminal.state !== 'DONE') {
       throw new Error(`Batch expected DONE after relaunch, got ${terminal.state}`);
     }

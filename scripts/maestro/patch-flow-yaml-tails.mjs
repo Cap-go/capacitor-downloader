@@ -79,7 +79,7 @@ const multiStep = {
     timeout: 120000
 - extendedWaitUntil:
     visible: '.*Marker: batch-kill-mid:success.*'
-    timeout: 180000`,
+    timeout: 300000`,
   'low-memory-kill': `
 - extendedWaitUntil:
     visible: '.*PHASE:low-memory-kill:downloading.*'

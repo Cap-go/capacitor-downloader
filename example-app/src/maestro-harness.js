@@ -412,9 +412,7 @@ const flows = {
     try {
       try {
         const badUrl =
-          Capacitor.getPlatform() === 'ios'
-            ? 'http://127.0.0.1:1/maestro-bad-url.bin'
-            : 'http://192.0.2.1:9/missing.bin';
+          Capacitor.getPlatform() === 'ios' ? 'not-a-valid-url' : 'http://192.0.2.1:9/missing.bin';
         await plugin.download({
           id,
           url: badUrl,

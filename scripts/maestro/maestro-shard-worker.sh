@@ -62,6 +62,9 @@ if [[ "$PLATFORM" == "ios" ]]; then
   xcrun simctl spawn "$DEVICE_ID" launchctl setenv CAPGO_MAESTRO_PORT "$HOST_PORT" >/dev/null 2>&1 || true
   xcrun simctl uninstall "$DEVICE_ID" "$APP_ID" >/dev/null 2>&1 || true
   xcrun simctl install "$DEVICE_ID" "$APP_PATH"
+  xcrun simctl launch "$DEVICE_ID" "$APP_ID" >/dev/null 2>&1 || true
+  sleep 2
+  xcrun simctl terminate "$DEVICE_ID" "$APP_ID" >/dev/null 2>&1 || true
   export CAPGO_MAESTRO_IOS_SIMULATOR_ID="$DEVICE_ID"
 else
   APK_PATH="$ROOT_DIR/example-app/android/app/build/outputs/apk/debug/app-debug.apk"

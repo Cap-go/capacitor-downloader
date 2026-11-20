@@ -6,11 +6,13 @@ ANDROID_ANIMATION_ORIGINAL_VALUES=()
 ANDROID_ANIMATION_DEVICE_ID=""
 
 run_animation_setting() {
-  python3 - "$@" <<'PYTHON'
+  local timeout_seconds="${CAPGO_MAESTRO_ANIMATION_CMD_TIMEOUT_SECONDS:-10}"
+  python3 - "$timeout_seconds" "$@" <<'PYTHON'
 import subprocess
 import sys
+timeout = float(sys.argv[1])
 try:
-    result = subprocess.run(sys.argv[1:], check=True, timeout=10, capture_output=True, text=True)
+    result = subprocess.run(sys.argv[2:], check=True, timeout=timeout, capture_output=True, text=True)
     sys.stdout.write(result.stdout)
 except (OSError, subprocess.SubprocessError) as error:
     print(f"Could not access device animation settings: {error}", file=sys.stderr)
@@ -92,7 +94,9 @@ disable_ios_simulator_animations() {
     return 0
   fi
 
-  run_animation_setting xcrun simctl spawn "$simulator_id" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true >/dev/null || true
+  CAPGO_MAESTRO_ANIMATION_CMD_TIMEOUT_SECONDS=3 run_animation_setting \
+    xcrun simctl spawn "$simulator_id" defaults write com.apple.Accessibility ReduceMotionEnabled -bool true \
+    >/dev/null 2>&1 || true
 }
 
 # Runners source this file so their exit traps can restore the saved settings.

@@ -12,6 +12,15 @@ fi
 
 MAESTRO_POOL_TOKEN="${GITHUB_RUN_ID:-$$}"
 mkdir -p "$(dirname "$POOL_MANIFEST")"
+
+if [[ -s "$POOL_MANIFEST" ]]; then
+  existing_id="$(head -n 1 "$POOL_MANIFEST" | tr -d '\r')"
+  if [[ -n "$existing_id" ]] && xcrun simctl list devices available 2>/dev/null | grep -q "$existing_id"; then
+    printf '%s\n' "$POOL_MANIFEST"
+    exit 0
+  fi
+fi
+
 : >"$POOL_MANIFEST"
 
 create_pool_device() {

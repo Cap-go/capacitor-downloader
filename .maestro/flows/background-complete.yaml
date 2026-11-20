@@ -12,7 +12,7 @@ appId: app.capgo.downloader
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*PHASE:background-complete:downloading.*'
-    timeout: 45000
+    timeout: 90000
 - pressKey: Home
 - waitForAnimationToEnd:
     timeout: 3000

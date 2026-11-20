@@ -294,7 +294,7 @@ const flows = {
     const id = 'bg-complete';
     setSummary(`PHASE:background-complete:downloading:id=${id}`);
     const isIos = Capacitor.getPlatform() === 'ios';
-    const url = fileUrl(isIos ? '/slow/786432' : '/slow/98304');
+    const url = fileUrl(isIos ? '/slow/262144' : '/slow/98304');
     const destination = isIos ? 'cache/maestro-bg.bin' : 'downloads/maestro-bg.bin';
     const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
     persistPending('background-complete', {

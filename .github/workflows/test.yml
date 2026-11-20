@@ -298,9 +298,6 @@ jobs:
           mkdir -p maestro-ios-app maestro-cli
           tar -xzf maestro-ios-e2e-bundle.tar.gz -C .
           wait "$POOL_PID"
-          SIM_ID="$(head -n 1 "$POOL_MANIFEST" | tr -d '\r')"
-          xcrun simctl boot "$SIM_ID" >/dev/null 2>&1 || true
-          python3 -c "import subprocess,sys; subprocess.run(['xcrun','simctl','bootstatus',sys.argv[1],'-b'],timeout=int(sys.argv[2]),check=False)" "$SIM_ID" 120
           rm -rf "$HOME/.maestro"
           mkdir -p "$HOME/.maestro"
           ditto maestro-cli/ "$HOME/.maestro/"
@@ -356,9 +353,6 @@ jobs:
           mkdir -p maestro-ios-app maestro-cli
           tar -xzf maestro-ios-e2e-bundle.tar.gz -C .
           wait "$POOL_PID"
-          SIM_ID="$(head -n 1 "$POOL_MANIFEST" | tr -d '\r')"
-          xcrun simctl boot "$SIM_ID" >/dev/null 2>&1 || true
-          python3 -c "import subprocess,sys; subprocess.run(['xcrun','simctl','bootstatus',sys.argv[1],'-b'],timeout=int(sys.argv[2]),check=False)" "$SIM_ID" 120
           rm -rf "$HOME/.maestro"
           mkdir -p "$HOME/.maestro"
           ditto maestro-cli/ "$HOME/.maestro/"
@@ -414,9 +408,6 @@ jobs:
           mkdir -p maestro-ios-app maestro-cli
           tar -xzf maestro-ios-e2e-bundle.tar.gz -C .
           wait "$POOL_PID"
-          SIM_ID="$(head -n 1 "$POOL_MANIFEST" | tr -d '\r')"
-          xcrun simctl boot "$SIM_ID" >/dev/null 2>&1 || true
-          python3 -c "import subprocess,sys; subprocess.run(['xcrun','simctl','bootstatus',sys.argv[1],'-b'],timeout=int(sys.argv[2]),check=False)" "$SIM_ID" 120
           rm -rf "$HOME/.maestro"
           mkdir -p "$HOME/.maestro"
           ditto maestro-cli/ "$HOME/.maestro/"
@@ -472,9 +463,6 @@ jobs:
           mkdir -p maestro-ios-app maestro-cli
           tar -xzf maestro-ios-e2e-bundle.tar.gz -C .
           wait "$POOL_PID"
-          SIM_ID="$(head -n 1 "$POOL_MANIFEST" | tr -d '\r')"
-          xcrun simctl boot "$SIM_ID" >/dev/null 2>&1 || true
-          python3 -c "import subprocess,sys; subprocess.run(['xcrun','simctl','bootstatus',sys.argv[1],'-b'],timeout=int(sys.argv[2]),check=False)" "$SIM_ID" 120
           rm -rf "$HOME/.maestro"
           mkdir -p "$HOME/.maestro"
           ditto maestro-cli/ "$HOME/.maestro/"

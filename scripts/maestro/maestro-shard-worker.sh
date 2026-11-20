@@ -95,7 +95,24 @@ fi
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 
+ios_driver_recovery() {
+  xcrun simctl shutdown "$DEVICE_ID" >/dev/null 2>&1 || true
+  xcrun simctl boot "$DEVICE_ID" >/dev/null 2>&1 || true
+  xcrun simctl bootstatus "$DEVICE_ID" -b
+  xcrun simctl spawn "$DEVICE_ID" launchctl setenv CAPGO_MAESTRO_PORT "$HOST_PORT" >/dev/null 2>&1 || true
+  xcrun simctl uninstall "$DEVICE_ID" "$APP_ID" >/dev/null 2>&1 || true
+  xcrun simctl install "$DEVICE_ID" "$APP_PATH"
+  xcrun simctl launch "$DEVICE_ID" "$APP_ID" >/dev/null 2>&1 || true
+  sleep 3
+  xcrun simctl terminate "$DEVICE_ID" "$APP_ID" >/dev/null 2>&1 || true
+}
+
+ios_driver_timeout_in_results() {
+  find "$RESULTS_DIR/debug" -type f -print0 2>/dev/null | xargs -0 grep -q 'IOSDriverTimeoutException' 2>/dev/null
+}
+
 attempt=1
+driver_recovery_used=0
 while (( attempt <= MAESTRO_TEST_RETRIES )); do
   echo "Maestro ${PLATFORM} shard ${SHARD_INDEX}/${SHARD_COUNT} attempt ${attempt}/${MAESTRO_TEST_RETRIES} flows=${FLOWS}"
   if python3 "$ROOT_DIR/scripts/maestro/run-maestro.py" \
@@ -106,16 +123,19 @@ while (( attempt <= MAESTRO_TEST_RETRIES )); do
     "$RESULTS_DIR"; then
     exit 0
   fi
-  if [[ "$PLATFORM" == "ios" ]] &&
-    find "$RESULTS_DIR/debug" -type f -print0 2>/dev/null | xargs -0 grep -q 'IOSDriverTimeoutException' 2>/dev/null; then
-    xcrun simctl shutdown "$DEVICE_ID" >/dev/null 2>&1 || true
-    xcrun simctl boot "$DEVICE_ID" >/dev/null 2>&1 || true
-    xcrun simctl bootstatus "$DEVICE_ID" -b
-    xcrun simctl spawn "$DEVICE_ID" launchctl setenv CAPGO_MAESTRO_PORT "$HOST_PORT" >/dev/null 2>&1 || true
-    xcrun simctl uninstall "$DEVICE_ID" "$APP_ID" >/dev/null 2>&1 || true
-    xcrun simctl install "$DEVICE_ID" "$APP_PATH"
+  if [[ "$PLATFORM" == "ios" ]] && ios_driver_timeout_in_results; then
+  if (( driver_recovery_used == 0 )); then
+    echo "iOS driver startup timed out; rebooting simulator once before retry." >&2
+    ios_driver_recovery
+    driver_recovery_used=1
+    sleep "$LIGHT_RETRY_SLEEP_SECONDS"
+    continue
+  fi
   fi
   attempt=$((attempt + 1))
+  if [[ "$PLATFORM" == "ios" ]] && ios_driver_timeout_in_results; then
+    ios_driver_recovery
+  fi
   sleep "$LIGHT_RETRY_SLEEP_SECONDS"
 done
 

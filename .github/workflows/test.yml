@@ -276,12 +276,7 @@ jobs:
       - maestro_build_ios_app
     timeout-minutes: 10
     runs-on: macOS-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        shard_index: [0, 1, 2, 3]
-    name: Maestro E2E iOS (${{ matrix.shard_index }})
+    name: Maestro E2E iOS
     steps:
       - name: Check out
         uses: actions/checkout@v7
@@ -308,11 +303,10 @@ jobs:
           chmod 0755 "$HOME/.maestro/bin/maestro"
           mv App.app maestro-ios-app/App.app
           echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
-      - name: Run Maestro E2E (parallel simulator shards)
+      - name: Run Maestro E2E (single simulator, full suite)
         env:
           CAPGO_MAESTRO_IOS_APP_PATH: maestro-ios-app/App.app
-          CAPGO_MAESTRO_SHARD_COUNT: 4
-          CAPGO_MAESTRO_SHARD_INDEX: ${{ matrix.shard_index }}
+          CAPGO_MAESTRO_SHARD_COUNT: 1
           CAPGO_MAESTRO_IOS_BOOT_TIMEOUT_SECONDS: 180
           CAPGO_MAESTRO_TIMEOUT_SECONDS: 540
           CAPGO_MAESTRO_TEST_RETRIES: 2
@@ -323,5 +317,5 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: maestro-results-ios-${{ matrix.shard_index }}
+          name: maestro-results-ios
           path: maestro-results-ios

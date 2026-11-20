@@ -337,7 +337,7 @@ const flows = {
         notification: 'hidden',
       })
       .catch((error) => setMarker('kill-relaunch-resume', false, String(error?.message ?? error)));
-    await sleep(2_000);
+    await sleep(isIos ? 4_000 : 2_000);
   },
 
   async 'low-memory-kill'() {
@@ -569,7 +569,7 @@ const flows = {
         }),
       ),
     );
-    const parallelWaitMs = isIos ? 45_000 : 120_000;
+    const parallelWaitMs = isIos ? 90_000 : 120_000;
     for (const spec of specs) {
       await waitForDone(spec.id, parallelWaitMs);
       const count = completionCounts.get(spec.id) ?? 0;

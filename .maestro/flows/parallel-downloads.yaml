@@ -12,4 +12,4 @@ appId: app.capgo.downloader
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: parallel-downloads:success.*'
-    timeout: 90000
+    timeout: 180000

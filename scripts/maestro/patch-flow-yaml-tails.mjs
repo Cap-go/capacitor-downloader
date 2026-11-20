@@ -26,7 +26,7 @@ const extraAssertions = {
     timeout: 90000`,
   'cancel-cleanup': `
 - extendedWaitUntil:
-    visible: '.*STATE:cancel-me:(?!DONE).*'
+    visible: '.*STOP:cancel-me:removed=true.*'
     timeout: 90000`,
 };
 

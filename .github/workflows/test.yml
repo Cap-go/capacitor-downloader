@@ -289,21 +289,8 @@ jobs:
           path: .
       - name: Extract iOS Maestro E2E bundle
         env:
-          CAPGO_MAESTRO_SHARD_INDEX: 0
-          CAPGO_MAESTRO_SHARD_COUNT: 4
-        run: |
-          POOL_MANIFEST="${GITHUB_WORKSPACE}/.maestro-artifacts/ios-simulator-pool-shard-0.txt"
-          bash scripts/maestro/setup-ios-simulator-pool.sh 1 "$POOL_MANIFEST" &
-          POOL_PID=$!
-          mkdir -p maestro-ios-app maestro-cli
-          tar -xzf maestro-ios-e2e-bundle.tar.gz -C .
-          wait "$POOL_PID"
-          rm -rf "$HOME/.maestro"
-          mkdir -p "$HOME/.maestro"
-          ditto maestro-cli/ "$HOME/.maestro/"
-          chmod 0755 "$HOME/.maestro/bin/maestro"
-          mv App.app maestro-ios-app/App.app
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+          CAPGO_MAESTRO_IOS_BOOT_TIMEOUT_SECONDS: 180
+        run: bash scripts/maestro/ci-extract-ios-maestro-bundle.sh 0
       - name: Run Maestro E2E shard 0/4
         env:
           CAPGO_MAESTRO_IOS_APP_PATH: maestro-ios-app/App.app
@@ -344,21 +331,8 @@ jobs:
           path: .
       - name: Extract iOS Maestro E2E bundle
         env:
-          CAPGO_MAESTRO_SHARD_INDEX: 1
-          CAPGO_MAESTRO_SHARD_COUNT: 4
-        run: |
-          POOL_MANIFEST="${GITHUB_WORKSPACE}/.maestro-artifacts/ios-simulator-pool-shard-1.txt"
-          bash scripts/maestro/setup-ios-simulator-pool.sh 1 "$POOL_MANIFEST" &
-          POOL_PID=$!
-          mkdir -p maestro-ios-app maestro-cli
-          tar -xzf maestro-ios-e2e-bundle.tar.gz -C .
-          wait "$POOL_PID"
-          rm -rf "$HOME/.maestro"
-          mkdir -p "$HOME/.maestro"
-          ditto maestro-cli/ "$HOME/.maestro/"
-          chmod 0755 "$HOME/.maestro/bin/maestro"
-          mv App.app maestro-ios-app/App.app
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+          CAPGO_MAESTRO_IOS_BOOT_TIMEOUT_SECONDS: 180
+        run: bash scripts/maestro/ci-extract-ios-maestro-bundle.sh 1
       - name: Run Maestro E2E shard 1/4
         env:
           CAPGO_MAESTRO_IOS_APP_PATH: maestro-ios-app/App.app
@@ -399,21 +373,8 @@ jobs:
           path: .
       - name: Extract iOS Maestro E2E bundle
         env:
-          CAPGO_MAESTRO_SHARD_INDEX: 2
-          CAPGO_MAESTRO_SHARD_COUNT: 4
-        run: |
-          POOL_MANIFEST="${GITHUB_WORKSPACE}/.maestro-artifacts/ios-simulator-pool-shard-2.txt"
-          bash scripts/maestro/setup-ios-simulator-pool.sh 1 "$POOL_MANIFEST" &
-          POOL_PID=$!
-          mkdir -p maestro-ios-app maestro-cli
-          tar -xzf maestro-ios-e2e-bundle.tar.gz -C .
-          wait "$POOL_PID"
-          rm -rf "$HOME/.maestro"
-          mkdir -p "$HOME/.maestro"
-          ditto maestro-cli/ "$HOME/.maestro/"
-          chmod 0755 "$HOME/.maestro/bin/maestro"
-          mv App.app maestro-ios-app/App.app
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+          CAPGO_MAESTRO_IOS_BOOT_TIMEOUT_SECONDS: 180
+        run: bash scripts/maestro/ci-extract-ios-maestro-bundle.sh 2
       - name: Run Maestro E2E shard 2/4
         env:
           CAPGO_MAESTRO_IOS_APP_PATH: maestro-ios-app/App.app
@@ -454,21 +415,8 @@ jobs:
           path: .
       - name: Extract iOS Maestro E2E bundle
         env:
-          CAPGO_MAESTRO_SHARD_INDEX: 3
-          CAPGO_MAESTRO_SHARD_COUNT: 4
-        run: |
-          POOL_MANIFEST="${GITHUB_WORKSPACE}/.maestro-artifacts/ios-simulator-pool-shard-3.txt"
-          bash scripts/maestro/setup-ios-simulator-pool.sh 1 "$POOL_MANIFEST" &
-          POOL_PID=$!
-          mkdir -p maestro-ios-app maestro-cli
-          tar -xzf maestro-ios-e2e-bundle.tar.gz -C .
-          wait "$POOL_PID"
-          rm -rf "$HOME/.maestro"
-          mkdir -p "$HOME/.maestro"
-          ditto maestro-cli/ "$HOME/.maestro/"
-          chmod 0755 "$HOME/.maestro/bin/maestro"
-          mv App.app maestro-ios-app/App.app
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+          CAPGO_MAESTRO_IOS_BOOT_TIMEOUT_SECONDS: 180
+        run: bash scripts/maestro/ci-extract-ios-maestro-bundle.sh 3
       - name: Run Maestro E2E shard 3/4
         env:
           CAPGO_MAESTRO_IOS_APP_PATH: maestro-ios-app/App.app

@@ -12,12 +12,15 @@ appId: app.capgo.downloader
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*PHASE:kill-relaunch-resume:downloading.*'
-    timeout: 90000
+    timeout: 45000
 - stopApp
 - launchApp:
     clearState: false
     arguments:
       isE2E: true
+- extendedWaitUntil:
+    visible: '.*Harness: ready.*'
+    timeout: 120000
 - extendedWaitUntil:
     visible: '.*Marker: kill-relaunch-resume:success.*'
     timeout: 120000

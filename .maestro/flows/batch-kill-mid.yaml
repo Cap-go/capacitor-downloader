@@ -21,5 +21,8 @@ appId: app.capgo.downloader
     arguments:
       isE2E: true
 - extendedWaitUntil:
+    visible: '.*Harness: ready.*'
+    timeout: 120000
+- extendedWaitUntil:
     visible: '.*Marker: batch-kill-mid:success.*'
     timeout: 180000

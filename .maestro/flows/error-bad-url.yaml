@@ -12,4 +12,4 @@ appId: app.capgo.downloader
     retryTapIfNoChange: true
 - extendedWaitUntil:
     visible: '.*Marker: error-bad-url:success.*'
-    timeout: 120000
+    timeout: 60000

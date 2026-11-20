@@ -15,6 +15,8 @@ const markerTimeout = {
   'error-404': '90000',
   'error-5xx': '90000',
   'error-unwritable-destination': '60000',
+  'batch-error-404': '150000',
+  'batch-error-5xx': '150000',
 };
 
 const extraAssertions = {
@@ -41,6 +43,9 @@ const multiStep = {
     arguments:
       isE2E: true
 - extendedWaitUntil:
+    visible: '.*Harness: ready.*'
+    timeout: 120000
+- extendedWaitUntil:
     visible: '.*Marker: background-complete:success.*'
     timeout: 120000`,
   'kill-relaunch-resume': `
@@ -53,8 +58,28 @@ const multiStep = {
     arguments:
       isE2E: true
 - extendedWaitUntil:
+    visible: '.*Harness: ready.*'
+    timeout: 120000
+- extendedWaitUntil:
     visible: '.*Marker: kill-relaunch-resume:success.*'
     timeout: 120000`,
+  'batch-kill-mid': `
+- extendedWaitUntil:
+    visible: '.*PHASE:batch-kill-mid:downloading.*'
+    timeout: 60000
+- waitForAnimationToEnd:
+    timeout: 5000
+- stopApp
+- launchApp:
+    clearState: false
+    arguments:
+      isE2E: true
+- extendedWaitUntil:
+    visible: '.*Harness: ready.*'
+    timeout: 120000
+- extendedWaitUntil:
+    visible: '.*Marker: batch-kill-mid:success.*'
+    timeout: 180000`,
   'low-memory-kill': `
 - extendedWaitUntil:
     visible: '.*PHASE:low-memory-kill:downloading.*'
@@ -64,6 +89,9 @@ const multiStep = {
     clearState: false
     arguments:
       isE2E: true
+- extendedWaitUntil:
+    visible: '.*Harness: ready.*'
+    timeout: 120000
 - extendedWaitUntil:
     visible: '.*Marker: low-memory-kill:success.*'
     timeout: 120000`,

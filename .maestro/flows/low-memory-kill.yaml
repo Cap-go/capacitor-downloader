@@ -19,5 +19,8 @@ appId: app.capgo.downloader
     arguments:
       isE2E: true
 - extendedWaitUntil:
+    visible: '.*Harness: ready.*'
+    timeout: 120000
+- extendedWaitUntil:
     visible: '.*Marker: low-memory-kill:success.*'
     timeout: 120000

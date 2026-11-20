@@ -803,6 +803,9 @@ export async function initMaestroHarness() {
   setSummary('Harness: ready');
   trackCompletions();
 
+  if (Capacitor.getPlatform() === 'ios' && readPending()) {
+    await sleep(2_000);
+  }
   await resumePendingFlowIfNeeded();
 
   App.addListener('appStateChange', (state) => {

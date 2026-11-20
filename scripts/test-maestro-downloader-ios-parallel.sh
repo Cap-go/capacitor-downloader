@@ -60,24 +60,34 @@ IOS_BOOT_TIMEOUT_SECONDS="${CAPGO_MAESTRO_IOS_BOOT_TIMEOUT_SECONDS:-120}"
 
 boot_ios_simulator() {
   local simulator_id="$1"
-  if xcrun simctl spawn "$simulator_id" true >/dev/null 2>&1; then
-    disable_ios_simulator_animations "$simulator_id"
-    return 0
-  fi
-  xcrun simctl boot "$simulator_id" >/dev/null 2>&1 || true
-  if ! python3 -c "
+  local attempt=1
+  while (( attempt <= 2 )); do
+    xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true
+    xcrun simctl boot "$simulator_id" >/dev/null 2>&1 || true
+    if python3 -c "
 import subprocess, sys
 subprocess.run(['xcrun', 'simctl', 'bootstatus', sys.argv[1], '-b'], timeout=int(sys.argv[2]), check=True)
 " "$simulator_id" "$IOS_BOOT_TIMEOUT_SECONDS"; then
-    echo "Simulator ${simulator_id} failed to boot within ${IOS_BOOT_TIMEOUT_SECONDS}s." >&2
-    exit 1
-  fi
-  disable_ios_simulator_animations "$simulator_id"
+      disable_ios_simulator_animations "$simulator_id"
+      return 0
+    fi
+  if (( attempt == 1 )); then
+      echo "Simulator ${simulator_id} boot slow; recreating once." >&2
+      xcrun simctl shutdown "$simulator_id" >/dev/null 2>&1 || true
+      xcrun simctl delete "$simulator_id" >/dev/null 2>&1 || true
+      simulator_id="$(bash "$ROOT_DIR/scripts/maestro/create-ios-simulator-named.sh" "Capgo Maestro retry-${IOS_BOOT_TIMEOUT_SECONDS}-${RANDOM}")"
+      printf '%s\n' "$simulator_id" >"$POOL_MANIFEST"
+    fi
+    attempt=$((attempt + 1))
+  done
+  echo "Simulator failed to boot within ${IOS_BOOT_TIMEOUT_SECONDS}s." >&2
+  exit 1
 }
 
 fail=0
 if [[ -n "$SHARD_INDEX" ]]; then
   boot_ios_simulator "${SIMULATOR_IDS[0]}"
+  SIMULATOR_IDS[0]="$(head -n 1 "$POOL_MANIFEST" | tr -d '\r')"
   if ! run_shard_worker "$SHARD_INDEX" "${SIMULATOR_IDS[0]}"; then
     fail=1
   fi

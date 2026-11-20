@@ -298,8 +298,6 @@ jobs:
           mkdir -p maestro-ios-app maestro-cli
           tar -xzf maestro-ios-e2e-bundle.tar.gz -C .
           wait "$POOL_PID"
-          SIM_ID="$(head -n 1 "$POOL_MANIFEST" | tr -d '\r')"
-          xcrun simctl boot "$SIM_ID" >/dev/null 2>&1 || true
           rm -rf "$HOME/.maestro"
           mkdir -p "$HOME/.maestro"
           ditto maestro-cli/ "$HOME/.maestro/"
@@ -330,6 +328,7 @@ jobs:
       contents: read
     needs:
       - maestro_build_ios_app
+      - maestro_e2e_ios_a
     timeout-minutes: 10
     runs-on: macOS-latest
     name: Maestro E2E iOS (b)
@@ -354,8 +353,6 @@ jobs:
           mkdir -p maestro-ios-app maestro-cli
           tar -xzf maestro-ios-e2e-bundle.tar.gz -C .
           wait "$POOL_PID"
-          SIM_ID="$(head -n 1 "$POOL_MANIFEST" | tr -d '\r')"
-          xcrun simctl boot "$SIM_ID" >/dev/null 2>&1 || true
           rm -rf "$HOME/.maestro"
           mkdir -p "$HOME/.maestro"
           ditto maestro-cli/ "$HOME/.maestro/"
@@ -386,6 +383,7 @@ jobs:
       contents: read
     needs:
       - maestro_build_ios_app
+      - maestro_e2e_ios_b
     timeout-minutes: 10
     runs-on: macOS-latest
     name: Maestro E2E iOS (c)
@@ -410,8 +408,6 @@ jobs:
           mkdir -p maestro-ios-app maestro-cli
           tar -xzf maestro-ios-e2e-bundle.tar.gz -C .
           wait "$POOL_PID"
-          SIM_ID="$(head -n 1 "$POOL_MANIFEST" | tr -d '\r')"
-          xcrun simctl boot "$SIM_ID" >/dev/null 2>&1 || true
           rm -rf "$HOME/.maestro"
           mkdir -p "$HOME/.maestro"
           ditto maestro-cli/ "$HOME/.maestro/"
@@ -442,6 +438,7 @@ jobs:
       contents: read
     needs:
       - maestro_build_ios_app
+      - maestro_e2e_ios_c
     timeout-minutes: 10
     runs-on: macOS-latest
     name: Maestro E2E iOS (d)
@@ -466,8 +463,6 @@ jobs:
           mkdir -p maestro-ios-app maestro-cli
           tar -xzf maestro-ios-e2e-bundle.tar.gz -C .
           wait "$POOL_PID"
-          SIM_ID="$(head -n 1 "$POOL_MANIFEST" | tr -d '\r')"
-          xcrun simctl boot "$SIM_ID" >/dev/null 2>&1 || true
           rm -rf "$HOME/.maestro"
           mkdir -p "$HOME/.maestro"
           ditto maestro-cli/ "$HOME/.maestro/"

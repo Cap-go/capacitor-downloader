@@ -22,7 +22,9 @@ if [[ -n "$SHARD_INDEX" ]]; then
     exit 1
   fi
   POOL_DEVICE_COUNT=1
-  POOL_MANIFEST="${POOL_MANIFEST%.txt}-shard-${SHARD_INDEX}.txt"
+  if [[ "$POOL_MANIFEST" != *"-shard-${SHARD_INDEX}.txt" ]]; then
+    POOL_MANIFEST="${POOL_MANIFEST%.txt}-shard-${SHARD_INDEX}.txt"
+  fi
 fi
 
 POOL_MANIFEST="$(bash "$ROOT_DIR/scripts/maestro/setup-ios-simulator-pool.sh" "$POOL_DEVICE_COUNT" "$POOL_MANIFEST")"

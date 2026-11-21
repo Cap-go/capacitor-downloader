@@ -525,14 +525,16 @@ const flows = {
 
   async 'cancel-cleanup'() {
     const id = 'cancel-me';
+    const isIos = Capacitor.getPlatform() === 'ios';
+    const slowBytes = isIos ? 98_304 : 524_288;
     await plugin.download({
       id,
-      url: fileUrl('/slow/524288'),
+      url: fileUrl(`/slow/${slowBytes}`),
       destination: 'cache/maestro-cancel.bin',
       androidHttpEngine: 'auto',
       notification: 'hidden',
     });
-    await sleep(1_500);
+    await sleep(isIos ? 2_500 : 1_500);
     const stopResult = await plugin.stop({ id });
     const removed = stopResult?.removed;
     setSummary(`STOP:${id}:removed=${removed}`);

@@ -22,6 +22,7 @@ mkdir -p "$HOME/.maestro"
 ditto maestro-cli/ "$HOME/.maestro/"
 chmod 0755 "$HOME/.maestro/bin/maestro"
 mv App.app maestro-ios-app/App.app
+export PATH="$HOME/.maestro/bin:${PATH:-}"
 echo "$HOME/.maestro/bin" >>"$GITHUB_PATH"
 
 wait "$BOOT_PID"

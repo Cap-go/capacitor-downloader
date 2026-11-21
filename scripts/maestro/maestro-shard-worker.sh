@@ -113,31 +113,47 @@ ios_driver_timeout_in_results() {
   find "$RESULTS_DIR/debug" -type f -print0 2>/dev/null | xargs -0 grep -q 'IOSDriverTimeoutException' 2>/dev/null
 }
 
+ios_driver_timeout_in_logs() {
+  local log_file="$RESULTS_DIR/maestro-run.log"
+  [[ -f "$log_file" ]] && grep -q 'IOSDriverTimeoutException' "$log_file"
+}
+
+ios_run_failed_with_driver_timeout() {
+  ios_driver_timeout_in_results || ios_driver_timeout_in_logs
+}
+
 attempt=1
 driver_recovery_used=0
 while (( attempt <= MAESTRO_TEST_RETRIES )); do
   echo "Maestro ${PLATFORM} shard ${SHARD_INDEX}/${SHARD_COUNT} attempt ${attempt}/${MAESTRO_TEST_RETRIES} flows=${FLOWS}"
+  maestro_log="$RESULTS_DIR/maestro-run.log"
+  set +o pipefail
   if python3 "$ROOT_DIR/scripts/maestro/run-maestro.py" \
     "$MAESTRO_TIMEOUT_SECONDS" \
-  "${FLOW_IDS[@]}" \
+    "${FLOW_IDS[@]}" \
     "$DEVICE_ID" \
     "$PLATFORM" \
-    "$RESULTS_DIR"; then
+    "$RESULTS_DIR" 2>&1 | tee "$maestro_log"; then
+    set -o pipefail
     exit 0
   fi
-  if [[ "$PLATFORM" == "ios" ]] && ios_driver_timeout_in_results; then
-  if (( driver_recovery_used == 0 )); then
-    echo "iOS driver startup timed out; rebooting simulator once before retry." >&2
+  maestro_status=${PIPESTATUS[0]}
+  set -o pipefail
+  if [[ "$PLATFORM" == "ios" ]] && ios_run_failed_with_driver_timeout; then
+    if (( driver_recovery_used == 0 )); then
+      echo "iOS driver startup timed out; rebooting simulator once before retry (attempt ${attempt} unchanged)." >&2
+      ios_driver_recovery
+      driver_recovery_used=1
+      sleep "$LIGHT_RETRY_SLEEP_SECONDS"
+      continue
+    fi
     ios_driver_recovery
-    driver_recovery_used=1
-    sleep "$LIGHT_RETRY_SLEEP_SECONDS"
-    continue
   fi
+  if (( maestro_status == 124 )); then
+    echo "Maestro shard timed out after ${MAESTRO_TIMEOUT_SECONDS}s." >&2
+    exit 124
   fi
   attempt=$((attempt + 1))
-  if [[ "$PLATFORM" == "ios" ]] && ios_driver_timeout_in_results; then
-    ios_driver_recovery
-  fi
   sleep "$LIGHT_RETRY_SLEEP_SECONDS"
 done
 

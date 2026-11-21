@@ -122,7 +122,7 @@ def monitor_process(process, selector, report, timeout, termination_signal):
         if termination_signal():
             return 128 + termination_signal()
         output = read_output(selector, output)
-        summary_passed = bool(re.search(r'\b(\d+)/\1 Flow Passed\b', output))
+        summary_passed = bool(re.search(r'\b(\d+)/\1 Flows? Passed\b', output))
         if summary_passed and report_passed(report):
             passed_at = passed_at or time.monotonic()
             if time.monotonic() - passed_at >= 0.5:

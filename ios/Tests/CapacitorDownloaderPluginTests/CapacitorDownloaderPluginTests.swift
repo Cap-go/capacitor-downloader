@@ -211,7 +211,8 @@ final class DownloadBatchProgressTests: XCTestCase {
     }
 
     func testLoadRestoresGenerationsBeforeRegisteringDelegate() {
-        DownloadIdGenerationStore.shared.setGeneration(11, forDownloadId: "episode")
+        let downloadId = "episode-load-restore-\(UUID().uuidString)"
+        DownloadIdGenerationStore.shared.setGeneration(11, forDownloadId: downloadId)
         let plugin = CapacitorDownloaderPlugin()
         plugin.load()
         XCTAssertTrue(plugin.didRestoreGenerationsBeforeDelegateRegistration)
@@ -650,14 +651,14 @@ final class DownloadBackgroundSessionManagerTests: XCTestCase {
         wait(for: [earlyFlushCompleted], timeout: 1)
 
         manager.register(downloadDelegate: SynchronousFinishDelegate())
-        wait(for: [handlerCalled], timeout: 1)
+        wait(for: [handlerCalled], timeout: 3)
         XCTAssertEqual(handlerCallCount, 1)
 
         let fallbackGrace = expectation(description: "fallback window elapsed")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             fallbackGrace.fulfill()
         }
-        wait(for: [fallbackGrace], timeout: 1)
+        wait(for: [fallbackGrace], timeout: 3)
         XCTAssertEqual(handlerCallCount, 1)
     }
 

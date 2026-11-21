@@ -32,14 +32,12 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private let foregroundSessionLock = NSLock()
     internal private(set) var restoredBackgroundSessionIdentifiers: [String] = []
     internal private(set) var didRestoreGenerationsBeforeDelegateRegistration = false
+    private var generationsPresentBeforeDelegateRegistration = false
     static let batchMaxFiles = 32
 
     private func registerDownloadDelegateIfGenerationsRestored() {
-        tasksLock.lock()
-        let generationsRestored = !downloadGenerations.isEmpty
-        tasksLock.unlock()
         DownloadBackgroundSessionManager.shared.register(downloadDelegate: self)
-        didRestoreGenerationsBeforeDelegateRegistration = generationsRestored
+        didRestoreGenerationsBeforeDelegateRegistration = generationsPresentBeforeDelegateRegistration
     }
 
     private func downloadSession(allowsCellularAccess: Bool, preferForegroundCapable: Bool) -> URLSession {
@@ -61,6 +59,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         tasksLock.lock()
         downloadGenerations = DownloadIdGenerationStore.shared.allGenerations()
         taskGenerations = DownloadTaskGenerationStore.shared.allGenerations()
+        generationsPresentBeforeDelegateRegistration = !downloadGenerations.isEmpty
         tasksLock.unlock()
         restoredBackgroundSessionIdentifiers = [
             DownloadSessionIdentifiers.main,
@@ -81,11 +80,16 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
             let semaphore = DispatchSemaphore(value: 0)
+            var didFinishLoad = false
             DownloadBackgroundSessionManager.shared.rehydrateTasks { tasks in
+                didFinishLoad = true
                 finishLoad(tasks)
                 semaphore.signal()
             }
-            _ = semaphore.wait(timeout: .now() + 5)
+            let waitResult = semaphore.wait(timeout: .now() + 5)
+            if waitResult == .timedOut, !didFinishLoad {
+                finishLoad([])
+            }
         } else {
             DownloadBackgroundSessionManager.shared.rehydrateTasks(completion: finishLoad)
         }
@@ -328,6 +332,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         )
 
         var request = URLRequest(url: url)
+        request.timeoutInterval = 20
         if let headers = call.getObject("headers") as? [String: String] {
             for (key, value) in headers {
                 request.setValue(value, forHTTPHeaderField: key)
@@ -336,6 +341,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         registerLengthHeaderOption(normalizedLengthHeader(from: call), for: id)
 
         let wifiOnly = call.getString("network") == "wifi-only"
+        let hiddenNotification = call.getString("notification") == "hidden"
         let continuedRequest = parseContinuedProcessingRequest(call)
 
         continuedProcessing.beginIfPossible(downloadId: id, request: continuedRequest) { [weak self] useForeground in
@@ -345,13 +351,17 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             self.tasksLock.lock()
             self.pendingDownloadStarts.remove(id)
             self.tasksLock.unlock()
+            let useForegroundSession = useForeground || hiddenNotification
             self.foregroundSessionLock.lock()
-            if useForeground {
+            if useForegroundSession {
                 self.foregroundSessionDownloadIds.insert(id)
             }
             self.foregroundSessionLock.unlock()
 
-            let activeSession = self.downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: useForeground)
+            let activeSession = self.downloadSession(
+                allowsCellularAccess: !wifiOnly,
+                preferForegroundCapable: useForegroundSession
+            )
             let task = activeSession.downloadTask(with: request)
             task.taskDescription = id
             self.setTask(task, for: id)
@@ -394,7 +404,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         let headers = call.getObject("headers") as? [String: String] ?? [:]
         let lengthHeader = normalizedLengthHeader(from: call)
         let wifiOnly = call.getString("network") == "wifi-only"
-        let batchSession = downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: false)
+        let hiddenNotification = call.getString("notification") == "hidden"
+        let batchSession = downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: hiddenNotification)
 
         for fileObject in files {
             guard let urlString = fileObject["url"] as? String,
@@ -436,6 +447,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             registerLengthHeaderOption(lengthHeader, for: taskId)
 
             var request = URLRequest(url: entry.url)
+            request.timeoutInterval = 20
             for (key, value) in headers {
                 request.setValue(value, forHTTPHeaderField: key)
             }
@@ -570,7 +582,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             cancelBatchTasks(batchId: id)
             deleteDownloadedFiles(destinations: destinations)
             batchCoordinator.removeBatch(batchId: id, unregisterChildren: false)
-            call.resolve()
+            call.resolve(["removed": true])
             return
         }
 
@@ -587,7 +599,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         if let generation {
             DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
         }
-        call.resolve()
+        call.resolve(["removed": true])
     }
 
 
@@ -718,6 +730,10 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 )
                 markContinuedProcessingFinished(downloadId: id, success: false)
             }
+            removeTask(for: id, completing: downloadTask, in: session)
+            _ = DownloadDestinationStore.shared.takeDestination(for: id)
+            batchCoordinator.unregisterChildTask(id)
+            clearTaskGeneration(for: downloadTask, in: session)
             return
         }
 

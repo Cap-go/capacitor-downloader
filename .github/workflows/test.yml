@@ -1,12 +1,22 @@
 name: Build source code and test it
 
+concurrency:
+  group: build-source-code-and-test-${{ github.ref }}
+  cancel-in-progress: false
+
 on:
   push:
     branches:
+      - main
       - renovate/**
   pull_request:
     branches: [ main ]
-  workflow_call:  # Allow this workflow to be called by other workflows
+  workflow_call: # release path: called by Build and publish on version tags
+
+env:
+  BUN_VERSION: 1.4.2
+  MAESTRO_VERSION: cli-2.4.0
+  CAPGO_MAESTRO_DEVICE_BASE_URL: http://127.0.0.1:3192
 
 jobs:
   guard_swiftpm_version:
@@ -47,6 +57,7 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '21'
+          cache: gradle
       - name: Build
         id: build_code
         run: bun run verify:android
@@ -103,3 +114,312 @@ jobs:
       - name: Verify
         id: verify_code
         run: bun run verify:web
+      - name: Check Maestro fake server lifecycle
+        run: bash scripts/maestro/test-server-lifecycle.sh
+
+  maestro_build_android_app:
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    name: Build Maestro Android app
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          dependency-cache-key: ${{ runner.os }}-bun-deps-root-example-${{ hashFiles('bun.lock', 'package.json', 'example-app/bun.lock', 'example-app/package.json') }}
+          dependency-cache-path: |
+            node_modules
+            example-app/node_modules
+          install-example: 'true'
+      - name: Setup java
+        uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: '21'
+          cache: gradle
+      - name: Build Android Maestro example app
+        env:
+          CAPGO_MAESTRO_DEVICE_BASE_URL: http://127.0.0.1:3192
+        run: bun scripts/maestro/prepare-maestro-app.mjs android
+      - name: Upload Android Maestro app
+        uses: actions/upload-artifact@v7
+        with:
+          name: maestro-downloader-android-app
+          path: example-app/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  maestro_build_ios_app:
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    runs-on: macOS-latest
+    name: Build Maestro iOS app
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          dependency-cache-key: ${{ runner.os }}-bun-deps-root-example-${{ hashFiles('bun.lock', 'package.json', 'example-app/bun.lock', 'example-app/package.json') }}
+          dependency-cache-path: |
+            node_modules
+            example-app/node_modules
+          install-example: 'true'
+      - name: Cache iOS DerivedData for Maestro app
+        uses: actions/cache@v5
+        with:
+          path: .maestro-ios-derived-data
+          key: maestro-ios-derived-${{ runner.os }}-${{ hashFiles('example-app/ios/**', 'ios/**', 'example-app/bun.lock', 'Package.swift') }}
+      - name: Build iOS Maestro example app
+        env:
+          CAPGO_MAESTRO_IOS_DERIVED_DATA: ${{ github.workspace }}/.maestro-ios-derived-data
+          CAPGO_MAESTRO_DEVICE_BASE_URL: http://127.0.0.1:3192
+        run: bun scripts/maestro/prepare-maestro-app.mjs ios
+      - name: Package iOS app
+        run: |
+          APP_PATH="${GITHUB_WORKSPACE}/.maestro-ios-derived-data/Build/Products/Debug-iphonesimulator/App.app"
+          mkdir -p maestro-ios-app
+          ditto "$APP_PATH" maestro-ios-app/App.app
+          tar -czf maestro-ios-app.tar.gz -C maestro-ios-app App.app
+      - name: Install Maestro CLI for E2E matrix
+        uses: ./.github/actions/setup-maestro
+        with:
+          maestro-version: ${{ env.MAESTRO_VERSION }}
+      - name: Package iOS Maestro E2E bundle
+        run: |
+          mkdir -p maestro-ios-e2e-bundle/App.app maestro-ios-e2e-bundle/maestro-cli
+          ditto maestro-ios-app/App.app maestro-ios-e2e-bundle/App.app
+          ditto "$HOME/.maestro/." maestro-ios-e2e-bundle/maestro-cli
+          tar -czf maestro-ios-e2e-bundle.tar.gz -C maestro-ios-e2e-bundle .
+      - name: Upload iOS Maestro E2E bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: maestro-ios-e2e-bundle
+          path: maestro-ios-e2e-bundle.tar.gz
+          if-no-files-found: error
+
+  maestro_e2e_android:
+    permissions:
+      contents: read
+    needs:
+      - maestro_build_android_app
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    name: Maestro E2E Android
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Setup Bun
+        uses: ./.github/actions/setup-bun
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+          dependency-cache-key: ${{ runner.os }}-bun-deps-maestro-android-${{ hashFiles('bun.lock', 'package.json') }}
+          dependency-cache-path: node_modules
+      - name: Setup java
+        uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: '21'
+      - name: Setup Maestro
+        uses: ./.github/actions/setup-maestro
+        with:
+          maestro-version: ${{ env.MAESTRO_VERSION }}
+      - name: Download Android Maestro app
+        uses: actions/download-artifact@v8
+        with:
+          name: maestro-downloader-android-app
+          path: example-app/android/app/build/outputs/apk/debug
+      - name: Enable KVM group perms
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Clear Android SDK temp cache
+        run: bash ./.github/scripts/ensure-android-emulator-sdk.sh
+      - name: Run Maestro E2E (parallel shards)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          profile: pixel_7
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none -no-metrics -read-only
+          script: >-
+            CAPGO_MAESTRO_SHARD_COUNT=1
+            CAPGO_MAESTRO_SKIP_BUILD=1
+            CAPGO_MAESTRO_TIMEOUT_SECONDS=480
+            CAPGO_MAESTRO_TEST_RETRIES=1
+            MAESTRO_DRIVER_STARTUP_TIMEOUT=300000
+            ./scripts/test-maestro-downloader-android-parallel.sh
+      - name: Upload Maestro artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: maestro-results-android
+          path: maestro-results
+
+  maestro_e2e_ios_a:
+    permissions:
+      contents: read
+    needs:
+      - maestro_build_ios_app
+    timeout-minutes: 10
+    runs-on: macOS-latest
+    name: Maestro E2E iOS (a)
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Download iOS Maestro E2E bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: maestro-ios-e2e-bundle
+          path: .
+      - name: Run Maestro E2E shard 0/4
+        env:
+          CAPGO_MAESTRO_IOS_APP_PATH: maestro-ios-app/App.app
+          CAPGO_MAESTRO_SHARD_COUNT: 4
+          CAPGO_MAESTRO_SHARD_INDEX: 0
+          CAPGO_MAESTRO_IOS_POOL_MANIFEST: ${{ github.workspace }}/.maestro-artifacts/ios-simulator-pool-shard-0.txt
+          CAPGO_MAESTRO_IOS_BOOT_TIMEOUT_SECONDS: 120
+          CAPGO_MAESTRO_IOS_SKIP_BOOT: 1
+          CAPGO_MAESTRO_TIMEOUT_SECONDS: 360
+          CAPGO_MAESTRO_TEST_RETRIES: 2
+          CAPGO_MAESTRO_LIGHT_RETRY_SLEEP_SECONDS: 2
+          MAESTRO_DRIVER_STARTUP_TIMEOUT: 120000
+        run: bash scripts/maestro/ci-run-ios-maestro-shard.sh 0
+      - name: Upload Maestro artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: maestro-results-ios-a
+          path: maestro-results-ios
+
+  maestro_e2e_ios_b:
+    permissions:
+      contents: read
+    needs:
+      - maestro_build_ios_app
+      - maestro_e2e_ios_a
+    timeout-minutes: 10
+    runs-on: macOS-latest
+    name: Maestro E2E iOS (b)
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Download iOS Maestro E2E bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: maestro-ios-e2e-bundle
+          path: .
+      - name: Run Maestro E2E shard 1/4
+        env:
+          CAPGO_MAESTRO_IOS_APP_PATH: maestro-ios-app/App.app
+          CAPGO_MAESTRO_SHARD_COUNT: 4
+          CAPGO_MAESTRO_SHARD_INDEX: 1
+          CAPGO_MAESTRO_IOS_POOL_MANIFEST: ${{ github.workspace }}/.maestro-artifacts/ios-simulator-pool-shard-1.txt
+          CAPGO_MAESTRO_IOS_BOOT_TIMEOUT_SECONDS: 120
+          CAPGO_MAESTRO_IOS_SKIP_BOOT: 1
+          CAPGO_MAESTRO_TIMEOUT_SECONDS: 360
+          CAPGO_MAESTRO_TEST_RETRIES: 2
+          CAPGO_MAESTRO_LIGHT_RETRY_SLEEP_SECONDS: 2
+          MAESTRO_DRIVER_STARTUP_TIMEOUT: 120000
+        run: bash scripts/maestro/ci-run-ios-maestro-shard.sh 1
+      - name: Upload Maestro artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: maestro-results-ios-b
+          path: maestro-results-ios
+
+  maestro_e2e_ios_c:
+    permissions:
+      contents: read
+    needs:
+      - maestro_build_ios_app
+      - maestro_e2e_ios_b
+    timeout-minutes: 10
+    runs-on: macOS-latest
+    name: Maestro E2E iOS (c)
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Download iOS Maestro E2E bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: maestro-ios-e2e-bundle
+          path: .
+      - name: Run Maestro E2E shard 2/4
+        env:
+          CAPGO_MAESTRO_IOS_APP_PATH: maestro-ios-app/App.app
+          CAPGO_MAESTRO_SHARD_COUNT: 4
+          CAPGO_MAESTRO_SHARD_INDEX: 2
+          CAPGO_MAESTRO_IOS_POOL_MANIFEST: ${{ github.workspace }}/.maestro-artifacts/ios-simulator-pool-shard-2.txt
+          CAPGO_MAESTRO_IOS_BOOT_TIMEOUT_SECONDS: 120
+          CAPGO_MAESTRO_IOS_SKIP_BOOT: 1
+          CAPGO_MAESTRO_TIMEOUT_SECONDS: 360
+          CAPGO_MAESTRO_TEST_RETRIES: 2
+          CAPGO_MAESTRO_LIGHT_RETRY_SLEEP_SECONDS: 2
+          MAESTRO_DRIVER_STARTUP_TIMEOUT: 120000
+        run: bash scripts/maestro/ci-run-ios-maestro-shard.sh 2
+      - name: Upload Maestro artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: maestro-results-ios-c
+          path: maestro-results-ios
+
+  maestro_e2e_ios_d:
+    permissions:
+      contents: read
+    needs:
+      - maestro_build_ios_app
+      - maestro_e2e_ios_c
+    timeout-minutes: 10
+    runs-on: macOS-latest
+    name: Maestro E2E iOS (d)
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Download iOS Maestro E2E bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: maestro-ios-e2e-bundle
+          path: .
+      - name: Run Maestro E2E shard 3/4
+        env:
+          CAPGO_MAESTRO_IOS_APP_PATH: maestro-ios-app/App.app
+          CAPGO_MAESTRO_SHARD_COUNT: 4
+          CAPGO_MAESTRO_SHARD_INDEX: 3
+          CAPGO_MAESTRO_IOS_POOL_MANIFEST: ${{ github.workspace }}/.maestro-artifacts/ios-simulator-pool-shard-3.txt
+          CAPGO_MAESTRO_IOS_BOOT_TIMEOUT_SECONDS: 120
+          CAPGO_MAESTRO_IOS_SKIP_BOOT: 1
+          CAPGO_MAESTRO_TIMEOUT_SECONDS: 360
+          CAPGO_MAESTRO_TEST_RETRIES: 2
+          CAPGO_MAESTRO_LIGHT_RETRY_SLEEP_SECONDS: 2
+          MAESTRO_DRIVER_STARTUP_TIMEOUT: 120000
+        run: bash scripts/maestro/ci-run-ios-maestro-shard.sh 3
+      - name: Upload Maestro artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: maestro-results-ios-d
+          path: maestro-results-ios

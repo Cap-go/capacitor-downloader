@@ -1,0 +1,825 @@
+import { App } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
+import { CapacitorDownloader } from '@capgo/capacitor-downloader';
+
+const plugin = CapacitorDownloader;
+
+function resolveMaestroServerUrl() {
+  if (typeof window.__capgoMaestroServerUrl === 'string' && window.__capgoMaestroServerUrl.length > 0) {
+    return window.__capgoMaestroServerUrl;
+  }
+  const rawPort = window.__capgoMaestroServerPort;
+  const port = typeof rawPort === 'number' ? rawPort : Number(rawPort);
+  if (Capacitor.getPlatform() === 'android') {
+    // Maestro CI adb reverse maps device localhost:3192 to each shard host port.
+    return 'http://127.0.0.1:3192';
+  }
+  if (Number.isFinite(port) && port > 0) {
+    return `http://127.0.0.1:${port}`;
+  }
+  return import.meta.env.VITE_CAPGO_SERVER_URL ?? 'http://127.0.0.1:3192';
+}
+
+const serverUrl = resolveMaestroServerUrl();
+const storagePrefix = '__capgo_dl_maestro_';
+const completionCounts = new Map();
+
+function requireElement(id) {
+  const element = document.getElementById(id);
+  if (!element) {
+    throw new Error(`Expected #${id}`);
+  }
+  return element;
+}
+
+const harnessReady = requireElement('harness-ready');
+const e2eSummary = requireElement('e2e-summary');
+const e2eLog = requireElement('e2e-log');
+const flowButtons = requireElement('e2e-flow-buttons');
+
+function appendLog(line) {
+  const stamp = new Date().toISOString();
+  e2eLog.textContent = `${e2eLog.textContent}\n${stamp} ${line}`.trim();
+}
+
+function setSummary(text) {
+  e2eSummary.textContent = text;
+  if (/^(PHASE|Marker|ASSERT|EVENT|STATE|APP):/.test(text)) {
+    harnessReady.textContent = text;
+  }
+  appendLog(text);
+}
+
+function setMarker(flowId, ok, detail = '') {
+  const status = ok ? 'success' : 'failure';
+  const suffix = detail ? `:${detail}` : '';
+  setSummary(`Marker: ${flowId}:${status}${suffix}`);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function fileUrl(path) {
+  return `${serverUrl.replace(/\/$/, '')}${path}`;
+}
+
+const ANDROID_DOWNLOAD_MANAGER_STATUS = {
+  190: 'PENDING',
+  192: 'RUNNING',
+  193: 'PAUSED',
+  200: 'DONE',
+  400: 'ERROR',
+};
+
+function normalizeDownloadTask(raw) {
+  if (!raw) {
+    return { state: 'RUNNING', progress: 0 };
+  }
+  if (typeof raw.state === 'string') {
+    const state = raw.state === 'PAUSED' ? 'RUNNING' : raw.state;
+    return { state, progress: Number(raw.progress) || 0 };
+  }
+  const statusCode = typeof raw.status === 'number' ? raw.status : undefined;
+  if (statusCode !== undefined) {
+    const total = Number(raw.bytesTotal) || 0;
+    const downloaded = Number(raw.bytesDownloaded) || 0;
+    const progress =
+      total > 0 ? Math.min(1, downloaded / total) : statusCode === 8 ? 1 : Number(raw.progress) || 0;
+    const state = ANDROID_DOWNLOAD_MANAGER_STATUS[statusCode] ?? 'RUNNING';
+    return { state, progress };
+  }
+  return { state: 'RUNNING', progress: Number(raw.progress) || 0 };
+}
+
+async function readDownloadStatus(id) {
+  try {
+    return normalizeDownloadTask(await plugin.checkStatus({ id }));
+  } catch (error) {
+    if ((completionCounts.get(id) ?? 0) > 0) {
+      return { state: 'DONE', progress: 1 };
+    }
+    const message = String(error?.message ?? error);
+    if (/not found/i.test(message)) {
+      return { state: 'ERROR', progress: 0 };
+    }
+    throw error;
+  }
+}
+
+async function waitForFailedEventOrTerminal(id, timeoutMs = 60_000) {
+  let failedEvent = false;
+  const listener = await plugin.addListener('downloadFailed', (payload) => {
+    if (payload.id === id) {
+      failedEvent = true;
+    }
+  });
+  try {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (failedEvent) {
+        return { state: 'ERROR', progress: 0 };
+      }
+      const status = await readDownloadStatus(id);
+      if (status.state === 'ERROR' || status.state === 'DONE') {
+        return status;
+      }
+      await sleep(300);
+    }
+    throw new Error(`Timed out waiting for failure on ${id}`);
+  } finally {
+    await listener.remove();
+  }
+}
+
+async function waitForTerminal(id, timeoutMs = 120_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let status = await readDownloadStatus(id);
+    if ((completionCounts.get(id) ?? 0) > 0 && status.state !== 'ERROR') {
+      status = { state: 'DONE', progress: 1 };
+    }
+    appendLog(`STATE:${id}:${status.state}:${status.progress}`);
+    if (status.state === 'DONE' || status.state === 'ERROR') {
+      return status;
+    }
+    await sleep(750);
+  }
+  if ((completionCounts.get(id) ?? 0) > 0) {
+    return { state: 'DONE', progress: 1 };
+  }
+  throw new Error(`Timed out waiting for terminal state on ${id}`);
+}
+
+async function waitForDone(id, timeoutMs = 120_000) {
+  const status = await waitForTerminal(id, timeoutMs);
+  if (status.state !== 'DONE') {
+    throw new Error(`Expected DONE for ${id}, got ${status.state}`);
+  }
+  return status;
+}
+
+function trackCompletions() {
+  plugin.addListener('downloadCompleted', (payload) => {
+    const next = (completionCounts.get(payload.id) ?? 0) + 1;
+    completionCounts.set(payload.id, next);
+    markCompletedInStorage(payload.id);
+    setSummary(`EVENT:downloadCompleted:id=${payload.id}:count=${next}`);
+  });
+  plugin.addListener('downloadFailed', (payload) => {
+    setSummary(`EVENT:downloadFailed:id=${payload.id}:error=${payload.error}`);
+  });
+  plugin.addListener('downloadProgress', (payload) => {
+    if (payload.progress >= 0.99) {
+      appendLog(`PROGRESS:${payload.id}:${payload.progress}`);
+    }
+  });
+}
+
+function persistPending(flowId, payload) {
+  localStorage.setItem(`${storagePrefix}pending_flow`, flowId);
+  localStorage.setItem(`${storagePrefix}pending_payload`, JSON.stringify(payload));
+}
+
+function markCompletedInStorage(id) {
+  localStorage.setItem(`${storagePrefix}completed_${id}`, '1');
+}
+
+function hasCompletedInStorage(id) {
+  return localStorage.getItem(`${storagePrefix}completed_${id}`) === '1';
+}
+
+function readPending() {
+  const flowId = localStorage.getItem(`${storagePrefix}pending_flow`);
+  const raw = localStorage.getItem(`${storagePrefix}pending_payload`);
+  if (!flowId || !raw) {
+    return null;
+  }
+  return { flowId, payload: JSON.parse(raw) };
+}
+
+function clearPending() {
+  localStorage.removeItem(`${storagePrefix}pending_flow`);
+  localStorage.removeItem(`${storagePrefix}pending_payload`);
+}
+
+function batchHttpEngine() {
+  return 'auto';
+}
+
+function buildBatchSpecs(count, okBytes, failUrl) {
+  const isIos = Capacitor.getPlatform() === 'ios';
+  const fileCount = isIos ? Math.min(count, 3) : count;
+  const payloadBytes = isIos ? Math.min(okBytes, 1024) : okBytes;
+  return Array.from({ length: fileCount }, (_, index) => {
+    const isFailFile = Boolean(failUrl) && index === fileCount - 1;
+    return {
+      url: isFailFile ? failUrl : fileUrl(`/bytes/${payloadBytes}`),
+      destination: `cache/maestro-batch-${index}.bin`,
+    };
+  });
+}
+
+async function waitForBatchFailure(id, timeoutMs = 150_000, failFileIndex = null) {
+  const deadline = Date.now() + timeoutMs;
+  const failChildId =
+    failFileIndex != null && Capacitor.getPlatform() === 'android' ? `${id}#${failFileIndex}` : null;
+  let failureSeen = false;
+  const failListener = await plugin.addListener('downloadFailed', (payload) => {
+    if (payload.id === id) {
+      failureSeen = true;
+    }
+  });
+  const sawBatchFailure = () => {
+    if (failureSeen) {
+      return true;
+    }
+    const haystack = `${e2eSummary.textContent ?? ''}\n${e2eLog.textContent ?? ''}`;
+    return haystack.includes(`downloadFailed:id=${id}`);
+  };
+  try {
+    while (Date.now() < deadline) {
+      if (sawBatchFailure()) {
+        return { state: 'ERROR', progress: 0 };
+      }
+      const status = await readDownloadStatus(id);
+      appendLog(`BATCH_FAIL_WAIT:${id}:${status.state}:${status.progress}`);
+      if (status.state === 'ERROR') {
+        return status;
+      }
+      if (failChildId) {
+        try {
+          const child = normalizeDownloadTask(await plugin.checkStatus({ id: failChildId }));
+          appendLog(`BATCH_FAIL_CHILD:${failChildId}:${child.state}:${child.progress}`);
+          if (child.state === 'ERROR') {
+            return { state: 'ERROR', progress: status.progress };
+          }
+        } catch (childError) {
+          const message = String(childError?.message ?? childError);
+          if (/not found/i.test(message)) {
+            return { state: 'ERROR', progress: status.progress };
+          }
+        }
+      }
+      if ((completionCounts.get(id) ?? 0) > 0 && !sawBatchFailure()) {
+        throw new Error(`Batch ${id} completed unexpectedly instead of failing`);
+      }
+      await sleep(750);
+    }
+    throw new Error(`Timed out waiting for batch failure on ${id}`);
+  } finally {
+    await failListener.remove();
+  }
+}
+
+const flows = {
+  async 'foreground-complete'() {
+    const id = 'fg-complete';
+    const bytes = Capacitor.getPlatform() === 'ios' ? 49_152 : 49_152;
+    await plugin.download({
+      id,
+      url: fileUrl(`/bytes/${bytes}`),
+      destination: 'downloads/maestro-fg.bin',
+      androidHttpEngine: 'auto',
+      notification: 'hidden',
+    });
+    const fgTimeoutMs = Capacitor.getPlatform() === 'ios' ? 120_000 : 90_000;
+    await waitForDone(id, fgTimeoutMs);
+    setMarker('foreground-complete', true);
+  },
+
+  async 'background-complete'() {
+    const id = 'bg-complete';
+    setSummary(`PHASE:background-complete:downloading:id=${id}`);
+    const isIos = Capacitor.getPlatform() === 'ios';
+    const url = fileUrl(isIos ? '/slow/262144' : '/slow/98304');
+    const destination = isIos ? 'cache/maestro-bg.bin' : 'downloads/maestro-bg.bin';
+    const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
+    persistPending('background-complete', {
+      id,
+      url,
+      destination,
+      androidHttpEngine,
+    });
+    void plugin
+      .download({
+        id,
+        url,
+        destination,
+        androidHttpEngine,
+        notification: 'hidden',
+      })
+      .catch((error) => setMarker('background-complete', false, String(error?.message ?? error)));
+    await sleep(isIos ? 2_500 : 1_000);
+  },
+
+  async 'kill-relaunch-resume'() {
+    const id = 'kill-resume';
+    const isIos = Capacitor.getPlatform() === 'ios';
+    const slowBytes = isIos ? 98_304 : 131072;
+    const destination = isIos ? 'cache/maestro-kill.bin' : 'downloads/maestro-kill.bin';
+    const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
+    const url = fileUrl(`/slow/${slowBytes}`);
+    persistPending('kill-relaunch-resume', {
+      id,
+      url,
+      destination,
+      androidHttpEngine,
+    });
+    setSummary(`PHASE:kill-relaunch-resume:downloading:id=${id}`);
+    void plugin
+      .download({
+        id,
+        url,
+        destination,
+        androidHttpEngine,
+        notification: 'hidden',
+      })
+      .catch((error) => setMarker('kill-relaunch-resume', false, String(error?.message ?? error)));
+    await sleep(isIos ? 4_000 : 2_000);
+  },
+
+  async 'low-memory-kill'() {
+    const id = 'low-mem';
+    const isIos = Capacitor.getPlatform() === 'ios';
+    const slowBytes = isIos ? 98_304 : 131_072;
+    const url = fileUrl(`/slow/${slowBytes}`);
+    const destination = isIos ? 'cache/maestro-lowmem.bin' : 'downloads/maestro-lowmem.bin';
+    const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
+    setSummary(`PHASE:low-memory-kill:downloading:id=${id}`);
+    persistPending('low-memory-kill', {
+      id,
+      url,
+      destination,
+      androidHttpEngine,
+    });
+    void plugin
+      .download({
+        id,
+        url,
+        destination,
+        androidHttpEngine,
+        notification: 'hidden',
+      })
+      .catch((error) => setMarker('low-memory-kill', false, String(error?.message ?? error)));
+    await sleep(2_000);
+  },
+
+  async 'network-drop-resume'() {
+    const id = 'net-drop';
+    const attemptKey = `attempt-${Date.now()}`;
+    const bytes = Capacitor.getPlatform() === 'ios' ? 98_304 : 49_152;
+    const url = fileUrl(`/recoverable/${bytes}?attemptKey=${encodeURIComponent(attemptKey)}`);
+    const options = {
+      id,
+      url,
+      destination: 'cache/maestro-net.bin',
+      androidHttpEngine: 'auto',
+      notification: 'hidden',
+    };
+    const finishAttempt = async (timeoutMs) => {
+      try {
+        await plugin.stop({ id });
+      } catch {
+        // download may already be inactive
+      }
+      completionCounts.delete(id);
+      localStorage.removeItem(`${storagePrefix}completed_${id}`);
+      await plugin.download(options);
+      await waitForDone(id, timeoutMs);
+    };
+    await plugin.download(options);
+    try {
+      await waitForDone(id, 50_000);
+    } catch (firstLegError) {
+      appendLog(`NET_DROP_FIRST_LEG:${firstLegError.message}`);
+      await finishAttempt(50_000);
+    }
+    setMarker('network-drop-resume', true);
+  },
+
+  async 'error-bad-url'() {
+    const id = 'err-bad-url';
+    let markerSet = false;
+    const failListener = await plugin.addListener('downloadFailed', (payload) => {
+      if (payload.id === id && !markerSet) {
+        markerSet = true;
+        setMarker('error-bad-url', true, 'failed-event');
+      }
+    });
+    try {
+      try {
+        const badUrl =
+          Capacitor.getPlatform() === 'ios' ? 'not-a-valid-url' : 'http://192.0.2.1:9/missing.bin';
+        await plugin.download({
+          id,
+          url: badUrl,
+          destination: 'cache/maestro-bad-url.bin',
+          androidHttpEngine: 'auto',
+          notification: 'hidden',
+        });
+      } catch (error) {
+        if (!markerSet) {
+          markerSet = true;
+          setMarker('error-bad-url', true, 'rejected');
+        }
+        return;
+      }
+      if (!markerSet) {
+        const failMs = Capacitor.getPlatform() === 'ios' ? 45_000 : 90_000;
+        const status = await waitForFailedEventOrTerminal(id, failMs);
+        if (status.state !== 'ERROR') {
+          throw new Error(`Expected ERROR for bad URL, got ${status.state}`);
+        }
+        setMarker('error-bad-url', true, 'status-error');
+      }
+    } finally {
+      await failListener.remove();
+    }
+  },
+
+  async 'error-404'() {
+    const id = 'err-404';
+    let markerSet = false;
+    const failListener = await plugin.addListener('downloadFailed', (payload) => {
+      if (payload.id === id && !markerSet) {
+        markerSet = true;
+        setMarker('error-404', true, 'HTTP 404');
+      }
+    });
+    try {
+      await plugin.download({
+        id,
+        url: fileUrl('/status/404'),
+        destination: 'cache/maestro-404.bin',
+        androidHttpEngine: 'auto',
+        notification: 'hidden',
+      });
+      if (!markerSet) {
+        const status = await waitForFailedEventOrTerminal(id, 60_000);
+        if (status.state !== 'ERROR') {
+          throw new Error(`Expected ERROR for 404, got ${status.state}`);
+        }
+        setMarker('error-404', true, 'HTTP 404');
+      }
+    } finally {
+      await failListener.remove();
+    }
+  },
+
+  async 'error-5xx'() {
+    const id = 'err-500';
+    let markerSet = false;
+    const failListener = await plugin.addListener('downloadFailed', (payload) => {
+      if (payload.id === id && !markerSet) {
+        markerSet = true;
+        setMarker('error-5xx', true, 'HTTP 500');
+      }
+    });
+    try {
+      await plugin.download({
+        id,
+        url: fileUrl('/status/500'),
+        destination: 'cache/maestro-500.bin',
+        androidHttpEngine: 'auto',
+        notification: 'hidden',
+      });
+      if (!markerSet) {
+        const failMs = Capacitor.getPlatform() === 'ios' ? 30_000 : 60_000;
+        const status = await waitForFailedEventOrTerminal(id, failMs);
+        if (status.state !== 'ERROR') {
+          throw new Error(`Expected ERROR for 5xx, got ${status.state}`);
+        }
+        setMarker('error-5xx', true, 'HTTP 500');
+      }
+    } finally {
+      await failListener.remove();
+    }
+  },
+
+  async 'error-unwritable-destination'() {
+    const id = 'err-write';
+    const destination =
+      Capacitor.getPlatform() === 'ios' ? 'cache/maestro/../../../escape.bin' : '';
+    try {
+      await plugin.download({
+        id,
+        url: fileUrl('/bytes/1024'),
+        destination,
+        androidHttpEngine: 'auto',
+        notification: 'hidden',
+      });
+    } catch (error) {
+      setMarker('error-unwritable-destination', true, String(error?.message ?? error));
+      return;
+    }
+    const status = await waitForTerminal(id, 30_000);
+    if (status.state === 'ERROR') {
+      setMarker('error-unwritable-destination', true, 'status-error');
+      return;
+    }
+    throw new Error('Expected unwritable destination to fail');
+  },
+
+  async 'cancel-cleanup'() {
+    const id = 'cancel-me';
+    const isIos = Capacitor.getPlatform() === 'ios';
+    const slowBytes = isIos ? 98_304 : 524_288;
+    await plugin.download({
+      id,
+      url: fileUrl(`/slow/${slowBytes}`),
+      destination: 'cache/maestro-cancel.bin',
+      androidHttpEngine: 'auto',
+      notification: 'hidden',
+    });
+    await sleep(isIos ? 2_500 : 1_500);
+    const stopResult = await plugin.stop({ id });
+    const removed = stopResult?.removed;
+    setSummary(`STOP:${id}:removed=${removed}`);
+    if (removed !== true) {
+      throw new Error(`Expected stop to cancel download (removed=true), got removed=${removed}`);
+    }
+    if ((completionCounts.get(id) ?? 0) > 0) {
+      throw new Error('Download completed despite stop');
+    }
+    await sleep(3_000);
+    if ((completionCounts.get(id) ?? 0) > 0) {
+      throw new Error('Download completed after stop');
+    }
+    setMarker('cancel-cleanup', true, `removed=${removed}`);
+  },
+
+  async 'parallel-downloads'() {
+    const isIos = Capacitor.getPlatform() === 'ios';
+    const specs = isIos
+      ? [
+          { id: 'parallel-a', destination: 'cache/maestro-pa.bin', bytes: 16_384 },
+          { id: 'parallel-b', destination: 'cache/maestro-pb.bin', bytes: 16_384 },
+        ]
+      : [
+          { id: 'parallel-a', destination: 'cache/maestro-pa.bin', bytes: 32_768 },
+          { id: 'parallel-b', destination: 'cache/maestro-pb.bin', bytes: 49_152 },
+          { id: 'parallel-c', destination: 'cache/maestro-pc.bin', bytes: 40_960 },
+        ];
+    await Promise.all(
+      specs.map((spec) =>
+        plugin.download({
+          id: spec.id,
+          url: fileUrl(`/bytes/${spec.bytes}`),
+          destination: spec.destination,
+          androidHttpEngine: 'auto',
+          notification: 'hidden',
+        }),
+      ),
+    );
+    const parallelWaitMs = isIos ? 90_000 : 120_000;
+    for (const spec of specs) {
+      await waitForDone(spec.id, parallelWaitMs);
+      const count = completionCounts.get(spec.id) ?? 0;
+      if (count < 1) {
+        throw new Error(`Expected completion event for ${spec.id}, got count=${count}`);
+      }
+      setSummary(`EVENT:downloadCompleted:id=${spec.id}:count=${count}`);
+    }
+    setMarker('parallel-downloads', true);
+  },
+
+  async 'completion-once'() {
+    const id = 'once-only';
+    completionCounts.set(id, 0);
+    await plugin.download({
+      id,
+      url: fileUrl('/bytes/32768'),
+      destination: 'cache/maestro-once.bin',
+      androidHttpEngine: 'auto',
+      notification: 'hidden',
+    });
+    await waitForDone(id, 90_000);
+    const eventDeadline = Date.now() + 15_000;
+    while ((completionCounts.get(id) ?? 0) < 1 && Date.now() < eventDeadline) {
+      await sleep(250);
+    }
+    const count = completionCounts.get(id) ?? 0;
+    setSummary(`ASSERT:completion-count:id=${id}:count=${count}`);
+    if (count !== 1) {
+      throw new Error(`Expected exactly one completion event, got ${count}`);
+    }
+    setMarker('completion-once', true, `count=${count}`);
+  },
+
+  async 'batch-error-404'() {
+    const id = 'batch-404';
+    const files = buildBatchSpecs(4, 4096, fileUrl('/status/404'));
+    await plugin.download({
+      id,
+      files,
+      androidHttpEngine: batchHttpEngine(),
+      notification: 'hidden',
+    });
+    const failMs = Capacitor.getPlatform() === 'ios' ? 90_000 : 150_000;
+    const status = await waitForBatchFailure(id, failMs, files.length - 1);
+    if (status.state !== 'ERROR') {
+      throw new Error(`Expected batch ERROR for 404, got ${status.state}`);
+    }
+    if ((completionCounts.get(id) ?? 0) > 0) {
+      throw new Error('Batch must not emit downloadCompleted when a file fails');
+    }
+    setMarker('batch-error-404', true, 'batch-failed');
+  },
+
+  async 'batch-error-5xx'() {
+    const id = 'batch-5xx';
+    const files = buildBatchSpecs(4, 4096, fileUrl('/status/500'));
+    await plugin.download({
+      id,
+      files,
+      androidHttpEngine: batchHttpEngine(),
+      notification: 'hidden',
+    });
+    const failMs = Capacitor.getPlatform() === 'ios' ? 45_000 : 150_000;
+    const status = await waitForBatchFailure(id, failMs, files.length - 1);
+    if (status.state !== 'ERROR') {
+      throw new Error(`Expected batch ERROR for 5xx, got ${status.state}`);
+    }
+    if ((completionCounts.get(id) ?? 0) > 0) {
+      throw new Error('Batch must not emit downloadCompleted when a file fails');
+    }
+    setMarker('batch-error-5xx', true, 'batch-failed');
+  },
+
+  async 'batch-kill-mid'() {
+    const id = 'batch-kill';
+    const isIos = Capacitor.getPlatform() === 'ios';
+    const fileCount = isIos ? 2 : 6;
+    const slowBytes = isIos ? 8_192 : 49_152;
+    const androidHttpEngine = isIos ? 'auto' : 'downloadManager';
+    const files = Array.from({ length: fileCount }, (_, index) => ({
+      url: fileUrl(`/slow/${slowBytes}`),
+      destination: isIos ? `cache/maestro-bk-${index}.bin` : `downloads/maestro-bk-${index}.bin`,
+    }));
+    persistPending('batch-kill-mid', { id, batch: true, fileCount, files, androidHttpEngine });
+    setSummary(`PHASE:batch-kill-mid:downloading:id=${id}:files=${fileCount}`);
+    void plugin
+      .download({
+        id,
+        files,
+        androidHttpEngine,
+        notification: 'hidden',
+      })
+      .catch((error) => setMarker('batch-kill-mid', false, String(error?.message ?? error)));
+    await sleep(isIos ? 5_000 : 2_000);
+  },
+};
+
+async function resumePendingDownload(flowId, payload) {
+  const { id } = payload;
+  if (hasCompletedInStorage(id) || (completionCounts.get(id) ?? 0) > 0) {
+    return;
+  }
+  if (payload.batch) {
+    let relaunch = await readDownloadStatus(id);
+    setSummary(`STATE:batch-kill-mid:relaunch:${id}:${relaunch.state}:${relaunch.progress}`);
+    if (relaunch.state !== 'DONE' && relaunch.state !== 'RUNNING' && payload.files?.length) {
+      try {
+        await plugin.download({
+          id,
+          files: payload.files,
+          androidHttpEngine: payload.androidHttpEngine ?? batchHttpEngine(),
+          notification: 'hidden',
+        });
+      } catch (downloadError) {
+        const message = String(downloadError?.message ?? downloadError);
+        if (!/already exists/i.test(message)) {
+          throw downloadError;
+        }
+      }
+      relaunch = await readDownloadStatus(id);
+      setSummary(`STATE:batch-kill-mid:relaunch-after-retry:${id}:${relaunch.state}:${relaunch.progress}`);
+    }
+    const batchDoneMs =
+      Capacitor.getPlatform() === 'ios' && flowId === 'batch-kill-mid' ? 180_000 : 120_000;
+    const terminal = await waitForTerminal(
+      id,
+      Capacitor.getPlatform() === 'ios' ? Math.max(90_000, batchDoneMs) : 120_000,
+    );
+    if (terminal.state !== 'DONE') {
+      throw new Error(`Batch expected DONE after relaunch, got ${terminal.state}`);
+    }
+    return;
+  }
+  const existing = await readDownloadStatus(id);
+  if (existing.state === 'DONE') {
+    markCompletedInStorage(id);
+    return;
+  }
+  try {
+    const status = await waitForDone(id, 90_000);
+    if (status.state !== 'DONE') {
+      throw new Error(`Pending flow ${flowId} failed with ${status.state}`);
+    }
+    return;
+  } catch (error) {
+    if (hasCompletedInStorage(id) || (completionCounts.get(id) ?? 0) > 0) {
+      return;
+    }
+    if (!payload.url || !payload.destination) {
+      throw error;
+    }
+    try {
+      await plugin.download({
+        id,
+        url: payload.url,
+        destination: payload.destination,
+        androidHttpEngine: payload.androidHttpEngine ?? 'auto',
+        notification: 'hidden',
+      });
+    } catch (downloadError) {
+      const message = String(downloadError?.message ?? downloadError);
+      if (!/already exists/i.test(message)) {
+        throw downloadError;
+      }
+      const status = await waitForDone(id, 180_000);
+      if (status.state !== 'DONE') {
+        throw new Error(`Pending flow ${flowId} failed with ${status.state}`);
+      }
+      return;
+    }
+    const status = await waitForDone(id, 180_000);
+    if (status.state !== 'DONE') {
+      throw new Error(`Pending flow ${flowId} failed with ${status.state}`);
+    }
+  }
+}
+
+async function resumePendingFlowIfNeeded() {
+  const pending = readPending();
+  if (!pending) {
+    return;
+  }
+  const { flowId, payload } = pending;
+  if (!payload?.id) {
+    return;
+  }
+  if (hasCompletedInStorage(payload.id) || (completionCounts.get(payload.id) ?? 0) > 0) {
+    clearPending();
+    setMarker(flowId, true, 'resumed');
+    return;
+  }
+  await resumePendingDownload(flowId, payload);
+  clearPending();
+  setMarker(flowId, true, 'resumed');
+}
+
+async function runFlow(flowId) {
+  appendLog(`RUN:${flowId}`);
+  const runner = flows[flowId];
+  if (!runner) {
+    throw new Error(`Unknown flow ${flowId}`);
+  }
+  await runner();
+}
+
+function installFlowButtons() {
+  const flowIds = Object.keys(flows);
+  flowButtons.innerHTML = '';
+  for (const flowId of flowIds) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.id = `e2e-flow-${flowId}`;
+    button.setAttribute('data-testid', `e2e-flow-${flowId}`);
+    button.textContent = flowId;
+    button.addEventListener('click', async () => {
+      try {
+        await runFlow(flowId);
+      } catch (error) {
+        setMarker(flowId, false, String(error?.message ?? error));
+      }
+    });
+    flowButtons.appendChild(button);
+  }
+}
+
+export async function initMaestroHarness() {
+  harnessReady.textContent = 'Harness: booting';
+
+  installFlowButtons();
+  harnessReady.textContent = 'Harness: ready';
+  setSummary('Harness: ready');
+  trackCompletions();
+
+  if (Capacitor.getPlatform() === 'ios' && readPending()) {
+    await sleep(2_000);
+  }
+  await resumePendingFlowIfNeeded();
+
+  App.addListener('appStateChange', (state) => {
+    appendLog(`APP:${state.isActive ? 'active' : 'background'}`);
+    if (state.isActive) {
+      resumePendingFlowIfNeeded().catch((error) => {
+        setSummary(`APP:resume-error:${error?.message ?? error}`);
+      });
+    }
+  });
+}

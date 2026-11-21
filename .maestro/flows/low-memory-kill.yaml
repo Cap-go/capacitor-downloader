@@ -1,0 +1,26 @@
+appId: app.capgo.downloader
+---
+- runFlow: ../helpers/launch-harness.yaml
+- scrollUntilVisible:
+    element:
+      text: low-memory-kill
+    direction: DOWN
+    timeout: 45000
+    centerElement: true
+- tapOn:
+    text: low-memory-kill
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: '.*PHASE:low-memory-kill:downloading.*'
+    timeout: 45000
+- stopApp
+- launchApp:
+    clearState: false
+    arguments:
+      isE2E: true
+- extendedWaitUntil:
+    visible: '.*Harness: ready.*'
+    timeout: 120000
+- extendedWaitUntil:
+    visible: '.*Marker: low-memory-kill:success.*'
+    timeout: 120000

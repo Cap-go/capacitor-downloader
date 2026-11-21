@@ -14,9 +14,6 @@ mkdir -p maestro-ios-app maestro-cli
 tar -xzf maestro-ios-e2e-bundle.tar.gz -C .
 wait "$POOL_PID"
 
-bash "$ROOT_DIR/scripts/maestro/warm-boot-ios-pool-simulator.sh" "$POOL_MANIFEST" &
-BOOT_PID=$!
-
 rm -rf "$HOME/.maestro"
 mkdir -p "$HOME/.maestro"
 ditto maestro-cli/ "$HOME/.maestro/"
@@ -24,6 +21,3 @@ chmod 0755 "$HOME/.maestro/bin/maestro"
 mv App.app maestro-ios-app/App.app
 export PATH="$HOME/.maestro/bin:${PATH:-}"
 echo "$HOME/.maestro/bin" >>"$GITHUB_PATH"
-
-wait "$BOOT_PID"
-touch "${POOL_MANIFEST%.txt}.prebooted"

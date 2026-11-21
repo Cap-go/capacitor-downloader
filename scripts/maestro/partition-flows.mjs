@@ -5,10 +5,11 @@ const shardCount = Number(process.argv[3] ?? 1);
 
 /** @type {readonly (readonly string[])[]} */
 const IOS_MAESTRO_SHARDS = [
-  ['error-5xx'],
+  ['error-5xx', 'cancel-cleanup'],
   ['error-404', 'error-bad-url', 'error-unwritable-destination', 'batch-error-404'],
-  ['cancel-cleanup', 'completion-once', 'parallel-downloads', 'foreground-complete', 'background-complete'],
-  ['batch-error-404', 'batch-kill-mid', 'low-memory-kill', 'kill-relaunch-resume', 'batch-error-5xx'],
+  ['completion-once', 'parallel-downloads', 'foreground-complete', 'network-drop-resume'],
+  ['background-complete', 'batch-kill-mid', 'low-memory-kill', 'kill-relaunch-resume', 'batch-error-5xx'],
+  ['network-drop-resume', 'batch-kill-mid', 'low-memory-kill', 'kill-relaunch-resume', 'batch-error-5xx'],
 ];
 
 if (!Number.isInteger(shardIndex) || !Number.isInteger(shardCount) || shardCount < 1) {

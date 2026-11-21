@@ -97,6 +97,14 @@ fi
 rm -rf "$RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 
+if [[ "$PLATFORM" == "ios" && "${CAPGO_MAESTRO_IOS_SKIP_BOOT:-}" == 1 ]]; then
+  xcrun simctl spawn "$DEVICE_ID" launchctl setenv CAPGO_MAESTRO_PORT "$HOST_PORT" >/dev/null 2>&1 || true
+  xcrun simctl launch "$DEVICE_ID" "$APP_ID" >/dev/null 2>&1 || true
+  sleep 2
+  xcrun simctl terminate "$DEVICE_ID" "$APP_ID" >/dev/null 2>&1 || true
+  sleep 1
+fi
+
 ios_driver_recovery() {
   xcrun simctl shutdown "$DEVICE_ID" >/dev/null 2>&1 || true
   xcrun simctl boot "$DEVICE_ID" >/dev/null 2>&1 || true

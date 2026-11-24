@@ -18,6 +18,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -34,6 +35,8 @@ import org.json.JSONObject;
 public class CapacitorDownloaderPlugin extends Plugin {
 
     private final String pluginVersion = "8.10.0";
+
+    static final int PROGRESS_QUERY_GROUP_SIZE = 500;
 
     private DownloadManager downloadManager;
     private final Map<String, Long> downloads = new ConcurrentHashMap<>();
@@ -869,8 +872,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 result.put("status", DownloadManager.STATUS_PENDING);
                 call.resolve(result);
 
+                okHttpProgressNotifier.started(id, title, description, notificationMode);
+
                 boolean submitted = runOkHttpTransferWork(() -> {
-                    okHttpProgressNotifier.started(id, title, description, notificationMode);
                     try {
                         okHttpDownloadExecutor.start(
                             okHttpReservation,
@@ -1028,34 +1032,36 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     executor.execute(() -> {
                         List<ProgressSnapshot> snapshots = new ArrayList<>();
                         try {
-                            DownloadManager.Query query = new DownloadManager.Query().setFilterById(filterIds);
-                            try (Cursor cursor = downloadManager.query(query)) {
-                                if (cursor != null) {
-                                    while (cursor.moveToNext()) {
-                                        long systemDownloadId = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID));
-                                        String childId = systemIdToChild.get(systemDownloadId);
-                                        if (childId == null) {
-                                            continue;
+                            for (long[] filterIdGroup : progressQueryGroups(filterIds)) {
+                                DownloadManager.Query query = new DownloadManager.Query().setFilterById(filterIdGroup);
+                                try (Cursor cursor = downloadManager.query(query)) {
+                                    if (cursor != null) {
+                                        while (cursor.moveToNext()) {
+                                            long systemDownloadId = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID));
+                                            String childId = systemIdToChild.get(systemDownloadId);
+                                            if (childId == null) {
+                                                continue;
+                                            }
+                                            int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+                                            long bytesDownloaded = cursor.getLong(
+                                                cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                                            );
+                                            long bytesTotal = cursor.getLong(
+                                                cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+                                            );
+                                            float progress = bytesTotal > 0 ? (float) bytesDownloaded / bytesTotal : 0f;
+                                            snapshots.add(
+                                                new ProgressSnapshot(
+                                                    childId,
+                                                    systemDownloadId,
+                                                    progress,
+                                                    status,
+                                                    true,
+                                                    bytesDownloaded,
+                                                    bytesTotal
+                                                )
+                                            );
                                         }
-                                        int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-                                        long bytesDownloaded = cursor.getLong(
-                                            cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
-                                        );
-                                        long bytesTotal = cursor.getLong(
-                                            cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
-                                        );
-                                        float progress = bytesTotal > 0 ? (float) bytesDownloaded / bytesTotal : 0f;
-                                        snapshots.add(
-                                            new ProgressSnapshot(
-                                                childId,
-                                                systemDownloadId,
-                                                progress,
-                                                status,
-                                                true,
-                                                bytesDownloaded,
-                                                bytesTotal
-                                            )
-                                        );
                                     }
                                 }
                             }
@@ -1564,6 +1570,18 @@ public class CapacitorDownloaderPlugin extends Plugin {
             }
             call.reject("Download manager is shutting down", e);
         }
+    }
+
+    /**
+     * Splits the ids of a batch progress poll into groups small enough for one {@link DownloadManager} query.
+     * The query turns the ids into a chain of {@code OR} terms, and SQLite rejects an expression deeper than 1000.
+     */
+    static List<long[]> progressQueryGroups(long[] ids) {
+        List<long[]> groups = new ArrayList<>();
+        for (int start = 0; start < ids.length; start += PROGRESS_QUERY_GROUP_SIZE) {
+            groups.add(Arrays.copyOfRange(ids, start, Math.min(ids.length, start + PROGRESS_QUERY_GROUP_SIZE)));
+        }
+        return groups;
     }
 
     private boolean runOkHttpTransferWork(Runnable work) {

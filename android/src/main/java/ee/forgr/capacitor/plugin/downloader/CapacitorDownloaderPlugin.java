@@ -20,9 +20,11 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -47,7 +49,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private final AtomicLong pendingDownloadSequence = new AtomicLong(0);
     private ExecutorService downloadManagerExecutor;
     private ExecutorService okHttpTransferExecutor;
-    private final Map<String, Long> batchProgressPollingGeneration = new ConcurrentHashMap<>();
+    private final Map<String, BatchProgressPoll> batchProgressPolls = new ConcurrentHashMap<>();
     private final Object batchPollRegistrationLock = new Object();
     private OkHttpDownloadExecutor okHttpDownloadExecutor;
     private OkHttpDownloadProgressNotifier okHttpProgressNotifier;
@@ -859,7 +861,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     return;
                 }
 
+                okHttpProgressNotifier.started(id, title, description, notificationMode);
+
                 if (!downloads.replace(id, pendingToken, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID)) {
+                    okHttpProgressNotifier.abandonDownload(id);
                     okHttpDownloadExecutor.abandonTransfer(okHttpReservation);
                     okHttpDestinationFiles.remove(id, destinationFile);
                     removeDownloadNotificationTexts(id, storedGeneration);
@@ -871,8 +876,6 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 result.put("id", id);
                 result.put("status", DownloadManager.STATUS_PENDING);
                 call.resolve(result);
-
-                okHttpProgressNotifier.started(id, title, description, notificationMode);
 
                 boolean submitted = runOkHttpTransferWork(() -> {
                     try {
@@ -972,23 +975,24 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
     private void startBatchProgressCheck(final String batchId, final DownloadBatchState batchState) {
         final long pollGeneration = batchState.generation;
+        final BatchProgressPoll registration = new BatchProgressPoll(pollGeneration);
         synchronized (batchPollRegistrationLock) {
             DownloadBatchState current = batches.get(batchId);
             if (current != batchState || current.generation != pollGeneration) {
                 return;
             }
-            batchProgressPollingGeneration.put(batchId, pollGeneration);
+            batchProgressPolls.put(batchId, registration);
         }
         final Runnable[] pollHolder = new Runnable[1];
         Runnable poll = new Runnable() {
             @Override
             public void run() {
-                if (!Long.valueOf(pollGeneration).equals(batchProgressPollingGeneration.get(batchId))) {
+                if (batchProgressPolls.get(batchId) != registration) {
                     return;
                 }
                 DownloadBatchState current = batches.get(batchId);
                 if (current == null || current.generation != pollGeneration || isBatchCancelled(current) || current.failed.get()) {
-                    batchProgressPollingGeneration.remove(batchId, pollGeneration);
+                    batchProgressPolls.remove(batchId, registration);
                     return;
                 }
 
@@ -1013,7 +1017,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 }
 
                 if (downloadIds.isEmpty()) {
-                    if (shouldScheduleBatchPoll(batchId, pollGeneration)) {
+                    if (shouldScheduleBatchPoll(batchId, registration)) {
                         handler.postDelayed(pollHolder[0], 1000);
                     }
                     return;
@@ -1036,8 +1040,13 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                 DownloadManager.Query query = new DownloadManager.Query().setFilterById(filterIdGroup);
                                 try (Cursor cursor = downloadManager.query(query)) {
                                     if (cursor != null) {
+                                        Set<Long> missingIds = new HashSet<>();
+                                        for (long id : filterIdGroup) {
+                                            missingIds.add(id);
+                                        }
                                         while (cursor.moveToNext()) {
                                             long systemDownloadId = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID));
+                                            missingIds.remove(systemDownloadId);
                                             String childId = systemIdToChild.get(systemDownloadId);
                                             if (childId == null) {
                                                 continue;
@@ -1062,6 +1071,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                                 )
                                             );
                                         }
+                                        for (Long missingId : missingIds) {
+                                            snapshots.add(ProgressSnapshot.notFound(systemIdToChild.get(missingId), missingId));
+                                        }
                                     }
                                 }
                             }
@@ -1070,14 +1082,14 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         }
                         handler.post(() -> {
                             deliverBatchProgressSnapshots(batchId, pollGeneration, snapshots);
-                            if (shouldScheduleBatchPoll(batchId, pollGeneration)) {
+                            if (shouldScheduleBatchPoll(batchId, registration)) {
                                 handler.postDelayed(pollHolder[0], 1000);
                             }
                         });
                     });
                 } catch (RejectedExecutionException ignored) {
                     // Plugin is shutting down; stop polling quietly.
-                    batchProgressPollingGeneration.remove(batchId, pollGeneration);
+                    batchProgressPolls.remove(batchId, registration);
                 }
             }
         };
@@ -1086,15 +1098,28 @@ public class CapacitorDownloaderPlugin extends Plugin {
     }
 
     private void stopBatchProgressPolling(String batchId, long generation) {
-        batchProgressPollingGeneration.remove(batchId, generation);
+        batchProgressPolls.computeIfPresent(batchId, (key, poll) -> poll.generation == generation ? null : poll);
     }
 
-    private boolean shouldScheduleBatchPoll(String batchId, long pollGeneration) {
-        if (!Long.valueOf(pollGeneration).equals(batchProgressPollingGeneration.get(batchId))) {
+    private boolean shouldScheduleBatchPoll(String batchId, BatchProgressPoll registration) {
+        if (batchProgressPolls.get(batchId) != registration) {
             return false;
         }
         DownloadBatchState current = batches.get(batchId);
-        return current != null && current.generation == pollGeneration;
+        return current != null && current.generation == registration.generation;
+    }
+
+    /**
+     * One running progress poll loop of a batch, compared by identity so that restarting the poll for the same
+     * generation, after a failed stop restores the batch, ends the loop it replaces instead of running beside it.
+     */
+    private static final class BatchProgressPoll {
+
+        final long generation;
+
+        BatchProgressPoll(long generation) {
+            this.generation = generation;
+        }
     }
 
     private void deliverBatchProgressSnapshots(String batchId, long pollGeneration, List<ProgressSnapshot> snapshots) {
@@ -1114,6 +1139,13 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 !isTrackedDownload(snapshot.id, trackedDownloadId)
             ) {
                 continue;
+            }
+            if (!snapshot.found) {
+                if (parts == null) {
+                    continue;
+                }
+                failBatch(batchId, "Download not found", parts.fileIndex);
+                return;
             }
             deliverProgressSnapshot(snapshot.id, trackedDownloadId, false, snapshot, null);
         }
@@ -1270,7 +1302,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         private static ProgressSnapshot notFound(String id) {
-            return new ProgressSnapshot(id, -1L, 0f, -1, false, 0, 0);
+            return notFound(id, -1L);
+        }
+
+        private static ProgressSnapshot notFound(String id, long systemDownloadId) {
+            return new ProgressSnapshot(id, systemDownloadId, 0f, -1, false, 0, 0);
         }
     }
 

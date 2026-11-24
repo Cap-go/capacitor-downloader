@@ -3,6 +3,7 @@ package ee.forgr.capacitor.plugin.downloader;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 
+import java.util.Arrays;
 import java.util.List;
 import org.junit.Test;
 
@@ -29,9 +30,10 @@ public class ProgressQueryGroupsTest {
         List<long[]> groups = CapacitorDownloaderPlugin.progressQueryGroups(ids);
 
         assertEquals(3, groups.size());
-        assertEquals(CapacitorDownloaderPlugin.PROGRESS_QUERY_GROUP_SIZE, groups.get(0).length);
-        assertEquals(CapacitorDownloaderPlugin.PROGRESS_QUERY_GROUP_SIZE, groups.get(1).length);
-        assertEquals(1, groups.get(2).length);
-        assertEquals(size - 1, groups.get(2)[0]);
+        for (int groupIndex = 0; groupIndex < groups.size(); groupIndex++) {
+            int start = groupIndex * CapacitorDownloaderPlugin.PROGRESS_QUERY_GROUP_SIZE;
+            int end = Math.min(size, start + CapacitorDownloaderPlugin.PROGRESS_QUERY_GROUP_SIZE);
+            assertArrayEquals(Arrays.copyOfRange(ids, start, end), groups.get(groupIndex));
+        }
     }
 }

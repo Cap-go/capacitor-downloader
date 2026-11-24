@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.timeout;
@@ -110,7 +111,44 @@ public class CapacitorDownloaderPluginBatchEntryTest {
         Shadows.shadowOf(Looper.getMainLooper()).idle();
 
         verify(downloadManager, timeout(5000).atLeastOnce()).query(any());
-        verify(downloadManager, times(1)).query(any());
+        // One poll can tick twice inside the advanced second; a poller per file would query a hundred times.
+        verify(downloadManager, atMost(2)).query(any());
+    }
+
+    @Test
+    public void downloadBatchFailsWhenItsDownloadManagerRowDisappears() throws Exception {
+        AtomicLong nextSystemId = new AtomicLong(4000L);
+        when(downloadManager.enqueue(any(DownloadManager.Request.class))).thenAnswer((invocation) -> nextSystemId.getAndIncrement());
+        when(downloadManager.query(any())).thenAnswer((invocation) -> {
+            MatrixCursor cursor = new MatrixCursor(new String[] {
+                DownloadManager.COLUMN_ID,
+                DownloadManager.COLUMN_STATUS,
+                DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR,
+                DownloadManager.COLUMN_TOTAL_SIZE_BYTES
+            });
+            cursor.addRow(new Object[] { 4000L, DownloadManager.STATUS_RUNNING, 10L, 100L });
+            cursor.addRow(new Object[] { 4001L, DownloadManager.STATUS_RUNNING, 10L, 100L });
+            return cursor;
+        });
+
+        PluginCall call = buildBatchCall("missing-row-batch", 3);
+        plugin.download(call);
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        verify(call, timeout(5000)).resolve(any());
+
+        @SuppressWarnings("unchecked")
+        Map<String, DownloadBatchState> batches = (Map<String, DownloadBatchState>) getField(plugin, "batches").get(plugin);
+        DownloadBatchState batch = batches.get("missing-row-batch");
+        assertNotNull(batch);
+
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(1100, TimeUnit.MILLISECONDS);
+        verify(downloadManager, timeout(5000).atLeastOnce()).query(any());
+        for (int attempt = 0; attempt < 50 && !batch.failed.get(); attempt++) {
+            Thread.sleep(100);
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+        }
+
+        assertTrue(batch.failed.get());
     }
 
     @Test

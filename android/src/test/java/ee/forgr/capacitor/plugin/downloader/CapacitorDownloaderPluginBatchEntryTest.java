@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import org.json.JSONObject;
 import org.junit.After;
@@ -119,6 +120,7 @@ public class CapacitorDownloaderPluginBatchEntryTest {
     public void downloadBatchFailsWhenItsDownloadManagerRowDisappears() throws Exception {
         AtomicLong nextSystemId = new AtomicLong(4000L);
         when(downloadManager.enqueue(any(DownloadManager.Request.class))).thenAnswer((invocation) -> nextSystemId.getAndIncrement());
+        AtomicInteger queries = new AtomicInteger();
         when(downloadManager.query(any())).thenAnswer((invocation) -> {
             MatrixCursor cursor = new MatrixCursor(new String[] {
                 DownloadManager.COLUMN_ID,
@@ -126,6 +128,10 @@ public class CapacitorDownloaderPluginBatchEntryTest {
                 DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR,
                 DownloadManager.COLUMN_TOTAL_SIZE_BYTES
             });
+            // Only the first, unfiltered poll query returns rows; the single-id query that confirms 4002 finds nothing.
+            if (queries.getAndIncrement() > 0) {
+                return cursor;
+            }
             cursor.addRow(new Object[] { 4000L, DownloadManager.STATUS_RUNNING, 10L, 100L });
             cursor.addRow(new Object[] { 4001L, DownloadManager.STATUS_RUNNING, 10L, 100L });
             return cursor;

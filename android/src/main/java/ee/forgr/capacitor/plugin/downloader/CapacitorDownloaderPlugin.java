@@ -977,7 +977,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
     /**
      * Polls every file of a batch with one unfiltered {@link DownloadManager} query, which only returns this app's
      * downloads, and matches the rows by id. Filtering by id would turn the ids into a chain of {@code OR} terms, which
-     * SQLite rejects past 1000.
+     * SQLite rejects past 1000. A file the query did not return is queried again on its own before it fails the batch,
+     * since a row that changes while the cursor is read in windows can be skipped.
      */
     private void startBatchProgressCheck(final String batchId, final DownloadBatchState batchState) {
         final long pollGeneration = batchState.generation;
@@ -1066,7 +1067,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                         );
                                     }
                                     for (Long missingId : missingIds) {
-                                        snapshots.add(ProgressSnapshot.notFound(systemIdToChild.get(missingId), missingId));
+                                        ProgressSnapshot confirmed = queryProgressSnapshot(systemIdToChild.get(missingId), missingId);
+                                        if (confirmed != null) {
+                                            snapshots.add(confirmed);
+                                        }
                                     }
                                 }
                             }
@@ -1182,11 +1186,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
         DownloadManager.Query query = new DownloadManager.Query().setFilterById(systemDownloadId);
         Cursor cursor = downloadManager.query(query);
         if (cursor == null) {
-            return ProgressSnapshot.notFound(id);
+            return ProgressSnapshot.notFound(id, systemDownloadId);
         }
         try (cursor) {
             if (!cursor.moveToFirst()) {
-                return ProgressSnapshot.notFound(id);
+                return ProgressSnapshot.notFound(id, systemDownloadId);
             }
 
             int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
@@ -1292,10 +1296,6 @@ public class CapacitorDownloaderPlugin extends Plugin {
             this.found = found;
             this.bytesDownloaded = bytesDownloaded;
             this.bytesTotal = bytesTotal;
-        }
-
-        private static ProgressSnapshot notFound(String id) {
-            return notFound(id, -1L);
         }
 
         private static ProgressSnapshot notFound(String id, long systemDownloadId) {

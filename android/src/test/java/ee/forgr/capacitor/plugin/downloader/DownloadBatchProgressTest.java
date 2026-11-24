@@ -27,4 +27,12 @@ public class DownloadBatchProgressTest {
         assertEquals(true, batch.markFileCompleted(1));
         assertEquals(true, batch.markFileCompleted(1));
     }
+
+    @Test
+    public void batchStateScalesWithLargeFileCount() {
+        DownloadBatchState batch = new DownloadBatchState("bundle", 40, 1L, "hidden");
+        assertEquals(40, batch.fileCount);
+        batch.updateFileProgress(39, 0.5f);
+        assertEquals(0.5f, batch.fileProgressAt(39), 0.0001f);
+    }
 }

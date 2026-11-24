@@ -1,3 +1,4 @@
+import Capacitor
 import XCTest
 @testable import CapacitorDownloaderPlugin
 
@@ -274,6 +275,95 @@ final class DownloadBatchProgressTests: XCTestCase {
         XCTAssertEqual(parts?.fileIndex, 2)
         XCTAssertNil(coordinator.childParts(for: "report#1:0"))
         coordinator.removeBatch(batchId: "bundle")
+        store.clear()
+    }
+
+    func testBatchCoordinatorAcceptsLargeFileCount() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let generation = coordinator.startBatch(batchId: "big", fileCount: 40, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+        XCTAssertGreaterThan(generation, 0)
+        coordinator.removeBatch(batchId: "big")
+        store.clear()
+    }
+
+    func testBatchProgressPersistenceDebouncesRapidCompletions() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let generation = coordinator.startBatch(batchId: "debounce", fileCount: 50, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+
+        for fileIndex in 0..<40 {
+            coordinator.recordMovedDestination(
+                batchId: "debounce",
+                generation: generation,
+                fileIndex: fileIndex,
+                destination: "/tmp/debounce-\(fileIndex).bin"
+            )
+        }
+
+        XCTAssertLessThan(
+            store.saveInvocationCountForTests,
+            5,
+            "rapid destination updates should debounce UserDefaults writes"
+        )
+
+        coordinator.flushPersistenceForTests()
+
+        let stored = store.load()["debounce"]
+        XCTAssertEqual(stored?.savedDestinations.count, 40)
+        XCTAssertGreaterThanOrEqual(store.saveInvocationCountForTests, 1)
+
+        coordinator.removeBatch(batchId: "debounce")
+        store.clear()
+    }
+
+    func testDownloadBatchEnqueuesFortyFilesThroughPlugin() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let plugin = CapacitorDownloaderPlugin(batchStore: store)
+        plugin.load()
+        let files: JSArray = (0..<40).map { index in
+            [
+                "url": "https://example.com/\(index).bin",
+                "destination": "batch-entry-\(index).bin",
+            ] as JSObject
+        }
+        plugin.skipBatchTaskResumeForTests = true
+        let expectation = expectation(description: "batch enqueue")
+        let options: [AnyHashable: Any] = [
+            "id": "forty-batch",
+            "files": files,
+        ]
+        guard let call = CAPPluginCall(
+            callbackId: "batch-entry",
+            methodName: "download",
+            options: options,
+            success: { result, _ in
+                XCTAssertEqual(result?.data?["id"] as? String, "forty-batch")
+                expectation.fulfill()
+            },
+            error: { error in
+                XCTFail("batch download should resolve: \(error?.message ?? "unknown")")
+            }
+        ) else {
+            XCTFail("failed to create CAPPluginCall")
+            return
+        }
+        plugin.download(call)
+        wait(for: [expectation], timeout: 5)
+        let childIds = plugin.batchCoordinatorForTests.childTaskIds(batchId: "forty-batch")
+        XCTAssertEqual(childIds.count, 40)
+        XCTAssertEqual(plugin.batchCoordinatorForTests.fileCount(batchId: "forty-batch"), 40)
+        if let generation = plugin.batchCoordinatorForTests.generation(for: "forty-batch") {
+            let lastTaskId = plugin.batchCoordinatorForTests.fileTaskId(batchId: "forty-batch", generation: generation, fileIndex: 39)
+            XCTAssertTrue(childIds.contains(lastTaskId))
+        }
+        plugin.tearDownBatchForTests(batchId: "forty-batch")
         store.clear()
     }
 }

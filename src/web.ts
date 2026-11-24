@@ -1,7 +1,6 @@
 import { WebPlugin } from '@capacitor/core';
 
 import type { CapacitorDownloaderPlugin, DownloadBatchOptions, DownloadOptions, DownloadTask } from './definitions';
-import { DOWNLOAD_BATCH_MAX_FILES } from './definitions';
 
 export class CapacitorDownloaderWeb extends WebPlugin implements CapacitorDownloaderPlugin {
   async download(options: DownloadOptions | DownloadBatchOptions): Promise<DownloadTask> {
@@ -12,9 +11,6 @@ export class CapacitorDownloaderWeb extends WebPlugin implements CapacitorDownlo
     }
     if (hasFiles) {
       const files = (options as DownloadBatchOptions).files;
-      if (files.length > DOWNLOAD_BATCH_MAX_FILES) {
-        throw new Error(`Batch exceeds maximum of ${DOWNLOAD_BATCH_MAX_FILES} files`);
-      }
       for (const file of files) {
         if (!file.url || !file.destination) {
           throw new Error('Each file entry requires url and destination');

@@ -37,6 +37,7 @@ final class DownloadManagerCursorReader {
     static final class Snapshot {
 
         final String id;
+        final long systemDownloadId;
         final int status;
         final int reason;
         final int httpStatus;
@@ -44,8 +45,18 @@ final class DownloadManagerCursorReader {
         final long bytesTotal;
         final boolean found;
 
-        private Snapshot(String id, int status, int reason, int httpStatus, long bytesDownloaded, long bytesTotal, boolean found) {
+        private Snapshot(
+            String id,
+            long systemDownloadId,
+            int status,
+            int reason,
+            int httpStatus,
+            long bytesDownloaded,
+            long bytesTotal,
+            boolean found
+        ) {
             this.id = id;
+            this.systemDownloadId = systemDownloadId;
             this.status = status;
             this.reason = reason;
             this.httpStatus = httpStatus;
@@ -54,8 +65,8 @@ final class DownloadManagerCursorReader {
             this.found = found;
         }
 
-        static Snapshot notFound(String id) {
-            return new Snapshot(id, -1, 0, 0, 0, 0, false);
+        static Snapshot notFound(String id, long systemDownloadId) {
+            return new Snapshot(id, systemDownloadId, -1, 0, 0, 0, 0, false);
         }
 
         float progress() {
@@ -66,16 +77,21 @@ final class DownloadManagerCursorReader {
         }
     }
 
-    static Snapshot readSnapshot(String id, Cursor cursor) {
+    static Snapshot readSnapshot(String id, long systemDownloadId, Cursor cursor) {
         if (cursor == null || !cursor.moveToFirst()) {
-            return Snapshot.notFound(id);
+            return Snapshot.notFound(id, systemDownloadId);
         }
+        return readRow(id, systemDownloadId, cursor);
+    }
+
+    /** Reads the row the cursor is on, for a caller that walks a cursor holding several downloads. */
+    static Snapshot readRow(String id, long systemDownloadId, Cursor cursor) {
         int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
         long bytesDownloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
         long bytesTotal = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
         int reason = readIntColumn(cursor, DownloadManager.COLUMN_REASON);
         int httpStatus = readIntColumn(cursor, "http_status");
-        return new Snapshot(id, status, reason, httpStatus, bytesDownloaded, bytesTotal, true);
+        return new Snapshot(id, systemDownloadId, status, reason, httpStatus, bytesDownloaded, bytesTotal, true);
     }
 
     private static int readIntColumn(Cursor cursor, String column) {

@@ -25,7 +25,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private var downloadGenerations: [String: UInt64] = [:]
     private var taskGenerations: [String: UInt64] = [:]
     private let tasksLock = NSLock()
-    private let batchCoordinator = DownloadBatchCoordinator()
+    private let batchCoordinator: DownloadBatchCoordinator
     private let continuedProcessing = DownloadContinuedProcessingCoordinator()
     private var foregroundSessionDownloadIds = Set<String>()
     private var pendingDownloadStarts = Set<String>()
@@ -36,7 +36,16 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     internal private(set) var restoredBackgroundSessionIdentifiers: [String] = []
     internal private(set) var didRestoreGenerationsBeforeDelegateRegistration = false
     private var generationsPresentBeforeDelegateRegistration = false
-    static let batchMaxFiles = 32
+
+    public override init() {
+        batchCoordinator = DownloadBatchCoordinator()
+        super.init()
+    }
+
+    internal init(batchStore: DownloadBatchStore) {
+        batchCoordinator = DownloadBatchCoordinator(store: batchStore)
+        super.init()
+    }
 
     private func registerDownloadDelegateIfGenerationsRestored() {
         DownloadBackgroundSessionManager.shared.register(downloadDelegate: self)
@@ -418,6 +427,48 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         return Set(tasks.keys.filter { batchCoordinator.childParts(for: $0) == nil })
     }
 
+    private func pluginString(_ value: Any?) -> String? {
+        if let value = value as? String {
+            return value
+        }
+        if let value = value as? NSString {
+            return value as String
+        }
+        return nil
+    }
+
+    private func parsedBatchFiles(from filesValue: JSArray) -> [[String: Any]]? {
+        var files: [[String: Any]] = []
+        files.reserveCapacity(filesValue.count)
+        for entry in filesValue {
+            if let object = entry as? [String: Any] {
+                files.append(object)
+                continue
+            }
+            if let object = entry as? JSObject {
+                var normalized: [String: Any] = [:]
+                for (key, value) in object {
+                    normalized[key] = value
+                }
+                files.append(normalized)
+                continue
+            }
+            if let object = entry as? NSDictionary {
+                var normalized: [String: Any] = [:]
+                for (key, value) in object {
+                    guard let stringKey = key as? String else {
+                        return nil
+                    }
+                    normalized[stringKey] = value
+                }
+                files.append(normalized)
+                continue
+            }
+            return nil
+        }
+        return files
+    }
+
     private func normalizedTaskId(from call: CAPPluginCall) -> String? {
         guard let rawId = call.getString("id") else {
             return nil
@@ -483,7 +534,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject("Provide either url and destination or files, not both")
                 return
             }
-            guard let files = filesValue as? [[String: Any]] else {
+            guard let files = parsedBatchFiles(from: filesValue) else {
                 call.reject("Invalid file entry")
                 return
             }
@@ -604,11 +655,6 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func downloadBatch(_ call: CAPPluginCall, batchId: String, files: [[String: Any]]) {
-        if files.count > Self.batchMaxFiles {
-            call.reject("Batch exceeds maximum of \(Self.batchMaxFiles) files")
-            return
-        }
-
         var parsed: [(url: URL, destination: String)] = []
         let headers = call.getObject("headers") as? [String: String] ?? [:]
         let lengthHeader = normalizedLengthHeader(from: call)
@@ -618,9 +664,9 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         let batchSession = downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: hiddenNotification)
 
         for fileObject in files {
-            guard let urlString = fileObject["url"] as? String,
+            guard let urlString = pluginString(fileObject["url"]),
                   let url = URL(string: urlString),
-                  let destination = fileObject["destination"] as? String,
+                  let destination = pluginString(fileObject["destination"]),
                   !destination.isEmpty else {
                 call.reject("Each file entry requires url and destination")
                 return
@@ -672,10 +718,14 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             stagedTasks.append((taskId, task))
         }
 
+        batchCoordinator.persistBatchChildRegistrations(batchId: batchId)
+
         for staged in stagedTasks {
             setRetryBudget(for: staged.taskId, retries: retries)
             setTask(staged.task, for: staged.taskId)
-            staged.task.resume()
+            if !skipBatchTaskResumeForTests {
+                staged.task.resume()
+            }
         }
 
         call.resolve([
@@ -774,6 +824,22 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             getTask(for: taskId)?.resume()
         }
+    }
+
+    internal func trackedBatchFileCountForTests(batchId: String) -> Int? {
+        batchCoordinator.fileCount(batchId: batchId)
+    }
+
+    internal var batchCoordinatorForTests: DownloadBatchCoordinator {
+        batchCoordinator
+    }
+
+    internal var skipBatchTaskResumeForTests = false
+
+    internal func tearDownBatchForTests(batchId: String) {
+        cancelBatchTasks(batchId: batchId)
+        batchCoordinator.removeBatch(batchId: batchId)
+        DownloadBatchStore.shared.clear()
     }
 
     internal var mainBackgroundSessionForTests: URLSession {
@@ -1098,16 +1164,11 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
 
             if let batchParts = batchCoordinator.activeChildParts(for: id) {
                 removeTask(for: id, completing: downloadTask, in: session)
-                batchCoordinator.recordMovedDestination(
-                    batchId: batchParts.batchId,
-                    generation: batchParts.generation,
-                    fileIndex: batchParts.fileIndex,
-                    destination: destinationURL.path
-                )
                 switch batchCoordinator.markFileCompleted(
                     batchId: batchParts.batchId,
                     generation: batchParts.generation,
-                    fileIndex: batchParts.fileIndex
+                    fileIndex: batchParts.fileIndex,
+                    movedDestination: destinationURL.path
                 ) {
                 case .allSucceeded(let batchId, let generation):
                     notifyListeners("downloadCompleted", data: ["id": batchId])

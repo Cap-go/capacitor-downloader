@@ -20,12 +20,23 @@ final class DownloadBatchStore {
     }
 
     private let defaults: UserDefaults
+    private let counterLock = NSLock()
+    private var saveCount = 0
+
+    var saveInvocationCountForTests: Int {
+        counterLock.lock()
+        defer { counterLock.unlock() }
+        return saveCount
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
     }
 
     func save(_ batches: [String: Record]) {
+        counterLock.lock()
+        saveCount += 1
+        counterLock.unlock()
         let encoder = JSONEncoder()
         guard let data = try? encoder.encode(batches) else {
             return

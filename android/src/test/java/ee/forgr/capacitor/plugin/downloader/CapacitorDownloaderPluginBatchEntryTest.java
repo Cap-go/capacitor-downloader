@@ -1,7 +1,9 @@
 package ee.forgr.capacitor.plugin.downloader;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atMost;
@@ -121,21 +123,10 @@ public class CapacitorDownloaderPluginBatchEntryTest {
         AtomicLong nextSystemId = new AtomicLong(4000L);
         when(downloadManager.enqueue(any(DownloadManager.Request.class))).thenAnswer((invocation) -> nextSystemId.getAndIncrement());
         AtomicInteger queries = new AtomicInteger();
-        when(downloadManager.query(any())).thenAnswer((invocation) -> {
-            MatrixCursor cursor = new MatrixCursor(new String[] {
-                DownloadManager.COLUMN_ID,
-                DownloadManager.COLUMN_STATUS,
-                DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR,
-                DownloadManager.COLUMN_TOTAL_SIZE_BYTES
-            });
-            // Only the first, unfiltered poll query returns rows; the single-id query that confirms 4002 finds nothing.
-            if (queries.getAndIncrement() > 0) {
-                return cursor;
-            }
-            cursor.addRow(new Object[] { 4000L, DownloadManager.STATUS_RUNNING, 10L, 100L });
-            cursor.addRow(new Object[] { 4001L, DownloadManager.STATUS_RUNNING, 10L, 100L });
-            return cursor;
-        });
+        // Only the first, unfiltered poll query returns rows; the single-id query that confirms 4002 finds nothing.
+        when(downloadManager.query(any())).thenAnswer((invocation) ->
+            queries.getAndIncrement() == 0 ? runningRows(4000L, 4001L) : runningRows()
+        );
 
         PluginCall call = buildBatchCall("missing-row-batch", 3);
         plugin.download(call);
@@ -158,6 +149,37 @@ public class CapacitorDownloaderPluginBatchEntryTest {
     }
 
     @Test
+    public void downloadBatchKeepsRunningWhenTheConfirmationQueryFindsTheSkippedRow() throws Exception {
+        AtomicLong nextSystemId = new AtomicLong(5000L);
+        when(downloadManager.enqueue(any(DownloadManager.Request.class))).thenAnswer((invocation) -> nextSystemId.getAndIncrement());
+        AtomicInteger queries = new AtomicInteger();
+        // The unfiltered poll query skips 5002, as a cursor read in windows can; the single-id query finds it running.
+        when(downloadManager.query(any())).thenAnswer((invocation) ->
+            queries.getAndIncrement() == 0 ? runningRows(5000L, 5001L) : runningRows(5002L)
+        );
+
+        PluginCall call = buildBatchCall("skipped-row-batch", 3);
+        plugin.download(call);
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+        verify(call, timeout(5000)).resolve(any());
+
+        @SuppressWarnings("unchecked")
+        Map<String, DownloadBatchState> batches = (Map<String, DownloadBatchState>) getField(plugin, "batches").get(plugin);
+        DownloadBatchState batch = batches.get("skipped-row-batch");
+        assertNotNull(batch);
+
+        Shadows.shadowOf(Looper.getMainLooper()).idleFor(1100, TimeUnit.MILLISECONDS);
+        verify(downloadManager, timeout(5000).atLeast(2)).query(any());
+        for (int attempt = 0; attempt < 5; attempt++) {
+            Thread.sleep(100);
+            Shadows.shadowOf(Looper.getMainLooper()).idle();
+        }
+
+        assertFalse(batch.failed.get());
+        assertSame(batch, batches.get("skipped-row-batch"));
+    }
+
+    @Test
     public void downloadBatchEnqueuesFortyFilesFromPluginEntry() throws Exception {
         AtomicLong nextSystemId = new AtomicLong(1000L);
         when(downloadManager.enqueue(any(DownloadManager.Request.class))).thenAnswer((invocation) -> nextSystemId.getAndIncrement());
@@ -175,6 +197,19 @@ public class CapacitorDownloaderPluginBatchEntryTest {
         assertNotNull(batch);
         assertEquals(40, batch.fileCount);
         assertEquals(40, batch.ownedChildIds.size());
+    }
+
+    private static MatrixCursor runningRows(long... systemDownloadIds) {
+        MatrixCursor cursor = new MatrixCursor(new String[] {
+            DownloadManager.COLUMN_ID,
+            DownloadManager.COLUMN_STATUS,
+            DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR,
+            DownloadManager.COLUMN_TOTAL_SIZE_BYTES
+        });
+        for (long systemDownloadId : systemDownloadIds) {
+            cursor.addRow(new Object[] { systemDownloadId, DownloadManager.STATUS_RUNNING, 10L, 100L });
+        }
+        return cursor;
     }
 
     private static PluginCall buildBatchCall(String batchId, int fileCount) throws Exception {

@@ -238,6 +238,7 @@ public class OkHttpDownloadProgressNotifierRobolectricTest {
             destination,
             new JSObject(),
             "cellular",
+            0,
             null,
             (downloadId, progress) -> notifier.update(downloadId, progress),
             (downloadId, ok, cancelled, errorMessage) -> {

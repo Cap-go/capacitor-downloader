@@ -99,6 +99,7 @@ public class OkHttpDownloadExecutor {
         File destinationFile,
         JSObject headers,
         String network,
+        int maxRetries,
         String lengthHeader,
         ProgressReporter reporter,
         CompletionListener completionListener
@@ -112,12 +113,6 @@ public class OkHttpDownloadExecutor {
             return;
         }
         ActiveDownload active = reserved;
-
-        Network wifiNetwork = resolveWifiNetworkForTransfer(network);
-        if ("wifi-only".equals(network) && (wifiNetwork == null || !isWifiNetworkUsable(wifiNetwork))) {
-            activeDownloads.remove(id, active);
-            throw new IllegalStateException("Wi-Fi required for this download");
-        }
 
         boolean acquired = false;
         try {
@@ -135,140 +130,204 @@ public class OkHttpDownloadExecutor {
                 return;
             }
 
-            if (wifiNetwork != null) {
-                active.boundWifiNetwork = wifiNetwork;
-            }
-            OkHttpClient client = buildClientForNetwork(network, wifiNetwork);
-
-            File tempFile = null;
             try {
-                synchronized (active) {
-                    if (active.cancelled.get()) {
-                        finishCancelled(active, null, id, completionListener);
-                        return;
-                    }
-                }
+                ensureDestinationParentDirectory(destinationFile);
+            } catch (IOException setupError) {
+                active.state = State.ERROR;
+                active.errorMessage = setupError.getMessage() != null ? setupError.getMessage() : "Download failed";
+                completionListener.onFinished(id, false, false, active.errorMessage);
+                return;
+            }
+            File parent = destinationFile.getParentFile();
 
-                Request.Builder requestBuilder = new Request.Builder().url(url);
-                if (headers != null) {
-                    Iterator<String> it = headers.keys();
-                    if (it != null) {
-                        while (it.hasNext()) {
-                            String key = it.next();
-                            requestBuilder.addHeader(key, headers.getString(key));
+            int retriesRemaining = Math.max(0, maxRetries);
+            int connectionFailureAttempt = 0;
+
+            attemptLoop: while (true) {
+                File tempFile = null;
+                try {
+                    synchronized (active) {
+                        if (active.cancelled.get()) {
+                            finishCancelled(active, null, id, completionListener);
+                            return;
                         }
                     }
-                }
 
-                Request request = requestBuilder.build();
-                Call call = client.newCall(request);
-                synchronized (active) {
+                    Network wifiNetwork = null;
+                    if ("wifi-only".equals(network)) {
+                        wifiNetwork = resolveWifiNetworkForTransfer(network);
+                        if (wifiNetwork == null || !isWifiNetworkUsable(wifiNetwork)) {
+                            active.state = State.ERROR;
+                            active.errorMessage = "Wi-Fi required for this download";
+                            completionListener.onFinished(id, false, false, active.errorMessage);
+                            return;
+                        }
+                        active.boundWifiNetwork = wifiNetwork;
+                    } else {
+                        active.boundWifiNetwork = null;
+                    }
+                    OkHttpClient client = buildClientForNetwork(network, wifiNetwork);
+
+                    Request.Builder requestBuilder = new Request.Builder().url(url);
+                    if (headers != null) {
+                        Iterator<String> it = headers.keys();
+                        if (it != null) {
+                            while (it.hasNext()) {
+                                String key = it.next();
+                                requestBuilder.addHeader(key, headers.getString(key));
+                            }
+                        }
+                    }
+
+                    Request request = requestBuilder.build();
+                    Call call = client.newCall(request);
+                    synchronized (active) {
+                        if (active.cancelled.get()) {
+                            call.cancel();
+                            finishCancelled(active, null, id, completionListener);
+                            return;
+                        }
+                        active.call = call;
+                    }
+                    active.state = State.RUNNING;
+                    active.bytesWritten = 0L;
+                    active.bytesTotal = 0L;
+                    active.progress = 0f;
+
+                    tempFile = createTempDownloadFile(destinationFile, parent);
+                    active.tempFile = tempFile;
+
+                    try (Response response = call.execute()) {
+                        if (active.cancelled.get()) {
+                            finishCancelled(active, tempFile, id, completionListener);
+                            return;
+                        }
+
+                        if (url.regionMatches(true, 0, "https:", 0, 6) && !response.request().url().isHttps()) {
+                            active.state = State.ERROR;
+                            active.errorMessage = "HTTPS to HTTP redirect is not allowed";
+                            tempFile.delete();
+                            completionListener.onFinished(id, false, false, active.errorMessage);
+                            return;
+                        }
+
+                        int code = response.code();
+                        if (code == 206) {
+                            active.state = State.ERROR;
+                            active.errorMessage = "Partial content (HTTP 206) is not supported";
+                            tempFile.delete();
+                            completionListener.onFinished(id, false, false, active.errorMessage);
+                            return;
+                        }
+
+                        if (!response.isSuccessful()) {
+                            active.state = State.ERROR;
+                            active.errorMessage = "HTTP " + code;
+                            tempFile.delete();
+                            completionListener.onFinished(id, false, false, active.errorMessage);
+                            return;
+                        }
+
+                        ResponseBody body = response.body();
+                        if (body == null) {
+                            active.state = State.ERROR;
+                            active.errorMessage = "Empty response body";
+                            tempFile.delete();
+                            completionListener.onFinished(id, false, false, active.errorMessage);
+                            return;
+                        }
+
+                        long total = DownloadExpectedLength.resolveTotalBytes(response, body, lengthHeader);
+                        active.bytesTotal = total;
+
+                        try (InputStream input = body.byteStream(); FileOutputStream output = new FileOutputStream(tempFile)) {
+                            byte[] buffer = new byte[8192];
+                            long written = 0L;
+                            int read;
+                            int lastReportedPercent = -1;
+                            while ((read = input.read(buffer)) != -1) {
+                                if (active.cancelled.get()) {
+                                    finishCancelled(active, tempFile, id, completionListener);
+                                    return;
+                                }
+                                output.write(buffer, 0, read);
+                                written += read;
+                                active.bytesWritten = written;
+                                if (total > 0) {
+                                    active.progress = Math.min(1f, (float) written / (float) total);
+                                }
+                                int percent = (int) (active.progress * 100f);
+                                if (percent != lastReportedPercent) {
+                                    lastReportedPercent = percent;
+                                    reporter.reportProgress(id, active.progress);
+                                }
+                            }
+                        }
+
+                        if (!commitTempToDestination(active, tempFile, destinationFile)) {
+                            finishCancelled(active, tempFile, id, completionListener);
+                            return;
+                        }
+                        tempFile = null;
+
+                        reporter.reportProgress(id, 1f);
+                        completionListener.onFinished(id, true, false, null);
+                        return;
+                    }
+                } catch (IOException e) {
+                    if (tempFile != null && tempFile.exists()) {
+                        tempFile.delete();
+                    }
+                    active.tempFile = null;
                     if (active.cancelled.get()) {
-                        call.cancel();
-                        finishCancelled(active, null, id, completionListener);
+                        active.state = State.CANCELLED;
+                        completionListener.onFinished(id, false, true, null);
                         return;
                     }
-                    active.call = call;
-                }
-                active.state = State.RUNNING;
-
-                ensureDestinationParentDirectory(destinationFile);
-                File parent = destinationFile.getParentFile();
-
-                tempFile = createTempDownloadFile(destinationFile, parent);
-                active.tempFile = tempFile;
-
-                try (Response response = call.execute()) {
-                    if (active.cancelled.get()) {
-                        finishCancelled(active, tempFile, id, completionListener);
-                        return;
-                    }
-
-                    if (url.regionMatches(true, 0, "https:", 0, 6) && !response.request().url().isHttps()) {
+                    String message = e.getMessage();
+                    if (DownloadConnectionRetry.isFilesystemIoMessage(message)) {
                         active.state = State.ERROR;
-                        active.errorMessage = "HTTPS to HTTP redirect is not allowed";
-                        tempFile.delete();
+                        active.errorMessage = message != null ? message : "Download failed";
                         completionListener.onFinished(id, false, false, active.errorMessage);
                         return;
                     }
-
-                    int code = response.code();
-                    if (code == 206) {
-                        active.state = State.ERROR;
-                        active.errorMessage = "Partial content (HTTP 206) is not supported";
-                        tempFile.delete();
-                        completionListener.onFinished(id, false, false, active.errorMessage);
-                        return;
-                    }
-
-                    if (!response.isSuccessful()) {
-                        active.state = State.ERROR;
-                        active.errorMessage = "HTTP " + code;
-                        tempFile.delete();
-                        completionListener.onFinished(id, false, false, active.errorMessage);
-                        return;
-                    }
-
-                    ResponseBody body = response.body();
-                    if (body == null) {
-                        active.state = State.ERROR;
-                        active.errorMessage = "Empty response body";
-                        tempFile.delete();
-                        completionListener.onFinished(id, false, false, active.errorMessage);
-                        return;
-                    }
-
-                    long total = DownloadExpectedLength.resolveTotalBytes(response, body, lengthHeader);
-                    active.bytesTotal = total;
-
-                    try (InputStream input = body.byteStream(); FileOutputStream output = new FileOutputStream(tempFile)) {
-                        byte[] buffer = new byte[8192];
-                        long written = 0L;
-                        int read;
-                        int lastReportedPercent = -1;
-                        while ((read = input.read(buffer)) != -1) {
+                    if (DownloadConnectionRetry.isRetryableConnectionFailure(e) && retriesRemaining > 0) {
+                        connectionFailureAttempt++;
+                        active.bytesWritten = 0L;
+                        active.bytesTotal = 0L;
+                        active.progress = 0f;
+                        reporter.reportProgress(id, 0f);
+                        long delayMs = DownloadConnectionRetry.delayMillisForAttempt(connectionFailureAttempt);
+                        long slept = 0L;
+                        while (slept < delayMs) {
                             if (active.cancelled.get()) {
-                                finishCancelled(active, tempFile, id, completionListener);
+                                active.state = State.CANCELLED;
+                                completionListener.onFinished(id, false, true, null);
                                 return;
                             }
-                            output.write(buffer, 0, read);
-                            written += read;
-                            active.bytesWritten = written;
-                            if (total > 0) {
-                                active.progress = Math.min(1f, (float) written / (float) total);
+                            long slice = Math.min(200L, delayMs - slept);
+                            try {
+                                Thread.sleep(slice);
+                            } catch (InterruptedException interrupted) {
+                                Thread.currentThread().interrupt();
+                                active.state = State.ERROR;
+                                active.errorMessage = "Download interrupted";
+                                completionListener.onFinished(id, false, false, active.errorMessage);
+                                return;
                             }
-                            int percent = (int) (active.progress * 100f);
-                            if (percent != lastReportedPercent) {
-                                lastReportedPercent = percent;
-                                reporter.reportProgress(id, active.progress);
-                            }
+                            slept += slice;
                         }
+                        retriesRemaining--;
+                        continue attemptLoop;
                     }
-
-                    if (!commitTempToDestination(active, tempFile, destinationFile)) {
-                        finishCancelled(active, tempFile, id, completionListener);
-                        return;
-                    }
-                    tempFile = null;
-
-                    reporter.reportProgress(id, 1f);
-                    completionListener.onFinished(id, true, false, null);
-                }
-            } catch (IOException e) {
-                if (tempFile != null && tempFile.exists()) {
-                    tempFile.delete();
-                }
-                if (active.cancelled.get()) {
-                    active.state = State.CANCELLED;
-                    completionListener.onFinished(id, false, true, null);
-                } else {
                     active.state = State.ERROR;
-                    active.errorMessage = e.getMessage() != null ? e.getMessage() : "Download failed";
+                    active.errorMessage = message != null ? message : "Download failed";
                     completionListener.onFinished(id, false, false, active.errorMessage);
+                    return;
+                } catch (RuntimeException e) {
+                    activeDownloads.remove(id, active);
+                    throw e;
                 }
-            } catch (RuntimeException e) {
-                activeDownloads.remove(id, active);
-                throw e;
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

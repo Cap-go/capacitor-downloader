@@ -39,6 +39,7 @@ import okhttp3.mockwebserver.Dispatcher;
 import okhttp3.mockwebserver.MockResponse;
 import okhttp3.mockwebserver.MockWebServer;
 import okhttp3.mockwebserver.RecordedRequest;
+import okhttp3.mockwebserver.SocketPolicy;
 import okhttp3.tls.HandshakeCertificates;
 import okhttp3.tls.HeldCertificate;
 import org.junit.After;
@@ -51,6 +52,9 @@ public class OkHttpDownloadExecutorTest {
     private MockWebServer server;
     private OkHttpDownloadExecutor executor;
     private File tempDir;
+
+    /** Released when the server receives the slow request a test cancels, so it is cancelled while in flight. */
+    private final CountDownLatch slowRequestReceived = new CountDownLatch(1);
 
     @Before
     public void setUp() throws Exception {
@@ -91,6 +95,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            0,
             "X-Uncompressed-Length",
             (id, progress) -> {
                 progressSamples.add(progress);
@@ -135,6 +140,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            0,
             "X-Uncompressed-Length",
             (id, progress) -> progressSamples.add(progress),
             (id, ok, cancelled, errorMessage) -> finished.countDown()
@@ -168,6 +174,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            0,
             null,
             (id, progress) -> {},
             (id, ok, cancelled, errorMessage) -> {
@@ -203,6 +210,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            0,
             null,
             (id, progress) -> {},
             (id, ok, cancelled, errorMessage) -> {
@@ -329,6 +337,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "wifi-only",
+            0,
             null,
             (id, progress) -> {},
             (id, ok, cancelled, errorMessage) -> {
@@ -363,6 +372,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            0,
             null,
             (id, progress) -> {},
             (id, ok, cancelled, errorMessage) -> {
@@ -417,6 +427,7 @@ public class OkHttpDownloadExecutorTest {
             destination,
             new JSObject(),
             "cellular",
+            0,
             null,
             (id, progress) -> {},
             (id, ok, cancelledFlag, errorMessage) -> {
@@ -432,6 +443,46 @@ public class OkHttpDownloadExecutorTest {
         assertEquals(0, server.getRequestCount());
         assertNotNull(executor.getActive("reuse-id"));
         assertEquals(current, executor.getActive("reuse-id"));
+    }
+
+    @Test(timeout = 20_000)
+    public void retriesOnceAfterConnectionDrop() throws Exception {
+        byte[] payload = "retried".getBytes(StandardCharsets.UTF_8);
+        server.enqueue(
+            new MockResponse()
+                .setBody(new okio.Buffer().write(payload))
+                .addHeader("Content-Length", String.valueOf(payload.length))
+                .setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
+        );
+        server.enqueue(
+            new MockResponse().setBody(new okio.Buffer().write(payload)).addHeader("Content-Length", String.valueOf(payload.length))
+        );
+
+        File destination = new File(tempDir, "retry.bin");
+        CountDownLatch finished = new CountDownLatch(1);
+        AtomicBoolean success = new AtomicBoolean(false);
+
+        OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer("retry-task");
+        assertNotNull(reservation);
+        executor.start(
+            reservation,
+            server.url("/file").toString(),
+            destination,
+            new JSObject(),
+            "cellular",
+            1,
+            null,
+            (id, progress) -> {},
+            (id, ok, cancelled, errorMessage) -> {
+                success.set(ok);
+                finished.countDown();
+            }
+        );
+
+        assertTrue(finished.await(15, TimeUnit.SECONDS));
+        assertTrue(success.get());
+        assertEquals(2, server.getRequestCount());
+        assertEquals(payload.length, destination.length());
     }
 
     @Test(timeout = 5_000)
@@ -501,6 +552,7 @@ public class OkHttpDownloadExecutorTest {
                     destination,
                     new JSObject(),
                     "cellular",
+                    0,
                     null,
                     (id, progress) -> {},
                     (id, ok, cancelled, errorMessage) -> {
@@ -512,7 +564,7 @@ public class OkHttpDownloadExecutorTest {
         }
 
         if (cancelCount > 0) {
-            Thread.sleep(300);
+            assertTrue(slowRequestReceived.await(20, TimeUnit.SECONDS));
             executor.cancel(cancelTaskId, new File(tempDir, cancelTaskId + ".bin"));
         }
 
@@ -579,6 +631,7 @@ public class OkHttpDownloadExecutorTest {
                     destination,
                     new JSObject(),
                     "cellular",
+                    0,
                     null,
                     (id, progress) -> {},
                     (id, ok, cancelled, errorMessage) -> {
@@ -589,7 +642,7 @@ public class OkHttpDownloadExecutorTest {
             });
         }
 
-        Thread.sleep(300);
+        assertTrue(slowRequestReceived.await(20, TimeUnit.SECONDS));
         executor.cancel("mixed-4", new File(tempDir, "mixed-4.bin"));
 
         assertTrue(finished.await(30, TimeUnit.SECONDS));
@@ -625,6 +678,7 @@ public class OkHttpDownloadExecutorTest {
                     destination,
                     new JSObject(),
                     "cellular",
+                    0,
                     null,
                     (id, progress) -> {},
                     (id, ok, cancelled, errorMessage) -> finished.countDown()
@@ -635,7 +689,6 @@ public class OkHttpDownloadExecutorTest {
         assertTrue(slowTransfersHoldingSlots.await(20, TimeUnit.SECONDS));
         assertEquals(0, executor.availableTransferSlots());
 
-        Thread.sleep(200);
         executor.cancel("sat-0", new File(tempDir, "sat-0.bin"));
 
         assertTrue(finished.await(30, TimeUnit.SECONDS));
@@ -654,6 +707,7 @@ public class OkHttpDownloadExecutorTest {
                         return new MockResponse().setResponseCode(404);
                     }
                     if ("/cancel-path-0".equals(path)) {
+                        slowRequestReceived.countDown();
                         return new MockResponse()
                             .setBody(new okio.Buffer().write(payload))
                             .addHeader("Content-Length", String.valueOf(payload.length))
@@ -695,6 +749,7 @@ public class OkHttpDownloadExecutorTest {
                         case "/mixed-3":
                             return new MockResponse().setResponseCode(500);
                         case "/mixed-4":
+                            slowRequestReceived.countDown();
                             return new MockResponse()
                                 .setBody(new okio.Buffer().write(payload))
                                 .addHeader("Content-Length", String.valueOf(payload.length))

@@ -181,6 +181,31 @@ final class DownloadBatchCoordinator {
         persistBatchesImmediatelyLocked()
     }
 
+    /// Call only while the plugin holds `tasksLock` so pause and retry registration stay coordinated.
+    func setPausedReturningChildTaskIds(batchId: String, paused: Bool) -> [String] {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        guard var batch = batches[batchId] else {
+            return []
+        }
+        batch.paused = paused
+        batches[batchId] = batch
+        persistBatchesImmediatelyLocked()
+        return Array(batch.childTaskIds)
+    }
+
+    /// Call only while the plugin holds `tasksLock`.
+    func isActiveChildPaused(taskId: String) -> Bool {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        guard let parts = childPartsUnlocked(for: taskId),
+              let batch = batches[parts.batchId],
+              batch.generation == parts.generation else {
+            return false
+        }
+        return batch.paused
+    }
+
     func overallProgress(batchId: String) -> Float? {
         batchesLock.lock()
         defer { batchesLock.unlock() }

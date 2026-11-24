@@ -380,6 +380,36 @@ final class DownloadCompletedNotificationTextTests: XCTestCase {
     }
 }
 
+final class DownloadFailedNotificationStoreTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var store: DownloadFailedNotificationStore!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: "CapacitorDownloaderFailedNotificationTests")!
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderFailedNotificationTests")
+        store = DownloadFailedNotificationStore(defaults: defaults)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderFailedNotificationTests")
+        super.tearDown()
+    }
+
+    func testSetAndTakeText() {
+        store.setText("  Tap to retry  ", for: "task-1", generation: 1)
+
+        XCTAssertEqual(store.takeText(for: "task-1", generation: 1), "Tap to retry")
+        XCTAssertNil(store.takeText(for: "task-1", generation: 1))
+    }
+
+    func testRemoveText() {
+        store.setText("Try again", for: "task-1", generation: 1)
+        store.removeText(for: "task-1", generation: 1)
+        XCTAssertNil(store.takeText(for: "task-1", generation: 1))
+    }
+}
+
 final class DownloadCompletedNotificationStoreTests: XCTestCase {
     private var defaults: UserDefaults!
     private var store: DownloadCompletedNotificationStore!
@@ -855,5 +885,158 @@ final class DownloadHTTPValidatorTests: XCTestCase {
         XCTAssertFalse(DownloadHTTPValidator.isSuccessfulStatusCode(199))
         XCTAssertFalse(DownloadHTTPValidator.isSuccessfulStatusCode(404))
         XCTAssertFalse(DownloadHTTPValidator.isSuccessfulStatusCode(500))
+    }
+}
+
+final class DownloadRetryBudgetStoreTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private var store: DownloadRetryBudgetStore!
+
+    override func setUp() {
+        super.setUp()
+        defaults = UserDefaults(suiteName: "CapacitorDownloaderRetryBudgetTests")!
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderRetryBudgetTests")
+        store = DownloadRetryBudgetStore(defaults: defaults)
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: "CapacitorDownloaderRetryBudgetTests")
+        super.tearDown()
+    }
+
+    func testSetRemoveAndRestore() {
+        let budget = DownloadConnectionRetry.Budget(remainingRetries: 2, connectionFailureCount: 1)
+        store.setBudget(budget, for: "episode")
+        XCTAssertEqual(store.allBudgets()["episode"]?.remainingRetries, 2)
+        store.removeBudget(for: "episode")
+        XCTAssertNil(store.allBudgets()["episode"])
+    }
+}
+
+final class DownloadForegroundRetryRegistrationTests: XCTestCase {
+    func testPausedBatchRetryReplacementStaysSuspended() {
+        let plugin = CapacitorDownloaderPlugin()
+        guard let childId = plugin.testing_preparePausedBatchChild(
+            batchId: "bundle",
+            fileCount: 1,
+            fileIndex: 0
+        ) else {
+            XCTFail("expected paused batch child")
+            return
+        }
+        plugin.testing_setRetryBudget(downloadId: childId, retries: 2)
+        let session = DownloadBackgroundSessionManager.shared.session(
+            allowsCellularAccess: true,
+            preferForegroundCapable: false
+        )
+        let retryTask = session.downloadTask(with: URL(string: "https://example.com/file.bin")!)
+        retryTask.taskDescription = childId
+        let registered = plugin.testing_registerAndResumeRetryTask(
+            downloadId: childId,
+            retryTask: retryTask,
+            session: session,
+            generation: 1
+        )
+        XCTAssertTrue(registered)
+        XCTAssertTrue(plugin.hasRegisteredTask(id: childId))
+        XCTAssertEqual(retryTask.state, .suspended)
+    }
+
+    func testPausedStandaloneForegroundRetryStaysSuspendedAfterDelay() {
+        let plugin = CapacitorDownloaderPlugin()
+        let downloadId = "standalone-pause"
+        plugin.testing_setRetryBudget(downloadId: downloadId, retries: 2)
+        let session = DownloadBackgroundSessionManager.shared.session(
+            allowsCellularAccess: true,
+            preferForegroundCapable: true
+        )
+        let retryTask = session.downloadTask(with: URL(string: "https://example.com/file.bin")!)
+        retryTask.taskDescription = downloadId
+        XCTAssertTrue(
+            plugin.testing_registerPendingForegroundRetry(
+                downloadId: downloadId,
+                retryTask: retryTask,
+                session: session,
+                generation: 1,
+                delay: 3600
+            )
+        )
+        plugin.testing_setForegroundRetryPaused(downloadId: downloadId)
+        plugin.testing_resumePendingForegroundRetryIfCurrent(downloadId: downloadId, retryTask: retryTask)
+        XCTAssertEqual(retryTask.state, .suspended)
+    }
+
+    func testForegroundRetryStaysRegisteredWhileDelayPending() {
+        let plugin = CapacitorDownloaderPlugin()
+        let downloadId = "episode"
+        plugin.testing_setRetryBudget(downloadId: downloadId, retries: 2)
+        let session = DownloadBackgroundSessionManager.shared.session(
+            allowsCellularAccess: true,
+            preferForegroundCapable: true
+        )
+        let retryTask = session.downloadTask(with: URL(string: "https://example.com/file.bin")!)
+        retryTask.taskDescription = downloadId
+        XCTAssertTrue(
+            plugin.testing_registerPendingForegroundRetry(
+                downloadId: downloadId,
+                retryTask: retryTask,
+                session: session,
+                generation: 1,
+                delay: 3600
+            )
+        )
+        XCTAssertTrue(plugin.hasRegisteredTask(id: downloadId))
+        XCTAssertTrue(plugin.testing_hasPendingForegroundRetry(downloadId: downloadId))
+    }
+
+    func testContinuedProcessingExpiryCancelsPendingForegroundRetry() {
+        let plugin = CapacitorDownloaderPlugin()
+        let downloadId = "episode"
+        plugin.testing_setRetryBudget(downloadId: downloadId, retries: 2)
+        let session = DownloadBackgroundSessionManager.shared.session(
+            allowsCellularAccess: true,
+            preferForegroundCapable: true
+        )
+        let retryTask = session.downloadTask(with: URL(string: "https://example.com/file.bin")!)
+        retryTask.taskDescription = downloadId
+        XCTAssertTrue(
+            plugin.testing_registerPendingForegroundRetry(
+                downloadId: downloadId,
+                retryTask: retryTask,
+                session: session,
+                generation: 1,
+                delay: 3600
+            )
+        )
+        plugin.testing_cancelDownloadFromContinuedProcessingExpiry(downloadId: downloadId)
+        XCTAssertFalse(plugin.hasRegisteredTask(id: downloadId))
+        XCTAssertFalse(plugin.testing_hasPendingForegroundRetry(downloadId: downloadId))
+    }
+}
+
+final class DownloadConnectionRetryTests: XCTestCase {
+    func testRetryableUrlErrorCodes() {
+        let timeout = NSError(domain: NSURLErrorDomain, code: URLError.timedOut.rawValue)
+        let lost = NSError(domain: NSURLErrorDomain, code: URLError.networkConnectionLost.rawValue)
+        let offline = NSError(domain: NSURLErrorDomain, code: URLError.notConnectedToInternet.rawValue)
+        let dns = NSError(domain: NSURLErrorDomain, code: URLError.dnsLookupFailed.rawValue)
+        let http = NSError(domain: NSURLErrorDomain, code: URLError.badURL.rawValue)
+
+        XCTAssertTrue(DownloadConnectionRetry.isRetryableConnectionError(timeout))
+        XCTAssertTrue(DownloadConnectionRetry.isRetryableConnectionError(lost))
+        XCTAssertTrue(DownloadConnectionRetry.isRetryableConnectionError(offline))
+        XCTAssertTrue(DownloadConnectionRetry.isRetryableConnectionError(dns))
+        XCTAssertFalse(DownloadConnectionRetry.isRetryableConnectionError(http))
+    }
+
+    func testDelayScalesWithFailureCount() {
+        XCTAssertEqual(5, DownloadConnectionRetry.delaySeconds(afterConnectionFailureCount: 1))
+        XCTAssertEqual(10, DownloadConnectionRetry.delaySeconds(afterConnectionFailureCount: 2))
+        XCTAssertEqual(DownloadConnectionRetry.maxRetryDelaySeconds, DownloadConnectionRetry.delaySeconds(afterConnectionFailureCount: 121))
+    }
+
+    func testNormalizeRetries() {
+        XCTAssertEqual(0, DownloadConnectionRetry.normalizeRetries(nil))
+        XCTAssertEqual(3, DownloadConnectionRetry.normalizeRetries(3))
     }
 }

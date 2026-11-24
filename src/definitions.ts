@@ -144,6 +144,22 @@ export interface DownloadOptions {
    */
   downloadCompletedNotificationText?: string;
   /**
+   * Optional localized text for a system notification when the download fails.
+   *
+   * When set, iOS and Android may show a local notification after a failed download
+   * if the user granted notification permission. If permission is denied, the failure
+   * still occurs and no notification is shown. Tapping the notification reopens the app.
+   * Uses the same notification slot as `downloadCompletedNotificationText`, so a failure
+   * alert replaces a prior completion alert for the same download id instead of stacking.
+   * Not shown when the download is stopped by the app.
+   *
+   * Omitted or empty means no failure notification from the plugin (use
+   * `downloadFailed` events while the app is open).
+   *
+   * @since 8.9.0
+   */
+  downloadFailedNotificationText?: string;
+  /**
    * HTTP response header that carries the uncompressed byte length when the body is transferred
    * compressed (for example `Content-Encoding: gzip`) and `Content-Length` is missing or wrong.
    *
@@ -175,6 +191,17 @@ export interface DownloadOptions {
    * @since 8.8.0
    */
   iosContinuedProcessingSubtitle?: string;
+  /**
+   * Number of times to retry the file after a connection failure (OkHttp on Android and iOS URLSession).
+   *
+   * Defaults to `0` (no retries). On a retry, the file is downloaded again from the start after a delay of
+   * 5 seconds times the attempt number (5 s, then 10 s, then 15 s, and so on). Progress for the file resets to 0.
+   * HTTP errors, cancellation, and file-system errors are not retried. Android DownloadManager and Web ignore this option.
+   *
+   * @default 0
+   * @since 8.9.0
+   */
+  retries?: number;
   /**
    * Multi-file batches use `files` instead. Omit for single-file downloads.
    *
@@ -275,6 +302,22 @@ export interface DownloadBatchOptions {
    */
   downloadCompletedNotificationText?: string;
   /**
+   * Optional localized text for a system notification when the batch fails.
+   *
+   * When set, iOS and Android may show a local notification after a failed batch download
+   * if the user granted notification permission. If permission is denied, the failure
+   * still occurs and no notification is shown. Tapping the notification reopens the app.
+   * Uses the same notification slot as `downloadCompletedNotificationText`, so a failure
+   * alert replaces a prior completion alert for the same batch id instead of stacking.
+   * Not shown when the batch is stopped by the app.
+   *
+   * Omitted or empty means no failure notification from the plugin (use
+   * `downloadFailed` events while the app is open).
+   *
+   * @since 8.9.0
+   */
+  downloadFailedNotificationText?: string;
+  /**
    * HTTP response header that carries the uncompressed byte length when the body is transferred
    * compressed (for example `Content-Encoding: gzip`) and `Content-Length` is missing or wrong.
    *
@@ -287,6 +330,17 @@ export interface DownloadBatchOptions {
    * @since 8.9.0
    */
   lengthHeader?: string;
+  /**
+   * Number of times to retry each file after a connection failure (iOS URLSession).
+   *
+   * Defaults to `0` (no retries). Applied to every entry in `files`. See {@link DownloadOptions.retries} for delay and
+   * error rules. While one file retries, the batch continues and other files are unaffected. Android DownloadManager
+   * batches ignore this option.
+   *
+   * @default 0
+   * @since 8.9.0
+   */
+  retries?: number;
 }
 
 /**

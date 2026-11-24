@@ -18,7 +18,6 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -37,8 +36,6 @@ import org.json.JSONObject;
 public class CapacitorDownloaderPlugin extends Plugin {
 
     private final String pluginVersion = "8.10.0";
-
-    static final int PROGRESS_QUERY_GROUP_SIZE = 500;
 
     private DownloadManager downloadManager;
     private final Map<String, Long> downloads = new ConcurrentHashMap<>();
@@ -700,6 +697,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
     }
 
+    /**
+     * Removes the downloads one id per call: {@link DownloadManager} turns several ids into one chain of {@code OR} terms,
+     * which SQLite rejects past 1000, so a single call could not remove a large batch.
+     */
     private void removeSystemDownloads(List<Long> downloadIds) {
         for (Long downloadId : downloadIds) {
             if (downloadId == null) {
@@ -973,6 +974,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
         runProgressQuery(id, true, downloadId);
     }
 
+    /**
+     * Polls every file of a batch with one unfiltered {@link DownloadManager} query, which only returns this app's
+     * downloads, and matches the rows by id. Filtering by id would turn the ids into a chain of {@code OR} terms, which
+     * SQLite rejects past 1000.
+     */
     private void startBatchProgressCheck(final String batchId, final DownloadBatchState batchState) {
         final long pollGeneration = batchState.generation;
         final BatchProgressPoll registration = new BatchProgressPoll(pollGeneration);
@@ -996,7 +1002,6 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     return;
                 }
 
-                List<Long> downloadIds = new ArrayList<>();
                 Map<Long, String> systemIdToChild = new HashMap<>();
                 for (String childId : current.ownedChildIds) {
                     DownloadBatchState.BatchIdParts childParts = DownloadBatchState.parseFileTaskId(childId);
@@ -1012,20 +1017,14 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     ) {
                         continue;
                     }
-                    downloadIds.add(systemDownloadId);
                     systemIdToChild.put(systemDownloadId, childId);
                 }
 
-                if (downloadIds.isEmpty()) {
+                if (systemIdToChild.isEmpty()) {
                     if (shouldScheduleBatchPoll(batchId, registration)) {
                         handler.postDelayed(pollHolder[0], 1000);
                     }
                     return;
-                }
-
-                long[] filterIds = new long[downloadIds.size()];
-                for (int index = 0; index < downloadIds.size(); index++) {
-                    filterIds[index] = downloadIds.get(index);
                 }
 
                 ExecutorService executor = downloadManagerExecutor;
@@ -1036,44 +1035,38 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     executor.execute(() -> {
                         List<ProgressSnapshot> snapshots = new ArrayList<>();
                         try {
-                            for (long[] filterIdGroup : progressQueryGroups(filterIds)) {
-                                DownloadManager.Query query = new DownloadManager.Query().setFilterById(filterIdGroup);
-                                try (Cursor cursor = downloadManager.query(query)) {
-                                    if (cursor != null) {
-                                        Set<Long> missingIds = new HashSet<>();
-                                        for (long id : filterIdGroup) {
-                                            missingIds.add(id);
+                            try (Cursor cursor = downloadManager.query(new DownloadManager.Query())) {
+                                if (cursor != null) {
+                                    Set<Long> missingIds = new HashSet<>(systemIdToChild.keySet());
+                                    while (cursor.moveToNext()) {
+                                        long systemDownloadId = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID));
+                                        String childId = systemIdToChild.get(systemDownloadId);
+                                        if (childId == null) {
+                                            continue;
                                         }
-                                        while (cursor.moveToNext()) {
-                                            long systemDownloadId = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID));
-                                            missingIds.remove(systemDownloadId);
-                                            String childId = systemIdToChild.get(systemDownloadId);
-                                            if (childId == null) {
-                                                continue;
-                                            }
-                                            int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-                                            long bytesDownloaded = cursor.getLong(
-                                                cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
-                                            );
-                                            long bytesTotal = cursor.getLong(
-                                                cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
-                                            );
-                                            float progress = bytesTotal > 0 ? (float) bytesDownloaded / bytesTotal : 0f;
-                                            snapshots.add(
-                                                new ProgressSnapshot(
-                                                    childId,
-                                                    systemDownloadId,
-                                                    progress,
-                                                    status,
-                                                    true,
-                                                    bytesDownloaded,
-                                                    bytesTotal
-                                                )
-                                            );
-                                        }
-                                        for (Long missingId : missingIds) {
-                                            snapshots.add(ProgressSnapshot.notFound(systemIdToChild.get(missingId), missingId));
-                                        }
+                                        missingIds.remove(systemDownloadId);
+                                        int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+                                        long bytesDownloaded = cursor.getLong(
+                                            cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
+                                        );
+                                        long bytesTotal = cursor.getLong(
+                                            cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
+                                        );
+                                        float progress = bytesTotal > 0 ? (float) bytesDownloaded / bytesTotal : 0f;
+                                        snapshots.add(
+                                            new ProgressSnapshot(
+                                                childId,
+                                                systemDownloadId,
+                                                progress,
+                                                status,
+                                                true,
+                                                bytesDownloaded,
+                                                bytesTotal
+                                            )
+                                        );
+                                    }
+                                    for (Long missingId : missingIds) {
+                                        snapshots.add(ProgressSnapshot.notFound(systemIdToChild.get(missingId), missingId));
                                     }
                                 }
                             }
@@ -1429,13 +1422,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             systemDownloadIds.add(stoppedChild.downloadId);
                         }
                     }
-                    if (!systemDownloadIds.isEmpty()) {
-                        long[] ids = new long[systemDownloadIds.size()];
-                        for (int i = 0; i < systemDownloadIds.size(); i++) {
-                            ids[i] = systemDownloadIds.get(i);
-                        }
-                        downloadManager.remove(ids);
-                    }
+                    removeSystemDownloads(systemDownloadIds);
                     List<StoppedBatchChild> stillActiveChildren = new ArrayList<>();
                     for (StoppedBatchChild stoppedChild : stoppedChildren) {
                         if (isPendingDownload(stoppedChild.downloadId)) {
@@ -1606,18 +1593,6 @@ public class CapacitorDownloaderPlugin extends Plugin {
             }
             call.reject("Download manager is shutting down", e);
         }
-    }
-
-    /**
-     * Splits the ids of a batch progress poll into groups small enough for one {@link DownloadManager} query.
-     * The query turns the ids into a chain of {@code OR} terms, and SQLite rejects an expression deeper than 1000.
-     */
-    static List<long[]> progressQueryGroups(long[] ids) {
-        List<long[]> groups = new ArrayList<>();
-        for (int start = 0; start < ids.length; start += PROGRESS_QUERY_GROUP_SIZE) {
-            groups.add(Arrays.copyOfRange(ids, start, Math.min(ids.length, start + PROGRESS_QUERY_GROUP_SIZE)));
-        }
-        return groups;
     }
 
     private boolean runOkHttpTransferWork(Runnable work) {

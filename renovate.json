@@ -24,6 +24,13 @@
         "patch"
       ],
       "enabled": false
+    },
+    {
+      "description": "OkHttp 5.5 and later require compileSdk 37; keep OkHttp on 5.4 until the plugin moves to compileSdk 37.",
+      "matchPackageNames": [
+        "com.squareup.okhttp3:**"
+      ],
+      "allowedVersions": "<5.5.0"
     }
   ]
 }

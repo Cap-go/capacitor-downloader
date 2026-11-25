@@ -278,6 +278,51 @@ final class DownloadBatchProgressTests: XCTestCase {
         store.clear()
     }
 
+    func testChildFileStatusSurvivesBatchTeardownAfterSuccess() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let generation = coordinator.startBatch(batchId: "maestro-ios-batch", fileCount: 2, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+        let child0 = coordinator.fileTaskId(batchId: "maestro-ios-batch", generation: generation, fileIndex: 0)
+        let child1 = coordinator.fileTaskId(batchId: "maestro-ios-batch", generation: generation, fileIndex: 1)
+        coordinator.registerChildTask(batchId: "maestro-ios-batch", taskId: child0, fileIndex: 0)
+        coordinator.registerChildTask(batchId: "maestro-ios-batch", taskId: child1, fileIndex: 1)
+
+        XCTAssertEqual(
+            coordinator.markFileCompleted(
+                batchId: "maestro-ios-batch",
+                generation: generation,
+                fileIndex: 0,
+                movedDestination: "/tmp/maestro-ios-a.bin"
+            ),
+            .inProgress(overall: 0.5)
+        )
+        let firstStatus = coordinator.childFileStatus(taskId: child0)
+        XCTAssertEqual(firstStatus?.state, "DONE")
+        XCTAssertEqual(firstStatus?.path, "/tmp/maestro-ios-a.bin")
+
+        XCTAssertEqual(
+            coordinator.markFileCompleted(
+                batchId: "maestro-ios-batch",
+                generation: generation,
+                fileIndex: 1,
+                movedDestination: "/tmp/maestro-ios-b.bin"
+            ),
+            .allSucceeded(batchId: "maestro-ios-batch", generation: generation)
+        )
+        XCTAssertFalse(coordinator.isBatch(batchId: "maestro-ios-batch"))
+
+        let doneAfterTeardown = coordinator.childFileStatus(taskId: child0)
+        XCTAssertEqual(doneAfterTeardown?.state, "DONE")
+        XCTAssertEqual(doneAfterTeardown?.path, "/tmp/maestro-ios-a.bin")
+        let secondAfterTeardown = coordinator.childFileStatus(taskId: child1)
+        XCTAssertEqual(secondAfterTeardown?.state, "DONE")
+        XCTAssertEqual(secondAfterTeardown?.path, "/tmp/maestro-ios-b.bin")
+        store.clear()
+    }
+
     func testBatchCoordinatorAcceptsLargeFileCount() {
         let store = DownloadBatchStore(defaults: batchDefaults)
         let coordinator = DownloadBatchCoordinator(store: store)

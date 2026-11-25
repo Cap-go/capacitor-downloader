@@ -23,6 +23,14 @@ final class DownloadBatchCoordinator {
     /// Batch generations that finished before the download() promise resolved startup.
     private var startupCompletedBeforeResolve: [String: UInt64] = [:]
     private var startupPendingGenerations: [String: UInt64] = [:]
+    private struct FinishedChildStatus {
+        let state: String
+        let progress: Float
+        let path: String?
+    }
+
+    /// Keeps batch child task ids queryable after the in-memory batch row is torn down on success.
+    private var finishedChildStatuses: [String: FinishedChildStatus] = [:]
     private let batchesLock = NSLock()
     private let store: DownloadBatchStore
     private let persistQueue = DispatchQueue(label: "CapacitorDownloader.DownloadBatchCoordinator.persist")
@@ -206,10 +214,13 @@ final class DownloadBatchCoordinator {
         return batches[batchId]?.generation
     }
 
-    /// Status for a batch child task id while the batch row is still present (not after a successful teardown).
-    func childFileStatus(taskId: String) -> (state: String, progress: Float)? {
+    /// Status for a batch child task id, including after the active batch row is removed on full success.
+    func childFileStatus(taskId: String) -> (state: String, progress: Float, path: String?)? {
         batchesLock.lock()
         defer { batchesLock.unlock() }
+        if let finished = finishedChildStatuses[taskId] {
+            return (finished.state, finished.progress, finished.path)
+        }
         guard let parts = parsedBatchChildTaskId(taskId),
               let batch = batches[parts.batchId],
               batch.generation == parts.generation,
@@ -217,17 +228,19 @@ final class DownloadBatchCoordinator {
               parts.fileIndex < batch.fileCount else {
             return nil
         }
+        let savedPath = batch.savedDestinations[parts.fileIndex]
         if batch.failed || batch.cancelled {
-            return ("ERROR", batch.fileProgress[parts.fileIndex])
+            return ("ERROR", batch.fileProgress[parts.fileIndex], savedPath)
         }
         if batch.fileCompleted[parts.fileIndex] {
-            return ("DONE", 1)
+            return ("DONE", 1, savedPath)
         }
         if batch.paused {
-            return ("PAUSED", batch.fileProgress[parts.fileIndex])
+            return ("PAUSED", batch.fileProgress[parts.fileIndex], savedPath)
         }
-        return ("RUNNING", batch.fileProgress[parts.fileIndex])
+        return ("RUNNING", batch.fileProgress[parts.fileIndex], savedPath)
     }
+
 
     func childTaskIds(batchId: String) -> [String] {
         batchesLock.lock()
@@ -477,6 +490,12 @@ final class DownloadBatchCoordinator {
         batch.fileProgress[fileIndex] = 1
         batch.completedCount += 1
         batches[batchId] = batch
+        let childTaskId = fileTaskId(batchId: batchId, generation: generation, fileIndex: fileIndex)
+        finishedChildStatuses[childTaskId] = FinishedChildStatus(
+            state: "DONE",
+            progress: 1,
+            path: batch.savedDestinations[fileIndex]
+        )
         if batch.completedCount >= batch.fileCount {
             let generation = batch.generation
             let fastStartup = startupPendingGenerations[batchId] == generation

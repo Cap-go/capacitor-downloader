@@ -1100,11 +1100,15 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         if let childStatus = batchCoordinator.childFileStatus(taskId: id) {
-            call.resolve([
+            var payload: [String: Any] = [
                 "id": id,
                 "state": childStatus.state,
                 "progress": childStatus.progress
-            ])
+            ]
+            if let path = childStatus.path {
+                payload["path"] = path
+            }
+            call.resolve(payload)
             return
         }
 

@@ -18,6 +18,8 @@ export interface DownloadTask {
   progress: number;
   /** Current state of the download */
   state: 'PENDING' | 'RUNNING' | 'PAUSED' | 'DONE' | 'ERROR';
+  /** Absolute on-disk path when `checkStatus` resolves a finished batch child on iOS */
+  path?: string;
   /**
    * Batch-only metadata returned when `download()` starts a multi-file batch.
    * `checkStatus()` applies to active transfers; after a batch tears down, child ids may return "Task not found".

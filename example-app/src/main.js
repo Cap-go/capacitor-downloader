@@ -507,6 +507,7 @@ function maestroChildCheckStatusLabel(status) {
 async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000) {
   let batchGeneration = null;
   let childTaskIds = null;
+  const checkStatusInFlight = Array.from({ length: fileCount }, () => null);
   const fileStates = Array.from({ length: fileCount }, () => ({
     done: false,
     bytesWritten: 0,
@@ -550,14 +551,10 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
       }
       if (typeof event.fileProgress === 'number' && event.fileProgress >= 1) {
         entry.done = true;
-        void verifyChildDoneStateViaCheckStatus(index).catch((error) => {
-          verificationError = error;
-        });
+        queueVerifyChildDoneStateViaCheckStatus(index);
       } else if (entry.bytesTotal > 0 && entry.bytesWritten >= entry.bytesTotal) {
         entry.done = true;
-        void verifyChildDoneStateViaCheckStatus(index).catch((error) => {
-          verificationError = error;
-        });
+        queueVerifyChildDoneStateViaCheckStatus(index);
       }
     }),
   );
@@ -577,7 +574,15 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
     if (entry.checkStatusCompleted) {
       return;
     }
-    const childId = maestroChildTaskId(batchId, fileIndex, batchGeneration, childTaskIds);
+    const metadataDeadline = Date.now() + MAESTRO_CHILD_CHECKSTATUS_POLL_MS;
+    let childId;
+    while (Date.now() < metadataDeadline) {
+      childId = maestroChildTaskId(batchId, fileIndex, batchGeneration, childTaskIds);
+      if (childId) {
+        break;
+      }
+      await sleep(50);
+    }
     if (!childId) {
       throw new Error(`Missing child task id for file index ${fileIndex}`);
     }
@@ -604,6 +609,23 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
       await sleep(200);
     }
     throw lastReject ?? new Error(`checkStatus(${childId}): timed out waiting for COMPLETED`);
+  };
+
+  const queueVerifyChildDoneStateViaCheckStatus = (fileIndex) => {
+    if (checkStatusInFlight[fileIndex]) {
+      return checkStatusInFlight[fileIndex];
+    }
+    const promise = verifyChildDoneStateViaCheckStatus(fileIndex)
+      .catch((error) => {
+        verificationError = error;
+      })
+      .finally(() => {
+        if (checkStatusInFlight[fileIndex] === promise) {
+          checkStatusInFlight[fileIndex] = null;
+        }
+      });
+    checkStatusInFlight[fileIndex] = promise;
+    return promise;
   };
 
   const verifyAllChildDoneStatesViaCheckStatus = async () => {
@@ -700,6 +722,8 @@ async function runMaestroBatchHarness({
   files,
   downloadOptions,
 }) {
+  output.textContent = '';
+  delete output.dataset.maestroOutcome;
   resetMaestroHarnessDiagnostics();
   let tracking;
   try {

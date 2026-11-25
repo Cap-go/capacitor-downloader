@@ -155,6 +155,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (parts == null || !parts.batchId.equals(batchId)) {
             return null;
         }
+        DownloadBatchState batch = batches.get(batchId);
+        if (batch != null && parts.generation >= 0 && parts.generation != batch.generation) {
+            return null;
+        }
         return parts;
     }
 
@@ -419,7 +423,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         result.put("batchGeneration", batch.generation);
         JSArray childTaskIds = new JSArray();
         for (int index = 0; index < fileCount; index++) {
-            childTaskIds.put(DownloadBatchState.fileTaskId(batch.batchId, index));
+            childTaskIds.put(DownloadBatchState.fileTaskId(batch.batchId, batch.generation, index));
         }
         result.put("childTaskIds", childTaskIds);
     }
@@ -518,7 +522,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             return;
                         }
 
-                        String childId = DownloadBatchState.fileTaskId(batchId, fileRequest.index);
+                        String childId = DownloadBatchState.fileTaskId(batchId, batchState.generation, fileRequest.index);
                         if (downloads.containsKey(childId)) {
                             removeSystemDownloads(enqueuedIds);
                             rollbackBatch(batchState);
@@ -652,7 +656,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         List<OkHttpDownloadExecutor.ActiveDownload> reservations = new ArrayList<>();
         for (BatchFileRequest fileRequest : fileRequests) {
             OkHttpDownloadExecutor.ActiveDownload reservation = okHttpDownloadExecutor.beginTransfer(
-                DownloadBatchState.fileTaskId(batchId, fileRequest.index)
+                DownloadBatchState.fileTaskId(batchId, batch.generation, fileRequest.index)
             );
             if (reservation == null) {
                 for (OkHttpDownloadExecutor.ActiveDownload reserved : reservations) {
@@ -810,7 +814,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
      */
     private void cancelOkHttpBatchFiles(DownloadBatchState batch, List<BatchFileRequest> fileRequests) {
         for (BatchFileRequest fileRequest : fileRequests) {
-            String childId = DownloadBatchState.fileTaskId(batch.batchId, fileRequest.index);
+            String childId = DownloadBatchState.fileTaskId(batch.batchId, batch.generation, fileRequest.index);
             if (!batch.isFileCompleted(fileRequest.index)) {
                 okHttpDownloadExecutor.cancelUnlessCommitted(childId, fileRequest.destinationFile);
             }

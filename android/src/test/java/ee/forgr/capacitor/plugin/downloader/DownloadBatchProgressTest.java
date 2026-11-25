@@ -14,8 +14,9 @@ public class DownloadBatchProgressTest {
 
     @Test
     public void parseFileTaskIdExtractsBatchParts() {
-        DownloadBatchState.BatchIdParts parts = DownloadBatchState.parseFileTaskId("bundle#2");
+        DownloadBatchState.BatchIdParts parts = DownloadBatchState.parseFileTaskId("bundle#3:2");
         assertEquals("bundle", parts.batchId);
+        assertEquals(3L, parts.generation);
         assertEquals(2, parts.fileIndex);
     }
 

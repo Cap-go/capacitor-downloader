@@ -426,9 +426,10 @@ checkStatus(options: { id: string; }) => Promise<DownloadTask>
 
 Check the current status of a download.
 
-Reports active URLSession/OkHttp/DownloadManager work. On iOS, batch child ids also resolve from in-memory
-batch progress while that batch row exists. Completed batches unregister their children, so `checkStatus`
-may reject with "Task not found" after success.
+Reports active URLSession/OkHttp/DownloadManager work. Batch child ids also resolve from in-memory batch
+progress while that batch row exists. On iOS, children that finish successfully keep resolving as `DONE`
+(with `path` when known) for the rest of the process lifetime; only after an app restart can they reject
+with "Task not found".
 
 | Param         | Type                         | Description                               |
 | ------------- | ---------------------------- | ----------------------------------------- |
@@ -547,14 +548,14 @@ Get the plugin version number.
 
 Represents the current state and progress of a download task.
 
-| Prop                  | Type                                                                 | Description                                                                                                                                                                             |
-| --------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`id`**              | <code>string</code>                                                  | Unique identifier for the download task                                                                                                                                                 |
-| **`progress`**        | <code>number</code>                                                  | Download progress from 0 to 1                                                                                                                                                           |
-| **`state`**           | <code>'PENDING' \| 'RUNNING' \| 'PAUSED' \| 'DONE' \| 'ERROR'</code> | Current state of the download                                                                                                                                                           |
-| **`path`**            | <code>string</code>                                                  | Absolute on-disk path when `checkStatus` resolves a finished batch child on iOS                                                                                                         |
-| **`batchGeneration`** | <code>number</code>                                                  | Batch-only metadata returned when `download()` starts a multi-file batch. `checkStatus()` applies to active transfers; after a batch tears down, child ids may return "Task not found". |
-| **`childTaskIds`**    | <code>string[]</code>                                                | Ordered child task ids for batch entries (same order as `files`).                                                                                                                       |
+| Prop                  | Type                                                                 | Description                                                                                                                                              |
+| --------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`id`**              | <code>string</code>                                                  | Unique identifier for the download task                                                                                                                  |
+| **`progress`**        | <code>number</code>                                                  | Download progress from 0 to 1                                                                                                                            |
+| **`state`**           | <code>'PENDING' \| 'RUNNING' \| 'PAUSED' \| 'DONE' \| 'ERROR'</code> | Current state of the download                                                                                                                            |
+| **`path`**            | <code>string</code>                                                  | Absolute on-disk path when `checkStatus` resolves a finished batch child on iOS                                                                          |
+| **`batchGeneration`** | <code>number</code>                                                  | Batch-only metadata returned when `download()` starts a multi-file batch. Pair with `childTaskIds` to correlate `checkStatus()` while a batch is active. |
+| **`childTaskIds`**    | <code>string[]</code>                                                | Ordered child task ids for batch entries (same order as `files`).                                                                                        |
 
 
 #### DownloadOptions

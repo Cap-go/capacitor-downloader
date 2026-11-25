@@ -139,6 +139,9 @@ final class DownloadBatchCoordinator {
 
         let generation = (batchGenerations[batchId] ?? 0) + 1
         batchGenerations[batchId] = generation
+        finishedChildStatuses = finishedChildStatuses.filter { key, _ in
+            !key.hasPrefix("\(batchId)#")
+        }
 
         for index in 0..<fileCount {
             let childId = fileTaskId(batchId: batchId, generation: generation, fileIndex: index)
@@ -229,11 +232,11 @@ final class DownloadBatchCoordinator {
             return nil
         }
         let savedPath = batch.savedDestinations[parts.fileIndex]
-        if batch.failed || batch.cancelled {
-            return ("ERROR", batch.fileProgress[parts.fileIndex], savedPath)
-        }
         if batch.fileCompleted[parts.fileIndex] {
             return ("DONE", 1, savedPath)
+        }
+        if batch.failed || batch.cancelled {
+            return ("ERROR", batch.fileProgress[parts.fileIndex], savedPath)
         }
         if batch.paused {
             return ("PAUSED", batch.fileProgress[parts.fileIndex], savedPath)
@@ -398,6 +401,7 @@ final class DownloadBatchCoordinator {
             childTaskIds: Array(batch.childTaskIds),
             destinations: batch.savedDestinations.values.sorted()
         )
+        clearFinishedChildStatusesLocked(batchId: batchId, generation: batch.generation)
         removeBatchLocked(batchId: batchId, unregisterChildren: false)
         return snapshot
     }
@@ -521,11 +525,19 @@ final class DownloadBatchCoordinator {
         let childTaskIds = Array(batch.childTaskIds)
         batch.failed = true
         batches[batchId] = batch
+        clearFinishedChildStatusesLocked(batchId: batchId, generation: generation)
         persistBatchesImmediatelyLocked()
         return childTaskIds
     }
 
-    enum BatchCompletionState {
+    private func clearFinishedChildStatusesLocked(batchId: String, generation: UInt64) {
+        let prefix = "\(batchId)#\(generation):"
+        finishedChildStatuses = finishedChildStatuses.filter { key, _ in
+            !key.hasPrefix(prefix)
+        }
+    }
+
+    enum BatchCompletionState: Equatable {
         case inProgress(overall: Float)
         case allSucceeded(batchId: String, generation: UInt64)
     }

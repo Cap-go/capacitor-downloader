@@ -670,9 +670,19 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
 
         for (OkHttpDownloadExecutor.ActiveDownload reservation : reservations) {
+            if (downloads.putIfAbsent(reservation.id, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID) != null) {
+                for (OkHttpDownloadExecutor.ActiveDownload reserved : reservations) {
+                    okHttpDownloadExecutor.abandonTransfer(reserved);
+                    batchChildOwners.remove(reserved.id, batchId);
+                    downloads.remove(reserved.id, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID);
+                }
+                batch.ownedChildIds.clear();
+                rollbackBatch(batch);
+                call.reject("Download already exists");
+                return;
+            }
             batchChildOwners.put(reservation.id, batchId);
             batch.trackChildId(reservation.id);
-            downloads.putIfAbsent(reservation.id, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID);
         }
 
         okHttpBatches.put(batchId, new OkHttpBatchOwnership(batch.generation, fileRequests));
@@ -836,6 +846,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
         batch.cancelled.set(true);
         cancelOkHttpBatchFiles(batch, fileRequests);
         okHttpProgressNotifier.finished(batchId, false);
+        for (String childId : new ArrayList<>(batch.ownedChildIds)) {
+            unregisterBatchChild(batchId, childId);
+        }
+        batch.ownedChildIds.clear();
         batches.remove(batchId, batch);
         completedNotificationStore.remove(batchId, batch.generation);
         call.resolve(new JSObject().put("removed", true));
@@ -992,7 +1006,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 continue;
             }
             batchChildOwners.remove(childId, batchId);
-            if (childDownloadId != null && downloads.remove(childId, childDownloadId) && !isPendingDownload(childDownloadId)) {
+            if (
+                childDownloadId != null &&
+                downloads.remove(childId, childDownloadId) &&
+                !isPendingDownload(childDownloadId) &&
+                !isOkHttpDownload(childDownloadId)
+            ) {
                 childDownloadIds.add(childDownloadId);
             }
         }

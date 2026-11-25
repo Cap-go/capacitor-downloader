@@ -701,9 +701,9 @@ async function runMaestroBatchHarness({
   downloadOptions,
 }) {
   resetMaestroHarnessDiagnostics();
-  await withMaestroStepTimeout('clearMaestroBatch', () => clearMaestroBatch(batchId));
   let tracking;
   try {
+    await withMaestroStepTimeout('clearMaestroBatch', () => clearMaestroBatch(batchId));
     tracking = await withMaestroStepTimeout('startMaestroBatchTracking', () =>
       startMaestroBatchTracking(batchId, files.length),
     );

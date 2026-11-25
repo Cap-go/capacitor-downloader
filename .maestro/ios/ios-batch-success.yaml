@@ -5,10 +5,14 @@ appId: app.capgo.downloader
     visible:
       text: '.*maestroReady.*'
     timeout: 60000
-- tapOn: Maestro iOS batch
+- tapOn:
+    text: '^Maestro iOS batch$'
+    waitUntilVisible: true
+    retryTapIfNoChange: true
+    waitToSettleTimeoutMs: 2000
 - extendedWaitUntil:
     visible:
-      text: '.*maestroRunning:.*'
+      text: '.*maestroRunning: maestro-ios-batch.*'
     timeout: 15000
 - extendedWaitUntil:
     visible:

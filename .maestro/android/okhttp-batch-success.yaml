@@ -5,10 +5,14 @@ appId: app.capgo.downloader
     visible:
       text: '.*maestroReady.*'
     timeout: 60000
-- tapOn: Maestro OkHttp batch
+- tapOn:
+    text: '^Maestro OkHttp batch$'
+    waitUntilVisible: true
+    retryTapIfNoChange: true
+    waitToSettleTimeoutMs: 2000
 - extendedWaitUntil:
     visible:
-      text: '.*maestroRunning:.*'
+      text: '.*maestroRunning: maestro-okhttp-batch.*'
     timeout: 15000
 - extendedWaitUntil:
     visible:

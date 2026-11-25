@@ -324,6 +324,16 @@ function resetMaestroHarnessDiagnostics() {
   maestroHarnessDiagnostics.length = 0;
 }
 
+function setMaestroHarnessReady() {
+  output.textContent = 'maestroReady';
+  output.dataset.maestroOutcome = 'ready';
+}
+
+function markMaestroHarnessRunning(flowId) {
+  output.textContent = `maestroRunning: ${flowId}`;
+  output.dataset.maestroOutcome = 'running';
+}
+
 function appendMaestroHarnessDiagnostic(message) {
   maestroHarnessDiagnostics.push(message);
   output.textContent = maestroHarnessDiagnostics.join('\n');
@@ -646,8 +656,7 @@ async function runMaestroBatchHarness({
   files,
   downloadOptions,
 }) {
-  output.textContent = '';
-  delete output.dataset.maestroOutcome;
+  markMaestroHarnessRunning(batchId);
   resetMaestroHarnessDiagnostics();
   await clearMaestroBatch(batchId);
   let tracking;
@@ -700,8 +709,7 @@ async function runMaestroOkHttpBatch() {
 }
 
 async function runMaestroMixedEngineBatch() {
-  output.textContent = '';
-  delete output.dataset.maestroOutcome;
+  markMaestroHarnessRunning('maestro-mixed-batch');
   try {
     const task = await invokeCapacitor('download', () =>
       plugin.download({
@@ -748,8 +756,7 @@ async function runMaestroIosBatch() {
 }
 
 async function runMaestroIosBatchFail() {
-  output.textContent = '';
-  delete output.dataset.maestroOutcome;
+  markMaestroHarnessRunning('maestro-ios-batch-fail');
   try {
     const task = await invokeCapacitor('download', () =>
       plugin.download({
@@ -797,6 +804,7 @@ if (maestroIosBatchFail) {
 }
 
 populateActions();
+setMaestroHarnessReady();
 
 if (Capacitor.isNativePlatform()) {
   CapacitorUpdater.notifyAppReady().catch((error) => {

@@ -56,7 +56,8 @@
     "example:install": "cd example-app && bun install --frozen-lockfile",
     "example:build": "bun run build && cd example-app && bun install --frozen-lockfile && bun run build",
     "changelog:ai": "node scripts/generate-ai-changelog.mjs",
-    "verify:maestro:android": "bash scripts/maestro/run-android-flows.sh"
+    "verify:maestro:android": "bash scripts/maestro/run-android-flows.sh",
+    "verify:maestro:ios": "bash scripts/maestro/run-ios-flows.sh"
   },
   "devDependencies": {
     "@capacitor/android": "^8.0.0",

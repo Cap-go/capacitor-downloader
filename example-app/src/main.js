@@ -297,7 +297,11 @@ runButton.addEventListener('click', async () => {
   }
 });
 
+const MAESTRO_SMALL_FILE_URL =
+  'https://capgo.app/readme-banner.svg?repo=Cap-go/capacitor-downloader';
+
 function setOutputFromMaestro(result, error) {
+  delete output.dataset.maestroOutcome;
   if (error) {
     output.textContent = `Error: ${error?.message ?? error}`;
     output.dataset.maestroOutcome = 'error';
@@ -317,21 +321,169 @@ function setOutputFromMaestro(result, error) {
   output.dataset.maestroOutcome = 'ok';
 }
 
+async function removeMaestroListeners(handles) {
+  await Promise.all(handles.map((handle) => handle.remove().catch(() => undefined)));
+}
+
+async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000) {
+  const fileStates = Array.from({ length: fileCount }, () => ({
+    done: false,
+    bytesWritten: 0,
+    bytesTotal: 0,
+    sizeOnDisk: 0,
+  }));
+  let downloadCompleted = false;
+  let failedEvent;
+  const handles = [];
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  handles.push(
+    await plugin.addListener('downloadFailed', (event) => {
+      if (event.id === batchId || (typeof event.id === 'string' && event.id.startsWith(`${batchId}#`))) {
+        failedEvent = event;
+      }
+    }),
+  );
+  handles.push(
+    await plugin.addListener('downloadProgress', (event) => {
+      if (event.id !== batchId || typeof event.fileIndex !== 'number') {
+        return;
+      }
+      const index = event.fileIndex;
+      if (index < 0 || index >= fileCount) {
+        return;
+      }
+      const entry = fileStates[index];
+      if (typeof event.bytesWritten === 'number') {
+        entry.bytesWritten = event.bytesWritten;
+      }
+      if (typeof event.bytesTotal === 'number' && event.bytesTotal > 0) {
+        entry.bytesTotal = event.bytesTotal;
+      }
+      if (event.fileProgress >= 1) {
+        entry.done = true;
+      }
+    }),
+  );
+  handles.push(
+    await plugin.addListener('downloadCompleted', (event) => {
+      if (event.id === batchId) {
+        downloadCompleted = true;
+      }
+    }),
+  );
+
+  const verifyChildDoneStates = async () => {
+    for (let index = 0; index < fileCount; index += 1) {
+      if (fileStates[index].done) {
+        continue;
+      }
+      const childId = `${batchId}#${index}`;
+      try {
+        const status = await plugin.checkStatus({ id: childId });
+        const isDone = status.state === 'DONE' || status.status === 8;
+        if (isDone) {
+          fileStates[index].done = true;
+        }
+      } catch {
+        // Child may be unregistered after the batch completes.
+      }
+    }
+  };
+
+  return {
+    async waitForCompletion() {
+      const deadline = Date.now() + timeoutMs;
+      try {
+        while (Date.now() < deadline) {
+          if (failedEvent) {
+            throw new Error(failedEvent.error ?? `Download failed for ${failedEvent.id}`);
+          }
+          if (downloadCompleted) {
+            await verifyChildDoneStates();
+            const allDone = fileStates.every((entry) => entry.done);
+            const allSized = fileStates.every((entry) => entry.bytesTotal > 0 && entry.bytesWritten > 0);
+            if (allDone && allSized) {
+              for (let index = 0; index < fileStates.length; index += 1) {
+                const entry = fileStates[index];
+                entry.sizeOnDisk = entry.bytesWritten;
+              }
+              return { downloadCompleted: true, allFilesDone: true, files: fileStates };
+            }
+          }
+          await sleep(250);
+        }
+        throw new Error('Timed out waiting for batch downloadCompleted and per-file DONE');
+      } finally {
+        await removeMaestroListeners(handles);
+      }
+    },
+  };
+}
+
+function formatMaestroBatchSuccess(task, completion, files) {
+  return {
+    maestroBatchComplete: true,
+    downloadCompleted: completion.downloadCompleted,
+    allFilesDone: completion.allFilesDone,
+    enqueue: task,
+    files: completion.files.map((file, index) => ({
+      index,
+      destination: files[index].destination,
+      done: file.done,
+      bytesWritten: file.bytesWritten,
+      bytesTotal: file.bytesTotal,
+      sizeOnDisk: file.sizeOnDisk,
+    })),
+  };
+}
+
 async function runMaestroOkHttpBatch() {
-  output.dataset.maestroOutcome = 'pending';
+  const batchId = 'maestro-okhttp-batch';
+  const files = [
+    {
+      url: MAESTRO_SMALL_FILE_URL,
+      destination: 'files/maestro-a.bin',
+    },
+    {
+      url: MAESTRO_SMALL_FILE_URL,
+      destination: 'files/maestro-b.bin',
+    },
+  ];
+  output.textContent = '';
+  delete output.dataset.maestroOutcome;
+  try {
+    const tracking = await startMaestroBatchTracking(batchId, files.length);
+    const task = await plugin.download({
+      id: batchId,
+      androidHttpEngine: 'okhttp',
+      notification: 'hidden',
+      files,
+    });
+    const completion = await tracking.waitForCompletion();
+    setOutputFromMaestro(formatMaestroBatchSuccess(task, completion, files));
+  } catch (error) {
+    setOutputFromMaestro(undefined, error);
+  }
+}
+
+async function runMaestroMixedEngineBatch() {
+  output.textContent = '';
+  delete output.dataset.maestroOutcome;
   try {
     const task = await plugin.download({
-      id: 'maestro-okhttp-batch',
-      androidHttpEngine: 'okhttp',
+      id: 'maestro-mixed-batch',
+      androidHttpEngine: 'auto',
       notification: 'hidden',
       files: [
         {
-          url: 'https://httpbin.org/bytes/128',
-          destination: 'files/maestro-a.bin',
+          url: MAESTRO_SMALL_FILE_URL,
+          destination: 'files/maestro-mixed-a.bin',
         },
         {
-          url: 'https://httpbin.org/bytes/128',
-          destination: 'files/maestro-b.bin',
+          url: MAESTRO_SMALL_FILE_URL,
+          destination: 'offline/maestro-mixed-b.bin',
         },
       ],
     });
@@ -341,21 +493,47 @@ async function runMaestroOkHttpBatch() {
   }
 }
 
-async function runMaestroMixedEngineBatch() {
-  output.dataset.maestroOutcome = 'pending';
+async function runMaestroIosBatch() {
+  const batchId = 'maestro-ios-batch';
+  const files = [
+    {
+      url: MAESTRO_SMALL_FILE_URL,
+      destination: 'files/maestro-ios-a.bin',
+    },
+    {
+      url: MAESTRO_SMALL_FILE_URL,
+      destination: 'files/maestro-ios-b.bin',
+    },
+  ];
+  output.textContent = '';
+  delete output.dataset.maestroOutcome;
+  try {
+    const tracking = await startMaestroBatchTracking(batchId, files.length);
+    const task = await plugin.download({
+      id: batchId,
+      notification: 'hidden',
+      files,
+    });
+    const completion = await tracking.waitForCompletion();
+    setOutputFromMaestro(formatMaestroBatchSuccess(task, completion, files));
+  } catch (error) {
+    setOutputFromMaestro(undefined, error);
+  }
+}
+
+async function runMaestroIosBatchFail() {
+  output.textContent = '';
+  delete output.dataset.maestroOutcome;
   try {
     const task = await plugin.download({
-      id: 'maestro-mixed-batch',
-      androidHttpEngine: 'auto',
+      id: 'maestro-ios-batch-fail',
+      url: 'https://example.com/only-single',
+      destination: 'files/maestro-ios-single.bin',
       notification: 'hidden',
       files: [
         {
-          url: 'https://httpbin.org/bytes/64',
-          destination: 'files/maestro-mixed-a.bin',
-        },
-        {
-          url: 'https://httpbin.org/bytes/64',
-          destination: 'offline/maestro-mixed-b.bin',
+          url: MAESTRO_SMALL_FILE_URL,
+          destination: 'files/maestro-ios-batch-only.bin',
         },
       ],
     });
@@ -367,6 +545,8 @@ async function runMaestroMixedEngineBatch() {
 
 const maestroOkHttpBatch = document.getElementById('maestro-okhttp-batch');
 const maestroMixedBatchFail = document.getElementById('maestro-mixed-batch-fail');
+const maestroIosBatch = document.getElementById('maestro-ios-batch');
+const maestroIosBatchFail = document.getElementById('maestro-ios-batch-fail');
 if (maestroOkHttpBatch) {
   maestroOkHttpBatch.addEventListener('click', () => {
     void runMaestroOkHttpBatch();
@@ -375,6 +555,16 @@ if (maestroOkHttpBatch) {
 if (maestroMixedBatchFail) {
   maestroMixedBatchFail.addEventListener('click', () => {
     void runMaestroMixedEngineBatch();
+  });
+}
+if (maestroIosBatch) {
+  maestroIosBatch.addEventListener('click', () => {
+    void runMaestroIosBatch();
+  });
+}
+if (maestroIosBatchFail) {
+  maestroIosBatchFail.addEventListener('click', () => {
+    void runMaestroIosBatchFail();
   });
 }
 

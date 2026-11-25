@@ -521,7 +521,15 @@ export interface CapacitorDownloaderPlugin {
    */
   addListener(
     eventName: 'downloadFailed',
-    listenerFunc: (error: { id: string; error: string; fileIndex?: number }) => void,
+    listenerFunc: (error: {
+      id: string;
+      error: string;
+      fileIndex?: number;
+      /** NSError code on iOS when available */
+      errorCode?: number;
+      /** NSError domain on iOS when available */
+      errorDomain?: string;
+    }) => void,
   ): Promise<PluginListenerHandle>;
 
   /**

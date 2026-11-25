@@ -499,16 +499,16 @@ Fired when a download finishes successfully.
 ### addListener('downloadFailed', ...)
 
 ```typescript
-addListener(eventName: 'downloadFailed', listenerFunc: (error: { id: string; error: string; fileIndex?: number | undefined; }) => void) => Promise<PluginListenerHandle>
+addListener(eventName: 'downloadFailed', listenerFunc: (error: { id: string; error: string; fileIndex?: number | undefined; errorCode?: number | undefined; errorDomain?: string | undefined; }) => void) => Promise<PluginListenerHandle>
 ```
 
 Listen for download failures.
 Fired when a download encounters an error.
 
-| Param              | Type                                                                                | Description                            |
-| ------------------ | ----------------------------------------------------------------------------------- | -------------------------------------- |
-| **`eventName`**    | <code>'downloadFailed'</code>                                                       | - Must be 'downloadFailed'             |
-| **`listenerFunc`** | <code>(error: { id: string; error: string; fileIndex?: number; }) =&gt; void</code> | - Callback receiving error information |
+| Param              | Type                                                                                                                          | Description                            |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| **`eventName`**    | <code>'downloadFailed'</code>                                                                                                 | - Must be 'downloadFailed'             |
+| **`listenerFunc`** | <code>(error: { id: string; error: string; fileIndex?: number; errorCode?: number; errorDomain?: string; }) =&gt; void</code> | - Callback receiving error information |
 
 **Returns:** <code>Promise&lt;<a href="#pluginlistenerhandle">PluginListenerHandle</a>&gt;</code>
 

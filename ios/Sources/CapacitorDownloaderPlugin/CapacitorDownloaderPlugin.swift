@@ -975,7 +975,31 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         return Set(taskGenerations.keys)
     }
 
-    private func failBatch(batchId: String, generation: UInt64, fileIndex: Int?, error: String) {
+    private func downloadFailedEventData(
+        id: String,
+        message: String,
+        underlying: Error? = nil,
+        fileIndex: Int? = nil
+    ) -> [String: Any] {
+        var data: [String: Any] = ["id": id, "error": message]
+        if let fileIndex {
+            data["fileIndex"] = fileIndex
+        }
+        if let underlying {
+            let nsError = underlying as NSError
+            data["errorCode"] = nsError.code
+            data["errorDomain"] = nsError.domain
+        }
+        return data
+    }
+
+    private func failBatch(
+        batchId: String,
+        generation: UInt64,
+        fileIndex: Int?,
+        error: String,
+        underlying: Error? = nil
+    ) {
         guard let childTaskIds = batchCoordinator.beginFailure(batchId: batchId, generation: generation) else {
             return
         }
@@ -984,11 +1008,10 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         _ = batchCoordinator.removeBatch(batchId: batchId, generation: generation, unregisterChildren: false)
         DownloadCompletedNotificationStore.shared.removeText(for: batchId, generation: generation)
         presentFailedDownloadNotificationIfStored(downloadId: batchId, generation: generation)
-        var data: [String: Any] = ["id": batchId, "error": error]
-        if let fileIndex {
-            data["fileIndex"] = fileIndex
-        }
-        notifyListeners("downloadFailed", data: data)
+        notifyListeners(
+            "downloadFailed",
+            data: downloadFailedEventData(id: batchId, message: error, underlying: underlying, fileIndex: fileIndex)
+        )
     }
 
     private func presentFailedDownloadNotificationIfStored(downloadId: String, generation: UInt64?) {
@@ -1333,14 +1356,18 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     batchId: batchParts.batchId,
                     generation: batchParts.generation,
                     fileIndex: batchParts.fileIndex,
-                    error: error.localizedDescription
+                    error: error.localizedDescription,
+                    underlying: error
                 )
             } else if !batchCoordinator.isOwnedBatchChild(taskId: id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                     presentFailedDownloadNotificationIfStored(downloadId: id, generation: generation)
                 }
-                notifyListeners("downloadFailed", data: ["id": id, "error": error.localizedDescription])
+                notifyListeners(
+                    "downloadFailed",
+                    data: downloadFailedEventData(id: id, message: error.localizedDescription, underlying: error)
+                )
                 clearRetryBudget(for: id)
                 markContinuedProcessingFinished(downloadId: id, success: false)
             }
@@ -1389,14 +1416,18 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     batchId: batchParts.batchId,
                     generation: batchParts.generation,
                     fileIndex: batchParts.fileIndex,
-                    error: error.localizedDescription
+                    error: error.localizedDescription,
+                    underlying: error
                 )
             } else if !batchCoordinator.isOwnedBatchChild(taskId: id) {
                 if let generation {
                     DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                     presentFailedDownloadNotificationIfStored(downloadId: id, generation: generation)
                 }
-                notifyListeners("downloadFailed", data: ["id": id, "error": error.localizedDescription])
+                notifyListeners(
+                    "downloadFailed",
+                    data: downloadFailedEventData(id: id, message: error.localizedDescription, underlying: error)
+                )
                 markContinuedProcessingFinished(downloadId: id, success: false)
             }
         } else {

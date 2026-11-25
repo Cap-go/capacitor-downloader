@@ -153,6 +153,7 @@ const formContainer = document.getElementById('action-form');
 const descriptionBox = document.getElementById('action-description');
 const runButton = document.getElementById('run-action');
 const output = document.getElementById('plugin-output');
+const maestroHarnessDiagnostics = [];
 
 function buildForm(action) {
   formContainer.innerHTML = '';
@@ -319,10 +320,41 @@ async function invokeCapacitor(scope, fn) {
   }
 }
 
+function resetMaestroHarnessDiagnostics() {
+  maestroHarnessDiagnostics.length = 0;
+}
+
+function appendMaestroHarnessDiagnostic(message) {
+  maestroHarnessDiagnostics.push(message);
+  output.textContent = maestroHarnessDiagnostics.join('\n');
+  output.dataset.maestroOutcome = 'error';
+}
+
+function formatMaestroDownloadFailedEvent(event) {
+  const parts = [];
+  if (event?.error) {
+    parts.push(event.error);
+  }
+  if (event?.errorDomain) {
+    parts.push(`domain=${event.errorDomain}`);
+  }
+  if (typeof event?.errorCode === 'number') {
+    parts.push(`code=${event.errorCode}`);
+  }
+  if (typeof event?.fileIndex === 'number') {
+    parts.push(`fileIndex=${event.fileIndex}`);
+  }
+  if (event?.id) {
+    parts.push(`id=${event.id}`);
+  }
+  return parts.length ? parts.join(' | ') : 'downloadFailed';
+}
+
 function setOutputFromMaestro(result, error) {
   delete output.dataset.maestroOutcome;
   if (error) {
-    output.textContent = `Error: ${pluginErrorMessage(error)}`;
+    const diagnosticLines = maestroHarnessDiagnostics.length ? `${maestroHarnessDiagnostics.join('\n')}\n` : '';
+    output.textContent = `${diagnosticLines}Error: ${pluginErrorMessage(error)}`;
     output.dataset.maestroOutcome = 'error';
     return;
   }
@@ -341,7 +373,19 @@ function setOutputFromMaestro(result, error) {
 }
 
 async function removeMaestroListeners(handles) {
-  await Promise.all(handles.map((handle) => handle.remove().catch(() => undefined)));
+  const failures = [];
+  for (const handle of handles) {
+    try {
+      await handle.remove();
+    } catch (error) {
+      const msg = pluginErrorMessage(error);
+      failures.push(msg);
+      appendMaestroHarnessDiagnostic(`removeMaestroListeners: ${msg}`);
+    }
+  }
+  if (failures.length) {
+    throw new Error(`removeMaestroListeners: ${failures.join('; ')}`);
+  }
 }
 
 async function resolveFileInfoPath(destination) {
@@ -376,9 +420,10 @@ async function fillSizesOnDisk(destinations, fileStates) {
 
 async function clearMaestroBatch(batchId) {
   try {
-    await plugin.stop({ id: batchId });
+    await invokeCapacitor(`stop(${batchId})`, () => plugin.stop({ id: batchId }));
   } catch (error) {
-    console.warn(`clearMaestroBatch stop(${batchId}): ${pluginErrorMessage(error)}`);
+    appendMaestroHarnessDiagnostic(`clearMaestroBatch stop(${batchId}): ${pluginErrorMessage(error)}`);
+    throw error;
   }
 }
 
@@ -402,13 +447,6 @@ function applyMaestroBatchEnqueueMetadata(task, tracking) {
   if (Array.isArray(task?.childTaskIds) && task.childTaskIds.length) {
     tracking.setChildTaskIds(task.childTaskIds);
   }
-}
-
-function markMaestroChildCompletedFromEvent(entry, source) {
-  entry.checkStatusCompleted = true;
-  entry.checkStatusLabel = 'COMPLETED';
-  entry.checkStatusState = 'DONE';
-  entry.checkStatusSource = source;
 }
 
 function isMaestroChildCheckStatusCompleted(status) {
@@ -439,6 +477,7 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
   }));
   let downloadCompleted = false;
   let failedEvent;
+  let verificationError;
   const handles = [];
 
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -468,10 +507,14 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
       }
       if (typeof event.fileProgress === 'number' && event.fileProgress >= 1) {
         entry.done = true;
-        void verifyChildDoneStateViaCheckStatus(index, 'downloadProgress');
+        void verifyChildDoneStateViaCheckStatus(index).catch((error) => {
+          verificationError = error;
+        });
       } else if (entry.bytesTotal > 0 && entry.bytesWritten >= entry.bytesTotal) {
         entry.done = true;
-        void verifyChildDoneStateViaCheckStatus(index, 'downloadProgress');
+        void verifyChildDoneStateViaCheckStatus(index).catch((error) => {
+          verificationError = error;
+        });
       }
     }),
   );
@@ -486,48 +529,34 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
     }),
   );
 
-  const verifyChildDoneStateViaCheckStatus = async (fileIndex, progressSource) => {
+  const verifyChildDoneStateViaCheckStatus = async (fileIndex) => {
     const entry = fileStates[fileIndex];
     if (entry.checkStatusCompleted) {
-      return true;
+      return;
     }
     const childId = maestroChildTaskId(batchId, fileIndex, batchGeneration, childTaskIds);
     if (!childId) {
-      if (entry.done && progressSource) {
-        markMaestroChildCompletedFromEvent(entry, progressSource);
-        return true;
-      }
-      return false;
+      throw new Error(`Missing child task id for file index ${fileIndex}`);
     }
     entry.childTaskId = childId;
-    try {
-      const status = await invokeCapacitor('checkStatus', () => plugin.checkStatus({ id: childId }));
-      entry.checkStatusState = status.state ?? null;
-      entry.checkStatusLabel = maestroChildCheckStatusLabel(status);
-      entry.checkStatusSource = 'checkStatus';
-      if (isMaestroChildCheckStatusCompleted(status)) {
-        entry.checkStatusCompleted = true;
-        entry.done = true;
-        return true;
-      }
-    } catch (error) {
-      entry.checkStatusLabel = pluginErrorMessage(error);
-      if (entry.done && progressSource) {
-        markMaestroChildCompletedFromEvent(entry, progressSource);
-        return true;
-      }
+    const status = await invokeCapacitor('checkStatus', () => plugin.checkStatus({ id: childId }));
+    entry.checkStatusState = status.state ?? null;
+    entry.checkStatusLabel = maestroChildCheckStatusLabel(status);
+    entry.checkStatusSource = 'checkStatus';
+    if (!isMaestroChildCheckStatusCompleted(status)) {
+      throw new Error(
+        `checkStatus(${childId}): not completed (state=${String(status.state)}, status=${String(status.status)})`,
+      );
     }
-    return false;
+    entry.checkStatusCompleted = true;
+    entry.done = true;
   };
 
   const verifyAllChildDoneStatesViaCheckStatus = async () => {
-    let verified = 0;
     for (let index = 0; index < fileCount; index += 1) {
-      if (await verifyChildDoneStateViaCheckStatus(index, 'downloadCompleted')) {
-        verified += 1;
-      }
+      await verifyChildDoneStateViaCheckStatus(index);
     }
-    return verified === fileCount;
+    return true;
   };
 
   let disposed = false;
@@ -552,7 +581,10 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
       try {
         while (Date.now() < deadline) {
           if (failedEvent) {
-            throw new Error(failedEvent.error || `Download failed for ${failedEvent.id}`);
+            throw new Error(formatMaestroDownloadFailedEvent(failedEvent));
+          }
+          if (verificationError) {
+            throw verificationError;
           }
           if (downloadCompleted) {
             const allChildrenCompleted = await verifyAllChildDoneStatesViaCheckStatus();
@@ -616,6 +648,7 @@ async function runMaestroBatchHarness({
 }) {
   output.textContent = '';
   delete output.dataset.maestroOutcome;
+  resetMaestroHarnessDiagnostics();
   await clearMaestroBatch(batchId);
   let tracking;
   try {

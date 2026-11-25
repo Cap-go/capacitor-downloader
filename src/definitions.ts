@@ -18,6 +18,13 @@ export interface DownloadTask {
   progress: number;
   /** Current state of the download */
   state: 'PENDING' | 'RUNNING' | 'PAUSED' | 'DONE' | 'ERROR';
+  /**
+   * Batch-only metadata returned when `download()` starts a multi-file batch.
+   * `checkStatus()` applies to active transfers; after a batch tears down, child ids may return "Task not found".
+   */
+  batchGeneration?: number;
+  /** Ordered child task ids for batch entries (same order as `files`). */
+  childTaskIds?: string[];
 }
 
 /**
@@ -441,6 +448,10 @@ export interface CapacitorDownloaderPlugin {
 
   /**
    * Check the current status of a download.
+   *
+   * Reports active URLSession/OkHttp/DownloadManager work. On iOS, batch child ids also resolve from in-memory
+   * batch progress while that batch row exists. Completed batches unregister their children, so `checkStatus`
+   * may reject with "Task not found" after success.
    *
    * @param options - Options containing the download task ID
    * @returns Promise with current download task status

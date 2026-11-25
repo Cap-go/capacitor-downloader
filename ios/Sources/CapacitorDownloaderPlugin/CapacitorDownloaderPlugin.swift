@@ -812,7 +812,9 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.resolve([
                     "id": batchId,
                     "state": paused ? "PAUSED" : "RUNNING",
-                    "progress": 0
+                    "progress": 0,
+                    "batchGeneration": generation,
+                    "childTaskIds": childRegistrations.map(\.taskId)
                 ])
             }
         }
@@ -1051,30 +1053,39 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
-        guard let task = getTask(for: id) else {
-            call.reject("Task not found")
+        if let task = getTask(for: id) {
+            let state: String
+            switch task.state {
+            case .running:
+                state = "RUNNING"
+            case .suspended:
+                state = "PAUSED"
+            case .canceling:
+                state = "ERROR"
+            case .completed:
+                state = "DONE"
+            @unknown default:
+                state = "PENDING"
+            }
+
+            call.resolve([
+                "id": id,
+                "state": state,
+                "progress": task.progress.fractionCompleted
+            ])
             return
         }
 
-        let state: String
-        switch task.state {
-        case .running:
-            state = "RUNNING"
-        case .suspended:
-            state = "PAUSED"
-        case .canceling:
-            state = "ERROR"
-        case .completed:
-            state = "DONE"
-        @unknown default:
-            state = "PENDING"
+        if let childStatus = batchCoordinator.childFileStatus(taskId: id) {
+            call.resolve([
+                "id": id,
+                "state": childStatus.state,
+                "progress": childStatus.progress
+            ])
+            return
         }
 
-        call.resolve([
-            "id": id,
-            "state": state,
-            "progress": task.progress.fractionCompleted
-        ])
+        call.reject("Task not found")
     }
 
     @objc func getFileInfo(_ call: CAPPluginCall) {

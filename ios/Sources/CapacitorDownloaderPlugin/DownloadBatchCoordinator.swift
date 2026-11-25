@@ -206,6 +206,29 @@ final class DownloadBatchCoordinator {
         return batches[batchId]?.generation
     }
 
+    /// Status for a batch child task id while the batch row is still present (not after a successful teardown).
+    func childFileStatus(taskId: String) -> (state: String, progress: Float)? {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        guard let parts = parsedBatchChildTaskId(taskId),
+              let batch = batches[parts.batchId],
+              batch.generation == parts.generation,
+              parts.fileIndex >= 0,
+              parts.fileIndex < batch.fileCount else {
+            return nil
+        }
+        if batch.failed || batch.cancelled {
+            return ("ERROR", batch.fileProgress[parts.fileIndex])
+        }
+        if batch.fileCompleted[parts.fileIndex] {
+            return ("DONE", 1)
+        }
+        if batch.paused {
+            return ("PAUSED", batch.fileProgress[parts.fileIndex])
+        }
+        return ("RUNNING", batch.fileProgress[parts.fileIndex])
+    }
+
     func childTaskIds(batchId: String) -> [String] {
         batchesLock.lock()
         defer { batchesLock.unlock() }

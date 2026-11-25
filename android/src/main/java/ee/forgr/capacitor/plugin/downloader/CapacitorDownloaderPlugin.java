@@ -415,6 +415,15 @@ public class CapacitorDownloaderPlugin extends Plugin {
         );
     }
 
+    private void putBatchEnqueueMetadata(JSObject result, DownloadBatchState batch, int fileCount) {
+        result.put("batchGeneration", batch.generation);
+        JSArray childTaskIds = new JSArray();
+        for (int index = 0; index < fileCount; index++) {
+            childTaskIds.put(DownloadBatchState.fileTaskId(batch.batchId, index));
+        }
+        result.put("childTaskIds", childTaskIds);
+    }
+
     private void downloadBatch(PluginCall call, String batchId, JSArray files) {
         if (isDownloadIdTaken(batchId)) {
             call.reject("Download already exists");
@@ -592,6 +601,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     result.put("id", batchId);
                     result.put("state", "RUNNING");
                     result.put("progress", 0);
+                    putBatchEnqueueMetadata(result, batchState, fileRequests.size());
                     call.resolve(result);
                 } catch (RuntimeException e) {
                     removeSystemDownloads(enqueuedIds);
@@ -663,6 +673,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         result.put("id", batchId);
         result.put("state", "RUNNING");
         result.put("progress", 0);
+        putBatchEnqueueMetadata(result, batch, fileRequests.size());
         call.resolve(result);
 
         for (int i = 0; i < fileRequests.size(); i++) {

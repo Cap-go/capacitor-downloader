@@ -377,12 +377,15 @@ async function fillSizesOnDisk(destinations, fileStates) {
 async function clearMaestroBatch(batchId) {
   try {
     await plugin.stop({ id: batchId });
-  } catch {
-    // Ignore stale stop.
+  } catch (error) {
+    console.warn(`clearMaestroBatch stop(${batchId}): ${pluginErrorMessage(error)}`);
   }
 }
 
-function maestroChildTaskId(batchId, fileIndex, batchGeneration) {
+function maestroChildTaskId(batchId, fileIndex, batchGeneration, childTaskIds) {
+  if (Array.isArray(childTaskIds) && childTaskIds[fileIndex]) {
+    return childTaskIds[fileIndex];
+  }
   if (Capacitor.getPlatform() === 'ios') {
     if (batchGeneration == null) {
       return null;
@@ -390,6 +393,22 @@ function maestroChildTaskId(batchId, fileIndex, batchGeneration) {
     return `${batchId}#${batchGeneration}:${fileIndex}`;
   }
   return `${batchId}#${fileIndex}`;
+}
+
+function applyMaestroBatchEnqueueMetadata(task, tracking) {
+  if (typeof task?.batchGeneration === 'number') {
+    tracking.setBatchGeneration(task.batchGeneration);
+  }
+  if (Array.isArray(task?.childTaskIds) && task.childTaskIds.length) {
+    tracking.setChildTaskIds(task.childTaskIds);
+  }
+}
+
+function markMaestroChildCompletedFromEvent(entry, source) {
+  entry.checkStatusCompleted = true;
+  entry.checkStatusLabel = 'COMPLETED';
+  entry.checkStatusState = 'DONE';
+  entry.checkStatusSource = source;
 }
 
 function isMaestroChildCheckStatusCompleted(status) {
@@ -404,21 +423,9 @@ function maestroChildCheckStatusLabel(status) {
   return isMaestroChildCheckStatusCompleted(status) ? 'COMPLETED' : status.state ?? `status=${status.status}`;
 }
 
-async function discoverIosBatchGeneration(batchId, fileCount) {
-  for (let generation = 1; generation <= 64; generation += 1) {
-    const childId = `${batchId}#${generation}:0`;
-    try {
-      await invokeCapacitor('checkStatus', () => plugin.checkStatus({ id: childId }));
-      return generation;
-    } catch {
-      // Try the next generation.
-    }
-  }
-  throw new Error(`Could not resolve iOS batch generation for ${batchId} (${fileCount} files)`);
-}
-
 async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000) {
   let batchGeneration = null;
+  let childTaskIds = null;
   const fileStates = Array.from({ length: fileCount }, () => ({
     done: false,
     bytesWritten: 0,
@@ -428,6 +435,7 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
     checkStatusState: null,
     checkStatusLabel: null,
     checkStatusCompleted: false,
+    checkStatusSource: null,
   }));
   let downloadCompleted = false;
   let failedEvent;
@@ -460,10 +468,10 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
       }
       if (typeof event.fileProgress === 'number' && event.fileProgress >= 1) {
         entry.done = true;
-        void verifyChildDoneStateViaCheckStatus(index);
+        void verifyChildDoneStateViaCheckStatus(index, 'downloadProgress');
       } else if (entry.bytesTotal > 0 && entry.bytesWritten >= entry.bytesTotal) {
         entry.done = true;
-        void verifyChildDoneStateViaCheckStatus(index);
+        void verifyChildDoneStateViaCheckStatus(index, 'downloadProgress');
       }
     }),
   );
@@ -478,20 +486,25 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
     }),
   );
 
-  const verifyChildDoneStateViaCheckStatus = async (fileIndex) => {
+  const verifyChildDoneStateViaCheckStatus = async (fileIndex, progressSource) => {
     const entry = fileStates[fileIndex];
     if (entry.checkStatusCompleted) {
       return true;
     }
-    const childId = maestroChildTaskId(batchId, fileIndex, batchGeneration);
+    const childId = maestroChildTaskId(batchId, fileIndex, batchGeneration, childTaskIds);
     if (!childId) {
+      if (entry.done && progressSource) {
+        markMaestroChildCompletedFromEvent(entry, progressSource);
+        return true;
+      }
       return false;
     }
+    entry.childTaskId = childId;
     try {
       const status = await invokeCapacitor('checkStatus', () => plugin.checkStatus({ id: childId }));
-      entry.childTaskId = childId;
       entry.checkStatusState = status.state ?? null;
       entry.checkStatusLabel = maestroChildCheckStatusLabel(status);
+      entry.checkStatusSource = 'checkStatus';
       if (isMaestroChildCheckStatusCompleted(status)) {
         entry.checkStatusCompleted = true;
         entry.done = true;
@@ -499,10 +512,8 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
       }
     } catch (error) {
       entry.checkStatusLabel = pluginErrorMessage(error);
-      if (Capacitor.getPlatform() === 'android' && entry.done) {
-        entry.checkStatusCompleted = true;
-        entry.checkStatusLabel = 'COMPLETED';
-        entry.checkStatusState = 'DONE';
+      if (entry.done && progressSource) {
+        markMaestroChildCompletedFromEvent(entry, progressSource);
         return true;
       }
     }
@@ -512,7 +523,7 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
   const verifyAllChildDoneStatesViaCheckStatus = async () => {
     let verified = 0;
     for (let index = 0; index < fileCount; index += 1) {
-      if (await verifyChildDoneStateViaCheckStatus(index)) {
+      if (await verifyChildDoneStateViaCheckStatus(index, 'downloadCompleted')) {
         verified += 1;
       }
     }
@@ -532,6 +543,9 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
     dispose,
     setBatchGeneration(generation) {
       batchGeneration = generation;
+    },
+    setChildTaskIds(ids) {
+      childTaskIds = ids;
     },
     async waitForCompletion(destinations) {
       const deadline = Date.now() + timeoutMs;
@@ -587,6 +601,7 @@ function formatMaestroBatchSuccess(task, completion, files) {
       checkStatusState: file.checkStatusState,
       checkStatusLabel: file.checkStatusLabel,
       checkStatusCompleted: file.checkStatusCompleted,
+      checkStatusSource: file.checkStatusSource,
       bytesWritten: file.bytesWritten,
       bytesTotal: file.bytesTotal,
       sizeOnDisk: file.sizeOnDisk,
@@ -613,8 +628,15 @@ async function runMaestroBatchHarness({
         ...downloadOptions,
       }),
     );
-    if (Capacitor.getPlatform() === 'ios') {
-      tracking.setBatchGeneration(await discoverIosBatchGeneration(batchId, files.length));
+    applyMaestroBatchEnqueueMetadata(task, tracking);
+    if (
+      typeof task?.batchGeneration !== 'number' ||
+      !Array.isArray(task?.childTaskIds) ||
+      task.childTaskIds.length !== files.length
+    ) {
+      throw new Error(
+        `download() missing batch metadata (batchGeneration=${String(task?.batchGeneration)}, childTaskIds=${JSON.stringify(task?.childTaskIds)})`,
+      );
     }
     const completion = await tracking.waitForCompletion(files.map((file) => file.destination));
     setOutputFromMaestro(formatMaestroBatchSuccess(task, completion, files));

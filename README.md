@@ -426,6 +426,10 @@ checkStatus(options: { id: string; }) => Promise<DownloadTask>
 
 Check the current status of a download.
 
+Reports active URLSession/OkHttp/DownloadManager work. On iOS, batch child ids also resolve from in-memory
+batch progress while that batch row exists. Completed batches unregister their children, so `checkStatus`
+may reject with "Task not found" after success.
+
 | Param         | Type                         | Description                               |
 | ------------- | ---------------------------- | ----------------------------------------- |
 | **`options`** | <code>{ id: string; }</code> | - Options containing the download task ID |
@@ -543,11 +547,13 @@ Get the plugin version number.
 
 Represents the current state and progress of a download task.
 
-| Prop           | Type                                                                 | Description                             |
-| -------------- | -------------------------------------------------------------------- | --------------------------------------- |
-| **`id`**       | <code>string</code>                                                  | Unique identifier for the download task |
-| **`progress`** | <code>number</code>                                                  | Download progress from 0 to 1           |
-| **`state`**    | <code>'PENDING' \| 'RUNNING' \| 'PAUSED' \| 'DONE' \| 'ERROR'</code> | Current state of the download           |
+| Prop                  | Type                                                                 | Description                                                                                                                                                                             |
+| --------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`id`**              | <code>string</code>                                                  | Unique identifier for the download task                                                                                                                                                 |
+| **`progress`**        | <code>number</code>                                                  | Download progress from 0 to 1                                                                                                                                                           |
+| **`state`**           | <code>'PENDING' \| 'RUNNING' \| 'PAUSED' \| 'DONE' \| 'ERROR'</code> | Current state of the download                                                                                                                                                           |
+| **`batchGeneration`** | <code>number</code>                                                  | Batch-only metadata returned when `download()` starts a multi-file batch. `checkStatus()` applies to active transfers; after a batch tears down, child ids may return "Task not found". |
+| **`childTaskIds`**    | <code>string[]</code>                                                | Ordered child task ids for batch entries (same order as `files`).                                                                                                                       |
 
 
 #### DownloadOptions

@@ -716,9 +716,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                 okHttpDownloadExecutor.clearCompleted(childId);
                                 return;
                             }
+                            long[] bytes = okHttpDownloadExecutor.progressBytes(childId);
                             okHttpDownloadExecutor.clearCompleted(childId);
                             if (success) {
-                                completeOkHttpBatchFile(batch, fileRequest.index);
+                                completeOkHttpBatchFile(batch, fileRequest.index, bytes[0], bytes[1]);
                             } else {
                                 failOkHttpBatch(batch, errorMessage != null ? errorMessage : "Download failed", fileRequest.index);
                             }
@@ -740,8 +741,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
     }
 
-    private void completeOkHttpBatchFile(DownloadBatchState batch, int fileIndex) {
-        BatchFileCompletionResult completion = completeBatchFile(batch.batchId, fileIndex, 0, 0);
+    private void completeOkHttpBatchFile(DownloadBatchState batch, int fileIndex, long bytesWritten, long bytesTotal) {
+        BatchFileCompletionResult completion = completeBatchFile(batch.batchId, fileIndex, bytesWritten, bytesTotal);
         if (completion.allDone && !ownsBatch(batch.batchId, batch)) {
             finishOkHttpBatchIfCurrent(batch, true, !completion.usedCustomCompletionNotification);
         }

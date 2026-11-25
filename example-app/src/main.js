@@ -1,5 +1,6 @@
 import { CapacitorUpdater } from '@capgo/capacitor-updater';
 import { Capacitor } from '@capacitor/core';
+import { Directory, Filesystem } from '@capacitor/filesystem';
 
 import './style.css';
 import { CapacitorDownloader } from '@capgo/capacitor-downloader';
@@ -325,6 +326,28 @@ async function removeMaestroListeners(handles) {
   await Promise.all(handles.map((handle) => handle.remove().catch(() => undefined)));
 }
 
+async function statDownloadedFile(destination) {
+  if (!destination?.startsWith('files/')) {
+    throw new Error(`Unsupported maestro destination for Filesystem.stat: ${destination}`);
+  }
+  const relative = destination.slice('files/'.length);
+  if (Capacitor.getPlatform() === 'ios') {
+    return Filesystem.stat({ directory: Directory.Documents, path: `files/${relative}` });
+  }
+  return Filesystem.stat({ directory: Directory.Data, path: relative });
+}
+
+async function fillSizesOnDisk(destinations, fileStates) {
+  for (let index = 0; index < destinations.length; index += 1) {
+    const stat = await statDownloadedFile(destinations[index]);
+    const size = stat.size ?? 0;
+    if (size <= 0) {
+      throw new Error(`File missing or empty on disk: ${destinations[index]}`);
+    }
+    fileStates[index].sizeOnDisk = size;
+  }
+}
+
 async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000) {
   const fileStates = Array.from({ length: fileCount }, () => ({
     done: false,
@@ -374,7 +397,10 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
     }),
   );
 
-  const verifyChildDoneStates = async () => {
+  const verifyAndroidChildDoneStates = async () => {
+    if (Capacitor.getPlatform() !== 'android') {
+      return;
+    }
     for (let index = 0; index < fileCount; index += 1) {
       if (fileStates[index].done) {
         continue;
@@ -392,8 +418,18 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
     }
   };
 
+  let disposed = false;
+  const dispose = async () => {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+    await removeMaestroListeners(handles);
+  };
+
   return {
-    async waitForCompletion() {
+    dispose,
+    async waitForCompletion(destinations) {
       const deadline = Date.now() + timeoutMs;
       try {
         while (Date.now() < deadline) {
@@ -401,14 +437,11 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
             throw new Error(failedEvent.error ?? `Download failed for ${failedEvent.id}`);
           }
           if (downloadCompleted) {
-            await verifyChildDoneStates();
+            await verifyAndroidChildDoneStates();
             const allDone = fileStates.every((entry) => entry.done);
             const allSized = fileStates.every((entry) => entry.bytesTotal > 0 && entry.bytesWritten > 0);
             if (allDone && allSized) {
-              for (let index = 0; index < fileStates.length; index += 1) {
-                const entry = fileStates[index];
-                entry.sizeOnDisk = entry.bytesWritten;
-              }
+              await fillSizesOnDisk(destinations, fileStates);
               return { downloadCompleted: true, allFilesDone: true, files: fileStates };
             }
           }
@@ -416,7 +449,7 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
         }
         throw new Error('Timed out waiting for batch downloadCompleted and per-file DONE');
       } finally {
-        await removeMaestroListeners(handles);
+        await dispose();
       }
     },
   };
@@ -453,18 +486,21 @@ async function runMaestroOkHttpBatch() {
   ];
   output.textContent = '';
   delete output.dataset.maestroOutcome;
+  let tracking;
   try {
-    const tracking = await startMaestroBatchTracking(batchId, files.length);
+    tracking = await startMaestroBatchTracking(batchId, files.length);
     const task = await plugin.download({
       id: batchId,
       androidHttpEngine: 'okhttp',
       notification: 'hidden',
       files,
     });
-    const completion = await tracking.waitForCompletion();
+    const completion = await tracking.waitForCompletion(files.map((file) => file.destination));
     setOutputFromMaestro(formatMaestroBatchSuccess(task, completion, files));
   } catch (error) {
     setOutputFromMaestro(undefined, error);
+  } finally {
+    await tracking?.dispose();
   }
 }
 
@@ -507,17 +543,20 @@ async function runMaestroIosBatch() {
   ];
   output.textContent = '';
   delete output.dataset.maestroOutcome;
+  let tracking;
   try {
-    const tracking = await startMaestroBatchTracking(batchId, files.length);
+    tracking = await startMaestroBatchTracking(batchId, files.length);
     const task = await plugin.download({
       id: batchId,
       notification: 'hidden',
       files,
     });
-    const completion = await tracking.waitForCompletion();
+    const completion = await tracking.waitForCompletion(files.map((file) => file.destination));
     setOutputFromMaestro(formatMaestroBatchSuccess(task, completion, files));
   } catch (error) {
     setOutputFromMaestro(undefined, error);
+  } finally {
+    await tracking?.dispose();
   }
 }
 

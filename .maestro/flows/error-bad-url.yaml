@@ -1,0 +1,15 @@
+appId: app.capgo.downloader
+---
+- runFlow: ../helpers/launch-harness.yaml
+- scrollUntilVisible:
+    element:
+      text: error-bad-url
+    direction: DOWN
+    timeout: 45000
+    centerElement: true
+- tapOn:
+    text: error-bad-url
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: '.*Marker: error-bad-url:success.*'
+    timeout: 60000

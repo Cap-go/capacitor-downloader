@@ -35,6 +35,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private let foregroundSessionLock = NSLock()
     internal private(set) var restoredBackgroundSessionIdentifiers: [String] = []
     internal private(set) var didRestoreGenerationsBeforeDelegateRegistration = false
+    private var generationsPresentBeforeDelegateRegistration = false
 
     public override init() {
         batchCoordinator = DownloadBatchCoordinator()
@@ -47,11 +48,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func registerDownloadDelegateIfGenerationsRestored() {
-        tasksLock.lock()
-        let generationsRestored = !downloadGenerations.isEmpty
-        tasksLock.unlock()
         DownloadBackgroundSessionManager.shared.register(downloadDelegate: self)
-        didRestoreGenerationsBeforeDelegateRegistration = generationsRestored
+        didRestoreGenerationsBeforeDelegateRegistration = generationsPresentBeforeDelegateRegistration
     }
 
     private func downloadSession(allowsCellularAccess: Bool, preferForegroundCapable: Bool) -> URLSession {
@@ -73,6 +71,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         tasksLock.lock()
         downloadGenerations = DownloadIdGenerationStore.shared.allGenerations()
         taskGenerations = DownloadTaskGenerationStore.shared.allGenerations()
+        generationsPresentBeforeDelegateRegistration = !downloadGenerations.isEmpty
         downloadRetryBudgets = DownloadRetryBudgetStore.shared.allBudgets()
         tasksLock.unlock()
         restoredBackgroundSessionIdentifiers = [
@@ -94,11 +93,16 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
             let semaphore = DispatchSemaphore(value: 0)
+            var didFinishLoad = false
             DownloadBackgroundSessionManager.shared.rehydrateTasks { tasks in
+                didFinishLoad = true
                 finishLoad(tasks)
                 semaphore.signal()
             }
-            _ = semaphore.wait(timeout: .now() + 5)
+            let waitResult = semaphore.wait(timeout: .now() + 5)
+            if waitResult == .timedOut, !didFinishLoad {
+                finishLoad([])
+            }
         } else {
             DownloadBackgroundSessionManager.shared.rehydrateTasks(completion: finishLoad)
         }
@@ -586,6 +590,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         )
 
         var request = URLRequest(url: url)
+        request.timeoutInterval = 20
         if let headers = call.getObject("headers") as? [String: String] {
             for (key, value) in headers {
                 request.setValue(value, forHTTPHeaderField: key)
@@ -594,6 +599,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         registerLengthHeaderOption(normalizedLengthHeader(from: call), for: id)
 
         let wifiOnly = call.getString("network") == "wifi-only"
+        let hiddenNotification = call.getString("notification") == "hidden"
         let retries = DownloadConnectionRetry.normalizeRetries(call.getInt("retries"))
         let continuedRequest = parseContinuedProcessingRequest(call)
 
@@ -604,13 +610,17 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             self.tasksLock.lock()
             self.pendingDownloadStarts.remove(id)
             self.tasksLock.unlock()
+            let useForegroundSession = useForeground || hiddenNotification
             self.foregroundSessionLock.lock()
-            if useForeground {
+            if useForegroundSession {
                 self.foregroundSessionDownloadIds.insert(id)
             }
             self.foregroundSessionLock.unlock()
 
-            let activeSession = self.downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: useForeground)
+            let activeSession = self.downloadSession(
+                allowsCellularAccess: !wifiOnly,
+                preferForegroundCapable: useForegroundSession
+            )
             let task = activeSession.downloadTask(with: request)
             task.taskDescription = id
             self.setRetryBudget(for: id, retries: retries)
@@ -649,8 +659,9 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         let headers = call.getObject("headers") as? [String: String] ?? [:]
         let lengthHeader = normalizedLengthHeader(from: call)
         let wifiOnly = call.getString("network") == "wifi-only"
+        let hiddenNotification = call.getString("notification") == "hidden"
         let retries = DownloadConnectionRetry.normalizeRetries(call.getInt("retries"))
-        let batchSession = downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: false)
+        let batchSession = downloadSession(allowsCellularAccess: !wifiOnly, preferForegroundCapable: hiddenNotification)
 
         for fileObject in files {
             guard let urlString = pluginString(fileObject["url"]),
@@ -697,6 +708,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             registerLengthHeaderOption(lengthHeader, for: taskId)
 
             var request = URLRequest(url: entry.url)
+            request.timeoutInterval = 20
             for (key, value) in headers {
                 request.setValue(value, forHTTPHeaderField: key)
             }
@@ -891,7 +903,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
                 DownloadFailedNotificationStore.shared.removeText(for: id, generation: generation)
             }
-            call.resolve()
+            call.resolve(["removed": true])
             return
         }
 
@@ -910,7 +922,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             DownloadCompletedNotificationStore.shared.removeText(for: id, generation: generation)
             DownloadFailedNotificationStore.shared.removeText(for: id, generation: generation)
         }
-        call.resolve()
+        call.resolve(["removed": true])
     }
 
 
@@ -1126,6 +1138,10 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                 clearRetryBudget(for: id)
                 markContinuedProcessingFinished(downloadId: id, success: false)
             }
+            removeTask(for: id, completing: downloadTask, in: session)
+            _ = DownloadDestinationStore.shared.takeDestination(for: id)
+            batchCoordinator.unregisterChildTask(id)
+            clearTaskGeneration(for: downloadTask, in: session)
             return
         }
 

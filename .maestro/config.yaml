@@ -1,0 +1,3 @@
+appId: app.capgo.downloader
+ios:
+  disableAnimations: true

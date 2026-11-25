@@ -1,0 +1,13 @@
+appId: app.capgo.downloader
+---
+- stopApp
+- launchApp:
+    clearState: true
+    arguments:
+      isE2E: true
+- extendedWaitUntil:
+    visible: '@capgo/capacitor-downloader'
+    timeout: 120000
+- extendedWaitUntil:
+    visible: '.*Harness: ready.*'
+    timeout: 90000

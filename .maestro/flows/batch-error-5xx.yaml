@@ -1,0 +1,15 @@
+appId: app.capgo.downloader
+---
+- runFlow: ../helpers/launch-harness.yaml
+- scrollUntilVisible:
+    element:
+      text: batch-error-5xx
+    direction: DOWN
+    timeout: 45000
+    centerElement: true
+- tapOn:
+    text: batch-error-5xx
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: '.*Marker: batch-error-5xx:success.*'
+    timeout: 150000

@@ -17,12 +17,20 @@
     <main class="container">
       <h1>@capgo/capacitor-downloader</h1>
       <p class="lead">Run native plugin APIs with the source linked locally.</p>
-      <label for="action-select">Available actions</label>
-      <select id="action-select"></select>
-      <div id="action-description" class="action-description"></div>
-      <div id="action-form" class="form-grid"></div>
-      <button id="run-action">Run action</button>
-      <pre id="plugin-output">Select an action to begin.</pre>
+      <section id="maestro-panel">
+        <p id="harness-ready">Harness: booting</p>
+        <p id="e2e-summary">Harness: booting</p>
+        <div id="e2e-flow-buttons" class="form-grid"></div>
+        <pre id="e2e-log"></pre>
+      </section>
+      <section id="manual-panel">
+        <label for="action-select">Available actions</label>
+        <select id="action-select"></select>
+        <div id="action-description" class="action-description"></div>
+        <div id="action-form" class="form-grid"></div>
+        <button id="run-action">Run action</button>
+        <pre id="plugin-output">Select an action to begin.</pre>
+      </section>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>

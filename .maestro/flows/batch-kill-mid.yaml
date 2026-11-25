@@ -1,0 +1,28 @@
+appId: app.capgo.downloader
+---
+- runFlow: ../helpers/launch-harness.yaml
+- scrollUntilVisible:
+    element:
+      text: batch-kill-mid
+    direction: DOWN
+    timeout: 45000
+    centerElement: true
+- tapOn:
+    text: batch-kill-mid
+    retryTapIfNoChange: true
+- extendedWaitUntil:
+    visible: '.*PHASE:batch-kill-mid:downloading.*'
+    timeout: 60000
+- waitForAnimationToEnd:
+    timeout: 5000
+- stopApp
+- launchApp:
+    clearState: false
+    arguments:
+      isE2E: true
+- extendedWaitUntil:
+    visible: '.*Harness: ready.*'
+    timeout: 120000
+- extendedWaitUntil:
+    visible: '.*Marker: batch-kill-mid:success.*'
+    timeout: 300000

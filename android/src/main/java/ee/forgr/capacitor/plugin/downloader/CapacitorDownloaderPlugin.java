@@ -42,6 +42,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private final Map<String, DownloadBatchState> batches = new ConcurrentHashMap<>();
     private final Map<String, String> batchChildOwners = new ConcurrentHashMap<>();
     private final Map<String, File> okHttpDestinationFiles = new ConcurrentHashMap<>();
+    private final Map<String, File> downloadManagerDestinationFiles = new ConcurrentHashMap<>();
+    private final Map<String, Integer> downloadPauseRetryPolls = new ConcurrentHashMap<>();
     private final Map<String, Long> downloadGenerations = new ConcurrentHashMap<>();
     private final AtomicLong pendingDownloadSequence = new AtomicLong(0);
     private ExecutorService downloadManagerExecutor;
@@ -345,6 +347,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             call.reject("Download already exists");
             return;
         }
+        downloadManagerDestinationFiles.put(id, destinationFile);
         final long downloadGeneration = nextGeneration(id);
         setDownloadNotificationTexts(id, completionNotificationText, failedNotificationText, downloadGeneration);
         runDownloadManagerWork(
@@ -397,6 +400,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             },
             () -> {
                 downloads.remove(id, pendingToken);
+                clearDownloadManagerTracking(id);
                 removeDownloadNotificationTexts(id, downloadGeneration);
             }
         );
@@ -443,14 +447,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     androidHttpEngine,
                     resolvedDestination.preferOkHttpInAutoMode
                 );
-                if (httpEngine == AndroidHttpEngineSelector.Engine.OKHTTP) {
-                    rollbackBatch(batchState);
-                    call.reject(
-                        "Multi-file batch downloads currently require DownloadManager. Set androidHttpEngine to 'downloadManager' or omit it."
-                    );
-                    return;
-                }
-                fileRequests.add(new BatchFileRequest(index, url, resolvedDestination.file));
+                fileRequests.add(
+                    new BatchFileRequest(index, url, resolvedDestination.file, httpEngine == AndroidHttpEngineSelector.Engine.OKHTTP)
+                );
             }
         } catch (JSONException e) {
             rollbackBatch(batchState);
@@ -464,6 +463,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         final JSObject headers = call.getObject("headers");
         final String network = call.getString("network");
+        final String title = call.getString("title");
+        final String description = call.getString("description");
+        final String notificationMode = notification != null ? notification : "completed";
 
         runDownloadManagerWork(
             call,
@@ -506,6 +508,29 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             return;
                         }
 
+                        if (fileRequest.useOkHttp) {
+                            if (
+                                !startBatchChildOkHttpTransfer(
+                                    batchId,
+                                    batchState,
+                                    childId,
+                                    childPendingToken,
+                                    fileRequest,
+                                    headers,
+                                    network,
+                                    notificationMode,
+                                    title,
+                                    description
+                                )
+                            ) {
+                                removeSystemDownloads(enqueuedIds);
+                                rollbackBatch(batchState);
+                                call.reject("Download could not be started");
+                                return;
+                            }
+                            continue;
+                        }
+
                         DownloadManager.Request request = buildDownloadRequest(
                             fileRequest.url,
                             fileRequest.destinationFile,
@@ -513,7 +538,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             network,
                             notification
                         );
-                        DownloadManagerNotificationLabels.apply(request, call.getString("title"), call.getString("description"));
+                        DownloadManagerNotificationLabels.apply(request, title, description);
 
                         long downloadId;
                         try {
@@ -552,6 +577,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                             return;
                         }
 
+                        downloadManagerDestinationFiles.put(childId, fileRequest.destinationFile);
                         enqueuedIds.add(downloadId);
                     }
 
@@ -577,11 +603,93 @@ public class CapacitorDownloaderPlugin extends Plugin {
         final int index;
         final String url;
         final File destinationFile;
+        final boolean useOkHttp;
 
-        BatchFileRequest(int index, String url, File destinationFile) {
+        BatchFileRequest(int index, String url, File destinationFile, boolean useOkHttp) {
             this.index = index;
             this.url = url;
             this.destinationFile = destinationFile;
+            this.useOkHttp = useOkHttp;
+        }
+    }
+
+    private boolean startBatchChildOkHttpTransfer(
+        String batchId,
+        DownloadBatchState batchState,
+        String childId,
+        long childPendingToken,
+        BatchFileRequest fileRequest,
+        JSObject headers,
+        String network,
+        String notificationMode,
+        String title,
+        String description
+    ) {
+        if (!isTrackedDownload(childId, childPendingToken) || !ownsBatch(batchId, batchState)) {
+            releaseChildReservation(childId, childPendingToken, batchId);
+            return false;
+        }
+        if (!okHttpDownloadExecutor.isWifiSatisfied(network)) {
+            releaseChildReservation(childId, childPendingToken, batchId);
+            return false;
+        }
+        okHttpDestinationFiles.put(childId, fileRequest.destinationFile);
+        OkHttpDownloadExecutor.ActiveDownload reservation = okHttpDownloadExecutor.beginTransfer(childId);
+        if (reservation == null) {
+            okHttpDestinationFiles.remove(childId);
+            releaseChildReservation(childId, childPendingToken, batchId);
+            return false;
+        }
+        if (!downloads.replace(childId, childPendingToken, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID)) {
+            okHttpDownloadExecutor.abandonTransfer(reservation);
+            okHttpDestinationFiles.remove(childId);
+            releaseChildReservation(childId, childPendingToken, batchId);
+            return false;
+        }
+        try {
+            okHttpDownloadExecutor.start(
+                reservation,
+                fileRequest.url,
+                fileRequest.destinationFile,
+                headers,
+                network,
+                0,
+                null,
+                (downloadId, progress) ->
+                    handler.post(() -> {
+                        DownloadBatchState.BatchIdParts parts = DownloadBatchState.parseFileTaskId(downloadId);
+                        if (parts == null || !batchId.equals(parts.batchId)) {
+                            return;
+                        }
+                        notifyBatchProgress(parts.batchId, parts.fileIndex, progress, 0, 0);
+                    }),
+                (downloadId, success, cancelled, errorMessage) ->
+                    handler.post(() -> {
+                        DownloadBatchState.BatchIdParts parts = DownloadBatchState.parseFileTaskId(downloadId);
+                        if (parts == null || !batchId.equals(parts.batchId)) {
+                            return;
+                        }
+                        if (cancelled) {
+                            return;
+                        }
+                        if (success) {
+                            long bytesTotal = reservation.bytesTotal > 0 ? reservation.bytesTotal : reservation.bytesWritten;
+                            completeBatchFile(parts.batchId, parts.fileIndex, reservation.bytesWritten, bytesTotal);
+                        } else {
+                            failBatch(parts.batchId, errorMessage != null ? errorMessage : "Download failed", parts.fileIndex);
+                        }
+                        okHttpDestinationFiles.remove(downloadId);
+                        downloads.remove(downloadId, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID);
+                        okHttpDownloadExecutor.clearCompleted(downloadId);
+                    })
+            );
+            return true;
+        } catch (RuntimeException e) {
+            okHttpDownloadExecutor.abandonTransfer(reservation);
+            okHttpDestinationFiles.remove(childId);
+            downloads.remove(childId, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID);
+            releaseChildReservation(childId, childPendingToken, batchId);
+            return false;
         }
     }
 
@@ -629,6 +737,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
         batchChildOwners.remove(childId, batchId);
+        clearDownloadManagerTracking(childId);
+    }
+
+    private void clearDownloadManagerTracking(String id) {
+        downloadManagerDestinationFiles.remove(id);
+        downloadPauseRetryPolls.remove(id);
     }
 
     private void clearChildOwnersForBatch(String batchId) {
@@ -667,6 +781,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         if (trackedDownloadId != null) {
             downloads.remove(childId, trackedDownloadId);
         }
+        clearDownloadManagerTracking(childId);
     }
 
     boolean shouldPreserveBatchChild(DownloadBatchState batch, int fileIndex, Long systemDownloadId) {
@@ -1034,7 +1149,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 }
                 try {
                     executor.execute(() -> {
-                        List<ProgressSnapshot> snapshots = new ArrayList<>();
+                        List<DownloadManagerCursorReader.Snapshot> snapshots = new ArrayList<>();
                         try {
                             try (Cursor cursor = downloadManager.query(new DownloadManager.Query())) {
                                 if (cursor != null) {
@@ -1046,28 +1161,13 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                             continue;
                                         }
                                         missingIds.remove(systemDownloadId);
-                                        int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-                                        long bytesDownloaded = cursor.getLong(
-                                            cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)
-                                        );
-                                        long bytesTotal = cursor.getLong(
-                                            cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)
-                                        );
-                                        float progress = bytesTotal > 0 ? (float) bytesDownloaded / bytesTotal : 0f;
-                                        snapshots.add(
-                                            new ProgressSnapshot(
-                                                childId,
-                                                systemDownloadId,
-                                                progress,
-                                                status,
-                                                true,
-                                                bytesDownloaded,
-                                                bytesTotal
-                                            )
-                                        );
+                                        snapshots.add(DownloadManagerCursorReader.readRow(childId, systemDownloadId, cursor));
                                     }
                                     for (Long missingId : missingIds) {
-                                        ProgressSnapshot confirmed = queryProgressSnapshot(systemIdToChild.get(missingId), missingId);
+                                        DownloadManagerCursorReader.Snapshot confirmed = queryProgressSnapshot(
+                                            systemIdToChild.get(missingId),
+                                            missingId
+                                        );
                                         if (confirmed != null) {
                                             snapshots.add(confirmed);
                                         }
@@ -1119,12 +1219,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
     }
 
-    private void deliverBatchProgressSnapshots(String batchId, long pollGeneration, List<ProgressSnapshot> snapshots) {
+    private void deliverBatchProgressSnapshots(String batchId, long pollGeneration, List<DownloadManagerCursorReader.Snapshot> snapshots) {
         DownloadBatchState batchState = batches.get(batchId);
         if (batchState == null || batchState.generation != pollGeneration) {
             return;
         }
-        for (ProgressSnapshot snapshot : snapshots) {
+        for (DownloadManagerCursorReader.Snapshot snapshot : snapshots) {
             DownloadBatchState.BatchIdParts parts = resolveOwnedBatchChild(snapshot.id);
             if (parts != null && batchState.isFileCompleted(parts.fileIndex)) {
                 continue;
@@ -1170,7 +1270,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         try {
             executor.execute(() -> {
-                ProgressSnapshot snapshot = queryProgressSnapshot(id, systemDownloadId);
+                DownloadManagerCursorReader.Snapshot snapshot = queryProgressSnapshot(id, systemDownloadId);
                 handler.post(() -> deliverProgressSnapshot(id, systemDownloadId, scheduleNext, snapshot, capturedGeneration));
             });
         } catch (RejectedExecutionException ignored) {
@@ -1178,7 +1278,40 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
     }
 
-    private ProgressSnapshot queryProgressSnapshot(String id, long systemDownloadId) {
+    private void rejectDownloadManagerSuccess(String id, long systemDownloadId, int httpCode, Long capturedGeneration) {
+        if (!isTrackedDownload(id, systemDownloadId)) {
+            return;
+        }
+        String error = DownloadHttpStatusRules.formatHttpErrorMessage(httpCode);
+        File destination = downloadManagerDestinationFiles.remove(id);
+        downloadPauseRetryPolls.remove(id);
+        if (destination != null && destination.exists()) {
+            // Best effort removal of a partial file DownloadManager may have written.
+            destination.delete();
+        }
+        downloads.remove(id, systemDownloadId);
+        try {
+            downloadManager.remove(systemDownloadId);
+        } catch (RuntimeException ignored) {
+            // Best effort cleanup.
+        }
+
+        DownloadBatchState.BatchIdParts batchParts = DownloadBatchState.parseFileTaskId(id);
+        if (batchParts != null) {
+            failBatch(batchParts.batchId, error, batchParts.fileIndex);
+            return;
+        }
+
+        if (capturedGeneration != null) {
+            completedNotificationStore.remove(id, capturedGeneration);
+        }
+        JSObject failedData = new JSObject();
+        failedData.put("id", id);
+        failedData.put("error", error);
+        notifyListeners("downloadFailed", failedData);
+    }
+
+    private DownloadManagerCursorReader.Snapshot queryProgressSnapshot(String id, long systemDownloadId) {
         if (!isTrackedDownload(id, systemDownloadId)) {
             return null;
         }
@@ -1186,18 +1319,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
         DownloadManager.Query query = new DownloadManager.Query().setFilterById(systemDownloadId);
         Cursor cursor = downloadManager.query(query);
         if (cursor == null) {
-            return ProgressSnapshot.notFound(id, systemDownloadId);
+            return DownloadManagerCursorReader.Snapshot.notFound(id, systemDownloadId);
         }
         try (cursor) {
-            if (!cursor.moveToFirst()) {
-                return ProgressSnapshot.notFound(id, systemDownloadId);
-            }
-
-            int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-            long bytesDownloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
-            long bytesTotal = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
-            float progress = bytesTotal > 0 ? (float) bytesDownloaded / bytesTotal : 0f;
-            return new ProgressSnapshot(id, systemDownloadId, progress, status, true, bytesDownloaded, bytesTotal);
+            return DownloadManagerCursorReader.readSnapshot(id, systemDownloadId, cursor);
         }
     }
 
@@ -1205,7 +1330,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         String id,
         long systemDownloadId,
         boolean scheduleNext,
-        ProgressSnapshot snapshot,
+        DownloadManagerCursorReader.Snapshot snapshot,
         Long capturedGeneration
     ) {
         if (snapshot == null || !snapshot.found || !isTrackedDownload(id, systemDownloadId)) {
@@ -1214,19 +1339,44 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         DownloadBatchState.BatchIdParts batchParts = resolveOwnedBatchChild(snapshot.id);
         boolean shouldContinue = true;
+        String failureMessage = DownloadManagerCursorReader.failureMessage(snapshot.status, snapshot.reason, snapshot.httpStatus);
+
+        int pauseRetryPolls = downloadPauseRetryPolls.getOrDefault(id, 0);
+        DownloadManagerCursorReader.PauseRetryPollUpdate pauseUpdate = DownloadManagerCursorReader.pauseRetryPollUpdate(
+            snapshot.status,
+            snapshot.reason,
+            pauseRetryPolls
+        );
+        if (pauseUpdate.trackCount) {
+            downloadPauseRetryPolls.put(id, pauseUpdate.nextCount);
+        } else {
+            downloadPauseRetryPolls.remove(id);
+        }
+        if (pauseUpdate.shouldFailExhausted) {
+            if (batchParts != null) {
+                failBatch(batchParts.batchId, "Download retry budget exhausted", batchParts.fileIndex);
+            } else {
+                failSingleDownload(snapshot.id, systemDownloadId, "Download retry budget exhausted", capturedGeneration);
+            }
+            return;
+        }
 
         if (batchParts != null) {
             if (snapshot.status == DownloadManager.STATUS_SUCCESSFUL) {
+                if (DownloadManagerCursorReader.shouldRejectReportedSuccess(snapshot.httpStatus)) {
+                    rejectDownloadManagerSuccess(id, systemDownloadId, snapshot.httpStatus, capturedGeneration);
+                    return;
+                }
                 completeBatchFile(batchParts.batchId, batchParts.fileIndex, snapshot.bytesDownloaded, snapshot.bytesTotal);
                 shouldContinue = false;
             } else if (snapshot.status == DownloadManager.STATUS_FAILED) {
-                failBatch(batchParts.batchId, "Download failed", batchParts.fileIndex);
+                failBatch(batchParts.batchId, failureMessage, batchParts.fileIndex);
                 shouldContinue = false;
             } else {
                 notifyBatchProgress(
                     batchParts.batchId,
                     batchParts.fileIndex,
-                    snapshot.progress,
+                    snapshot.progress(),
                     snapshot.bytesDownloaded,
                     snapshot.bytesTotal
                 );
@@ -1234,12 +1384,16 @@ public class CapacitorDownloaderPlugin extends Plugin {
         } else {
             JSObject progressData = new JSObject();
             progressData.put("id", snapshot.id);
-            progressData.put("progress", snapshot.progress);
+            progressData.put("progress", snapshot.progress());
             progressData.put("bytesWritten", snapshot.bytesDownloaded);
             progressData.put("bytesTotal", snapshot.bytesTotal);
             notifyListeners("downloadProgress", progressData);
 
             if (snapshot.status == DownloadManager.STATUS_SUCCESSFUL) {
+                if (DownloadManagerCursorReader.shouldRejectReportedSuccess(snapshot.httpStatus)) {
+                    rejectDownloadManagerSuccess(id, systemDownloadId, snapshot.httpStatus, capturedGeneration);
+                    return;
+                }
                 JSObject completedData = new JSObject();
                 completedData.put("id", snapshot.id);
                 notifyListeners("downloadCompleted", completedData);
@@ -1253,14 +1407,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 }
                 shouldContinue = false;
             } else if (snapshot.status == DownloadManager.STATUS_FAILED) {
-                JSObject failedData = new JSObject();
-                failedData.put("id", snapshot.id);
-                failedData.put("error", "Download failed");
-                notifyListeners("downloadFailed", failedData);
-                if (capturedGeneration != null) {
-                    completedNotificationStore.remove(snapshot.id, capturedGeneration);
-                    presentFailedDownloadNotification(snapshot.id, capturedGeneration);
-                }
+                failSingleDownload(snapshot.id, systemDownloadId, failureMessage, capturedGeneration);
                 shouldContinue = false;
             }
         }
@@ -1270,37 +1417,17 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
     }
 
-    private static final class ProgressSnapshot {
-
-        private final String id;
-        private final long systemDownloadId;
-        private final float progress;
-        private final int status;
-        private final boolean found;
-        private final long bytesDownloaded;
-        private final long bytesTotal;
-
-        private ProgressSnapshot(
-            String id,
-            long systemDownloadId,
-            float progress,
-            int status,
-            boolean found,
-            long bytesDownloaded,
-            long bytesTotal
-        ) {
-            this.id = id;
-            this.systemDownloadId = systemDownloadId;
-            this.progress = progress;
-            this.status = status;
-            this.found = found;
-            this.bytesDownloaded = bytesDownloaded;
-            this.bytesTotal = bytesTotal;
+    private void failSingleDownload(String id, long systemDownloadId, String error, Long capturedGeneration) {
+        downloads.remove(id, systemDownloadId);
+        clearDownloadManagerTracking(id);
+        if (capturedGeneration != null) {
+            completedNotificationStore.remove(id, capturedGeneration);
+            presentFailedDownloadNotification(id, capturedGeneration);
         }
-
-        private static ProgressSnapshot notFound(String id, long systemDownloadId) {
-            return new ProgressSnapshot(id, systemDownloadId, 0f, -1, false, 0, 0);
-        }
+        JSObject failedData = new JSObject();
+        failedData.put("id", id);
+        failedData.put("error", error);
+        notifyListeners("downloadFailed", failedData);
     }
 
     @PluginMethod
@@ -1342,6 +1469,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             call.reject("Download not found");
             return;
         }
+        clearDownloadManagerTracking(id);
 
         if (isPendingDownload(downloadId)) {
             okHttpDestinationFiles.remove(id);
@@ -1609,19 +1737,19 @@ public class CapacitorDownloaderPlugin extends Plugin {
     }
 
     private JSObject getDownloadStatus(Cursor cursor) {
-        int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
-        long bytesDownloaded = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
-        long bytesTotal = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
-
+        DownloadManagerCursorReader.Snapshot snapshot = DownloadManagerCursorReader.readSnapshot("status", -1L, cursor);
         JSObject result = new JSObject();
-        result.put("status", status);
-        result.put("bytesDownloaded", bytesDownloaded);
-        result.put("bytesTotal", bytesTotal);
+        result.put("status", snapshot.status);
+        result.put("state", DownloadManagerCursorReader.toCapacitorState(snapshot.status));
+        result.put("bytesDownloaded", snapshot.bytesDownloaded);
+        result.put("bytesTotal", snapshot.bytesTotal);
 
-        if (status == DownloadManager.STATUS_FAILED) {
-            int reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON));
-            result.put("reason", reason);
-            result.put("reasonText", getReasonText(status, reason));
+        if (snapshot.status == DownloadManager.STATUS_FAILED) {
+            result.put("reason", snapshot.reason);
+            result.put("reasonText", getReasonText(snapshot.status, snapshot.reason));
+            result.put("error", DownloadManagerCursorReader.failureMessage(snapshot.status, snapshot.reason, snapshot.httpStatus));
+        } else if (snapshot.httpStatus > 0) {
+            result.put("httpStatus", snapshot.httpStatus);
         }
 
         return result;

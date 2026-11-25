@@ -42,6 +42,19 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private final Map<String, DownloadBatchState> batches = new ConcurrentHashMap<>();
     private final Map<String, String> batchChildOwners = new ConcurrentHashMap<>();
     private final Map<String, File> okHttpDestinationFiles = new ConcurrentHashMap<>();
+
+    private static final class OkHttpBatchOwnership {
+
+        final long generation;
+        final List<BatchFileRequest> fileRequests;
+
+        OkHttpBatchOwnership(long generation, List<BatchFileRequest> fileRequests) {
+            this.generation = generation;
+            this.fileRequests = fileRequests;
+        }
+    }
+
+    private final Map<String, OkHttpBatchOwnership> okHttpBatches = new ConcurrentHashMap<>();
     private final Map<String, Long> downloadGenerations = new ConcurrentHashMap<>();
     private final AtomicLong pendingDownloadSequence = new AtomicLong(0);
     private ExecutorService downloadManagerExecutor;
@@ -443,14 +456,18 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     androidHttpEngine,
                     resolvedDestination.preferOkHttpInAutoMode
                 );
-                if (httpEngine == AndroidHttpEngineSelector.Engine.OKHTTP) {
+                boolean okHttp = httpEngine == AndroidHttpEngineSelector.Engine.OKHTTP;
+                if (okHttp && extendedDestinationRoots && destination.trim().startsWith("public-downloads/")) {
                     rollbackBatch(batchState);
-                    call.reject(
-                        "Multi-file batch downloads currently require DownloadManager. Set androidHttpEngine to 'downloadManager' or omit it."
-                    );
+                    call.reject("OkHttp cannot write to public-downloads/ paths. Use androidHttpEngine 'auto' or 'downloadManager'.");
                     return;
                 }
-                fileRequests.add(new BatchFileRequest(index, url, resolvedDestination.file));
+                if (!fileRequests.isEmpty() && fileRequests.get(0).okHttp != okHttp) {
+                    rollbackBatch(batchState);
+                    call.reject("All files of a batch must resolve to the same Android HTTP engine");
+                    return;
+                }
+                fileRequests.add(new BatchFileRequest(index, url, resolvedDestination.file, okHttp));
             }
         } catch (JSONException e) {
             rollbackBatch(batchState);
@@ -464,6 +481,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         final JSObject headers = call.getObject("headers");
         final String network = call.getString("network");
+
+        if (!fileRequests.isEmpty() && fileRequests.get(0).okHttp) {
+            downloadBatchWithOkHttp(call, batchState, fileRequests, headers, network, notification);
+            return;
+        }
 
         runDownloadManagerWork(
             call,
@@ -577,12 +599,198 @@ public class CapacitorDownloaderPlugin extends Plugin {
         final int index;
         final String url;
         final File destinationFile;
+        final boolean okHttp;
 
-        BatchFileRequest(int index, String url, File destinationFile) {
+        BatchFileRequest(int index, String url, File destinationFile, boolean okHttp) {
             this.index = index;
             this.url = url;
             this.destinationFile = destinationFile;
+            this.okHttp = okHttp;
         }
+    }
+
+    /**
+     * Runs a batch whose files go to app-private storage through OkHttp, with one progress notification and
+     * foreground service for the whole batch. The executor limits how many of the files transfer at once.
+     */
+    private void downloadBatchWithOkHttp(
+        PluginCall call,
+        DownloadBatchState batch,
+        List<BatchFileRequest> fileRequests,
+        JSObject headers,
+        String network,
+        String notification
+    ) {
+        final String batchId = batch.batchId;
+        if (!okHttpDownloadExecutor.isWifiSatisfied(network)) {
+            rollbackBatch(batch);
+            call.reject("Wi-Fi required for this download");
+            return;
+        }
+
+        List<OkHttpDownloadExecutor.ActiveDownload> reservations = new ArrayList<>();
+        for (BatchFileRequest fileRequest : fileRequests) {
+            OkHttpDownloadExecutor.ActiveDownload reservation = okHttpDownloadExecutor.beginTransfer(
+                DownloadBatchState.fileTaskId(batchId, fileRequest.index)
+            );
+            if (reservation == null) {
+                for (OkHttpDownloadExecutor.ActiveDownload reserved : reservations) {
+                    okHttpDownloadExecutor.abandonTransfer(reserved);
+                }
+                rollbackBatch(batch);
+                call.reject("Download already exists");
+                return;
+            }
+            reservations.add(reservation);
+        }
+
+        okHttpBatches.put(batchId, new OkHttpBatchOwnership(batch.generation, fileRequests));
+        batch.committed.set(true);
+        okHttpProgressNotifier.started(batchId, call.getString("title"), call.getString("description"), notification);
+
+        JSObject result = new JSObject();
+        result.put("id", batchId);
+        result.put("state", "RUNNING");
+        result.put("progress", 0);
+        call.resolve(result);
+
+        for (int i = 0; i < fileRequests.size(); i++) {
+            if (!ownsBatch(batchId, batch) || isBatchCancelled(batch)) {
+                okHttpDownloadExecutor.abandonTransfer(reservations.get(i));
+                continue;
+            }
+            startOkHttpBatchFile(batch, fileRequests.get(i), reservations.get(i), headers, network);
+        }
+    }
+
+    private void startOkHttpBatchFile(
+        DownloadBatchState batch,
+        BatchFileRequest fileRequest,
+        OkHttpDownloadExecutor.ActiveDownload reservation,
+        JSObject headers,
+        String network
+    ) {
+        final String batchId = batch.batchId;
+        Runnable transfer = () -> {
+            if (!ownsBatch(batchId, batch) || isBatchCancelled(batch)) {
+                okHttpDownloadExecutor.abandonTransfer(reservation);
+                return;
+            }
+            try {
+                okHttpDownloadExecutor.start(
+                    reservation,
+                    fileRequest.url,
+                    fileRequest.destinationFile,
+                    headers,
+                    network,
+                    null,
+                    (childId, progress) ->
+                        handler.post(() -> {
+                            if (!ownsBatch(batchId, batch)) {
+                                return;
+                            }
+                            notifyBatchProgress(batchId, fileRequest.index, progress, 0, 0);
+                            okHttpProgressNotifier.update(batchId, batch.overallProgress());
+                        }),
+                    (childId, success, cancelled, errorMessage) ->
+                        handler.post(() -> {
+                            okHttpDownloadExecutor.clearCompleted(childId);
+                            if (cancelled || !ownsBatch(batchId, batch)) {
+                                return;
+                            }
+                            if (success) {
+                                completeOkHttpBatchFile(batch, fileRequest.index);
+                            } else {
+                                failOkHttpBatch(batch, errorMessage != null ? errorMessage : "Download failed", fileRequest.index);
+                            }
+                        })
+                );
+            } catch (RuntimeException e) {
+                okHttpDownloadExecutor.abandonTransfer(reservation);
+                handler.post(() -> {
+                    if (ownsBatch(batchId, batch)) {
+                        failOkHttpBatch(batch, e.getMessage(), fileRequest.index);
+                    }
+                });
+            }
+        };
+
+        ExecutorService executor = downloadManagerExecutor;
+        try {
+            if (executor == null) {
+                throw new RejectedExecutionException("Download manager is not available");
+            }
+            executor.execute(transfer);
+        } catch (RejectedExecutionException e) {
+            okHttpDownloadExecutor.abandonTransfer(reservation);
+            failOkHttpBatch(batch, "Download manager is shutting down", fileRequest.index);
+        }
+    }
+
+    private void completeOkHttpBatchFile(DownloadBatchState batch, int fileIndex) {
+        completeBatchFile(batch.batchId, fileIndex, 0, 0);
+        if (!ownsBatch(batch.batchId, batch)) {
+            finishOkHttpBatchIfCurrent(batch, true);
+        }
+    }
+
+    private void failOkHttpBatch(DownloadBatchState batch, String error, int fileIndex) {
+        OkHttpBatchOwnership ownership = takeOkHttpBatchOwnership(batch);
+        if (ownership == null) {
+            return;
+        }
+        cancelOkHttpBatchFiles(batch, ownership.fileRequests);
+        okHttpProgressNotifier.finished(batch.batchId, false);
+        failBatch(batch.batchId, error, fileIndex);
+    }
+
+    private OkHttpBatchOwnership takeOkHttpBatchOwnership(DownloadBatchState batch) {
+        OkHttpBatchOwnership ownership = okHttpBatches.get(batch.batchId);
+        if (ownership == null || ownership.generation != batch.generation) {
+            return null;
+        }
+        return okHttpBatches.remove(batch.batchId, ownership) ? ownership : null;
+    }
+
+    private void finishOkHttpBatchIfCurrent(DownloadBatchState batch, boolean success) {
+        OkHttpBatchOwnership ownership = takeOkHttpBatchOwnership(batch);
+        if (ownership == null) {
+            return;
+        }
+        okHttpProgressNotifier.finished(batch.batchId, success);
+        if (success) {
+            String notificationMode = batch.notification != null ? batch.notification : "completed";
+            if (!OkHttpDownloadProgressNotifier.shouldShowProgressForMode(notificationMode)) {
+                DownloadCompletionNotifier.notifyIfRequested(getContext(), batch.batchId, notificationMode, true);
+            }
+        }
+    }
+
+    /**
+     * Cancels the transfers of a batch that did not finish yet, keeping the files that already completed, including
+     * one whose file is in place while its completion callback is still queued.
+     */
+    private void cancelOkHttpBatchFiles(DownloadBatchState batch, List<BatchFileRequest> fileRequests) {
+        for (BatchFileRequest fileRequest : fileRequests) {
+            String childId = DownloadBatchState.fileTaskId(batch.batchId, fileRequest.index);
+            if (!batch.isFileCompleted(fileRequest.index)) {
+                okHttpDownloadExecutor.cancelUnlessCommitted(childId, fileRequest.destinationFile);
+            }
+        }
+    }
+
+    private void stopOkHttpBatch(PluginCall call, String batchId, List<BatchFileRequest> fileRequests) {
+        DownloadBatchState batch = batches.get(batchId);
+        if (batch == null) {
+            call.reject("Download not found");
+            return;
+        }
+        batch.cancelled.set(true);
+        cancelOkHttpBatchFiles(batch, fileRequests);
+        okHttpProgressNotifier.finished(batchId, false);
+        batches.remove(batchId, batch);
+        completedNotificationStore.remove(batchId, batch.generation);
+        call.resolve(new JSObject().put("removed", true));
     }
 
     private DownloadManager.Request buildDownloadRequest(
@@ -1328,6 +1536,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
         String id = call.getString("id");
         if (id == null) {
             call.reject("Download not found");
+            return;
+        }
+
+        OkHttpBatchOwnership okHttpBatchOwnership = okHttpBatches.remove(id);
+        if (okHttpBatchOwnership != null) {
+            stopOkHttpBatch(call, id, okHttpBatchOwnership.fileRequests);
             return;
         }
 

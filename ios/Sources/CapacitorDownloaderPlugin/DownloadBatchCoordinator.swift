@@ -18,6 +18,10 @@ final class DownloadBatchCoordinator {
     private var batches: [String: ActiveBatch] = [:]
     private var batchGenerations: [String: UInt64] = [:]
     private var registeredChildren: [String: String] = [:]
+    /// Batch child ids unregistered while still finishing on the URLSession delegate queue.
+    private var inactiveBatchChildTaskIds: Set<String> = []
+    /// Batch generations that finished before the download() promise resolved startup.
+    private var startupCompletedBeforeResolve: [String: UInt64] = [:]
     private let batchesLock = NSLock()
     private let store: DownloadBatchStore
     private let persistQueue = DispatchQueue(label: "CapacitorDownloader.DownloadBatchCoordinator.persist")
@@ -41,18 +45,55 @@ final class DownloadBatchCoordinator {
     func activeChildParts(for taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
         batchesLock.lock()
         defer { batchesLock.unlock() }
-        guard let parts = childPartsUnlocked(for: taskId),
+        return activeChildPartsUnlocked(for: taskId)
+    }
+
+    private func activeChildPartsUnlocked(for taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
+        guard let parts = parsedBatchChildTaskId(taskId),
               let batch = batches[parts.batchId],
-              batch.generation == parts.generation else {
+              batch.generation == parts.generation,
+              !batch.cancelled, !batch.failed else {
             return nil
         }
         return parts
+    }
+
+    func isBatchFormattedTaskId(_ taskId: String) -> Bool {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        return parsedBatchChildTaskId(taskId) != nil
+    }
+
+    func isOwnedBatchChild(taskId: String) -> Bool {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        return registeredChildren[taskId] != nil || inactiveBatchChildTaskIds.contains(taskId)
+    }
+
+    /// Verifies a batch child is still active, then removes an existing destination file under the batch lock.
+    func prepareDestinationReplacement(taskId: String, destinationURL: URL) throws -> Bool {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        let ownedBatchChild = registeredChildren[taskId] != nil || inactiveBatchChildTaskIds.contains(taskId)
+        if ownedBatchChild {
+            guard activeChildPartsUnlocked(for: taskId) != nil else {
+                return false
+            }
+        }
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try FileManager.default.removeItem(at: destinationURL)
+        }
+        return true
     }
 
     private func childPartsUnlocked(for taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
         guard registeredChildren[taskId] != nil else {
             return nil
         }
+        return parsedBatchChildTaskId(taskId)
+    }
+
+    private func parsedBatchChildTaskId(_ taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
         guard let hashIndex = taskId.lastIndex(of: "#"),
               let colonIndex = taskId.lastIndex(of: ":"),
               colonIndex > hashIndex else {
@@ -134,7 +175,15 @@ final class DownloadBatchCoordinator {
     func unregisterChildTask(_ taskId: String) {
         batchesLock.lock()
         defer { batchesLock.unlock() }
-        registeredChildren.removeValue(forKey: taskId)
+        if registeredChildren.removeValue(forKey: taskId) != nil, parsedBatchChildTaskId(taskId) != nil {
+            inactiveBatchChildTaskIds.insert(taskId)
+        }
+    }
+
+    func clearInactiveBatchChildTask(_ taskId: String) {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        inactiveBatchChildTaskIds.remove(taskId)
     }
 
     func isBatch(batchId: String) -> Bool {
@@ -226,6 +275,83 @@ final class DownloadBatchCoordinator {
         persistBatchesImmediatelyLocked()
     }
 
+    struct BatchStartupSnapshot {
+        let allowed: Bool
+        let paused: Bool
+    }
+
+    func batchStartupSnapshot(batchId: String, generation: UInt64) -> BatchStartupSnapshot {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        guard let batch = batches[batchId], batch.generation == generation, !batch.cancelled, !batch.failed else {
+            return BatchStartupSnapshot(allowed: false, paused: false)
+        }
+        return BatchStartupSnapshot(allowed: true, paused: batch.paused)
+    }
+
+    enum BatchStartupResumeOutcome {
+        case proceed(paused: Bool)
+        case abort
+    }
+
+    /// Decides whether download() may resolve after child tasks were resumed.
+    func batchStartupResumeOutcome(batchId: String, generation: UInt64) -> BatchStartupResumeOutcome {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        if let batch = batches[batchId], batch.generation == generation {
+            if batch.cancelled || batch.failed {
+                return .abort
+            }
+            return .proceed(paused: batch.paused)
+        }
+        if startupCompletedBeforeResolve.removeValue(forKey: batchId) == generation {
+            return .proceed(paused: false)
+        }
+        return .abort
+    }
+
+    /// Registers child task ids for a batch under the same lock used by cancellation.
+    func registerStartupChildren(
+        batchId: String,
+        generation: UInt64,
+        children: [(taskId: String, fileIndex: Int)]
+    ) -> BatchStartupSnapshot {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        guard var batch = batches[batchId], batch.generation == generation, !batch.cancelled, !batch.failed else {
+            return BatchStartupSnapshot(allowed: false, paused: false)
+        }
+        for child in children {
+            batch.childTaskIds.insert(child.taskId)
+            registeredChildren[child.taskId] = batchId
+        }
+        batches[batchId] = batch
+        persistBatchesLocked()
+        return BatchStartupSnapshot(allowed: true, paused: batch.paused)
+    }
+
+    struct BatchStopSnapshot {
+        let generation: UInt64
+        let childTaskIds: [String]
+        let destinations: [String]
+    }
+
+    /// Removes the batch under the batch lock and returns child ids for task cancellation.
+    func takeBatchForStop(batchId: String) -> BatchStopSnapshot? {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        guard let batch = batches[batchId] else {
+            return nil
+        }
+        let snapshot = BatchStopSnapshot(
+            generation: batch.generation,
+            childTaskIds: Array(batch.childTaskIds),
+            destinations: batch.savedDestinations.values.sorted()
+        )
+        removeBatchLocked(batchId: batchId, unregisterChildren: false)
+        return snapshot
+    }
+
     func removeBatch(batchId: String, unregisterChildren: Bool = true) {
         batchesLock.lock()
         defer { batchesLock.unlock() }
@@ -241,15 +367,17 @@ final class DownloadBatchCoordinator {
         return batch.savedDestinations.values.sorted()
     }
 
-    func recordMovedDestination(batchId: String, generation: UInt64, fileIndex: Int, destination: String) {
+    @discardableResult
+    func recordMovedDestination(batchId: String, generation: UInt64, fileIndex: Int, destination: String) -> Bool {
         batchesLock.lock()
         defer { batchesLock.unlock() }
         guard var batch = batches[batchId], batch.generation == generation, !batch.cancelled, !batch.failed else {
-            return
+            return false
         }
         batch.savedDestinations[fileIndex] = destination
         batches[batchId] = batch
         schedulePersistBatchesLocked()
+        return true
     }
 
     func updateFileProgress(batchId: String, generation: UInt64, fileIndex: Int, progress: Float) -> (overall: Float, file: Float)? {
@@ -303,6 +431,7 @@ final class DownloadBatchCoordinator {
         batches[batchId] = batch
         if batch.completedCount >= batch.fileCount {
             let generation = batch.generation
+            startupCompletedBeforeResolve[batchId] = generation
             removeBatchLocked(batchId: batchId, unregisterChildren: true)
             return .allSucceeded(batchId: batchId, generation: generation)
         }

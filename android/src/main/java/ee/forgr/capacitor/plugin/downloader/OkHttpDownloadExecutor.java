@@ -438,6 +438,22 @@ public class OkHttpDownloadExecutor {
         return null;
     }
 
+    public boolean cancelUnlessCommitted(String id, File destinationFile) {
+        ActiveDownload active = activeDownloads.get(id);
+        if (active == null) {
+            if (destinationFile != null && destinationFile.exists()) {
+                return destinationFile.delete();
+            }
+            return false;
+        }
+        synchronized (active) {
+            if (active.state == State.DONE) {
+                return false;
+            }
+        }
+        return cancel(id, destinationFile);
+    }
+
     public boolean cancel(String id, File destinationFile) {
         ActiveDownload active = activeDownloads.get(id);
         if (active == null) {

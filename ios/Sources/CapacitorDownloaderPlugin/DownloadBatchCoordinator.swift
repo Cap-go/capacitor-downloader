@@ -22,6 +22,7 @@ final class DownloadBatchCoordinator {
     private var inactiveBatchChildTaskIds: Set<String> = []
     /// Batch generations that finished before the download() promise resolved startup.
     private var startupCompletedBeforeResolve: [String: UInt64] = [:]
+    private var startupPendingGenerations: [String: UInt64] = [:]
     private let batchesLock = NSLock()
     private let store: DownloadBatchStore
     private let persistQueue = DispatchQueue(label: "CapacitorDownloader.DownloadBatchCoordinator.persist")
@@ -49,16 +50,20 @@ final class DownloadBatchCoordinator {
     }
 
     private func activeChildPartsUnlocked(for taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
-        guard registeredChildren[taskId] != nil || inactiveBatchChildTaskIds.contains(taskId) else {
-            return nil
-        }
-        guard let parts = parsedBatchChildTaskId(taskId),
+        guard let parts = childPartsUnlocked(for: taskId) ?? inactiveOwnedChildPartsUnlocked(for: taskId),
               let batch = batches[parts.batchId],
               batch.generation == parts.generation,
               !batch.cancelled, !batch.failed else {
             return nil
         }
         return parts
+    }
+
+    private func inactiveOwnedChildPartsUnlocked(for taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
+        guard inactiveBatchChildTaskIds.contains(taskId) else {
+            return nil
+        }
+        return parsedBatchChildTaskId(taskId)
     }
 
     func isBatchFormattedTaskId(_ taskId: String) -> Bool {
@@ -275,6 +280,10 @@ final class DownloadBatchCoordinator {
         }
         batch.cancelled = true
         batches[batchId] = batch
+        for taskId in batch.childTaskIds {
+            inactiveBatchChildTaskIds.remove(taskId)
+        }
+        startupPendingGenerations.removeValue(forKey: batchId)
         persistBatchesImmediatelyLocked()
     }
 
@@ -301,13 +310,14 @@ final class DownloadBatchCoordinator {
     func batchStartupResumeOutcome(batchId: String, generation: UInt64) -> BatchStartupResumeOutcome {
         batchesLock.lock()
         defer { batchesLock.unlock() }
+        let pendingGeneration = startupPendingGenerations.removeValue(forKey: batchId)
         if let batch = batches[batchId], batch.generation == generation {
             if batch.cancelled || batch.failed {
                 return .abort
             }
             return .proceed(paused: batch.paused)
         }
-        if startupCompletedBeforeResolve.removeValue(forKey: batchId) == generation {
+        if pendingGeneration == generation, startupCompletedBeforeResolve.removeValue(forKey: batchId) == generation {
             return .proceed(paused: false)
         }
         return .abort
@@ -329,6 +339,7 @@ final class DownloadBatchCoordinator {
             registeredChildren[child.taskId] = batchId
         }
         batches[batchId] = batch
+        startupPendingGenerations[batchId] = generation
         persistBatchesLocked()
         return BatchStartupSnapshot(allowed: true, paused: batch.paused)
     }
@@ -434,7 +445,10 @@ final class DownloadBatchCoordinator {
         batches[batchId] = batch
         if batch.completedCount >= batch.fileCount {
             let generation = batch.generation
-            startupCompletedBeforeResolve[batchId] = generation
+            if startupPendingGenerations[batchId] == generation {
+                startupCompletedBeforeResolve[batchId] = generation
+            }
+            startupPendingGenerations.removeValue(forKey: batchId)
             removeBatchLocked(batchId: batchId, unregisterChildren: true)
             return .allSucceeded(batchId: batchId, generation: generation)
         }
@@ -465,6 +479,11 @@ final class DownloadBatchCoordinator {
         guard let batch = batches.removeValue(forKey: batchId) else {
             return
         }
+        for taskId in batch.childTaskIds {
+            inactiveBatchChildTaskIds.remove(taskId)
+        }
+        startupPendingGenerations.removeValue(forKey: batchId)
+        startupCompletedBeforeResolve.removeValue(forKey: batchId)
         if unregisterChildren {
             for taskId in batch.childTaskIds {
                 registeredChildren.removeValue(forKey: taskId)

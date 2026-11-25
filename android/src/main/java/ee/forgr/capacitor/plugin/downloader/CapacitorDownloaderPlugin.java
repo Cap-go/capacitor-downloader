@@ -481,9 +481,18 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         final JSObject headers = call.getObject("headers");
         final String network = call.getString("network");
+        final String lengthHeader = call.getString("lengthHeader");
+        final int batchRetries;
+        try {
+            batchRetries = DownloadConnectionRetry.normalizeRetries(call.getInt("retries"));
+        } catch (IllegalArgumentException e) {
+            rollbackBatch(batchState);
+            call.reject(e.getMessage(), e);
+            return;
+        }
 
         if (!fileRequests.isEmpty() && fileRequests.get(0).okHttp) {
-            downloadBatchWithOkHttp(call, batchState, fileRequests, headers, network, notification);
+            downloadBatchWithOkHttp(call, batchState, fileRequests, headers, network, notification, batchRetries, lengthHeader);
             return;
         }
 
@@ -619,7 +628,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
         List<BatchFileRequest> fileRequests,
         JSObject headers,
         String network,
-        String notification
+        String notification,
+        int retries,
+        String lengthHeader
     ) {
         final String batchId = batch.batchId;
         if (!okHttpDownloadExecutor.isWifiSatisfied(network)) {
@@ -659,7 +670,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                 okHttpDownloadExecutor.abandonTransfer(reservations.get(i));
                 continue;
             }
-            startOkHttpBatchFile(batch, fileRequests.get(i), reservations.get(i), headers, network);
+            startOkHttpBatchFile(batch, fileRequests.get(i), reservations.get(i), headers, network, retries, lengthHeader);
         }
     }
 
@@ -668,7 +679,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
         BatchFileRequest fileRequest,
         OkHttpDownloadExecutor.ActiveDownload reservation,
         JSObject headers,
-        String network
+        String network,
+        int retries,
+        String lengthHeader
     ) {
         final String batchId = batch.batchId;
         Runnable transfer = () -> {
@@ -683,7 +696,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
                     fileRequest.destinationFile,
                     headers,
                     network,
-                    null,
+                    retries,
+                    lengthHeader,
                     (childId, progress) ->
                         handler.post(() -> {
                             if (!ownsBatch(batchId, batch)) {

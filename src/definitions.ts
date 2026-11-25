@@ -102,7 +102,7 @@ export interface DownloadOptions {
    * when `iosContinuedProcessing` is set.
    *
    * When omitted or empty, the system uses its default (typically the destination file name).
-   * Ignored on Web and the OkHttp Android download path.
+   * On Android OkHttp, used when `notification` is `'progress'` (including OkHttp batches). Ignored on Web.
    *
    * @since 8.6.0
    */
@@ -111,7 +111,8 @@ export interface DownloadOptions {
    * Description shown on the Android DownloadManager progress notification, and on iOS as the subtitle of the
    * continued processing task when `iosContinuedProcessing` is set.
    *
-   * When omitted or empty, the system uses its default. Ignored on Web and the OkHttp Android download path.
+   * When omitted or empty, the system uses its default. On Android OkHttp, used when `notification` is `'progress'`
+   * (including OkHttp batches). Ignored on Web.
    *
    * @since 8.6.0
    */
@@ -341,8 +342,8 @@ export interface DownloadBatchOptions {
    * When the response includes this header with a positive integer, native code uses it for
    * `downloadProgress` totals and progress is clamped at 1. Examples: `X-Uncompressed-Length`.
    *
-   * Batch downloads: iOS only (same header name applies to every file in `files`). Android OkHttp batches ignore this
-   * option. Ignored on Web.
+   * Batch downloads: iOS and Android OkHttp (same header name applies to every file in `files`). Ignored on Web and
+   * Android DownloadManager batches.
    *
    * @since 8.9.0
    */

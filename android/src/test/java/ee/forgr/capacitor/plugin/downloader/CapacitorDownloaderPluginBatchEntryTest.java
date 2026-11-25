@@ -79,7 +79,7 @@ public class CapacitorDownloaderPluginBatchEntryTest {
         plugin.download(call);
         Shadows.shadowOf(Looper.getMainLooper()).idle();
 
-        verify(call, timeout(5000)).reject(Mockito.eq("All files of a batch must resolve to the same Android HTTP engine"), any());
+        verify(call, timeout(5000)).reject(Mockito.eq("All files of a batch must resolve to the same Android HTTP engine"));
         verify(downloadManager, never()).enqueue(any(DownloadManager.Request.class));
     }
 

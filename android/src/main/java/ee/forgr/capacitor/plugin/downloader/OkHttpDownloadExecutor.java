@@ -441,9 +441,6 @@ public class OkHttpDownloadExecutor {
     public boolean cancelUnlessCommitted(String id, File destinationFile) {
         ActiveDownload active = activeDownloads.get(id);
         if (active == null) {
-            if (destinationFile != null && destinationFile.exists()) {
-                return destinationFile.delete();
-            }
             return false;
         }
         synchronized (active) {
@@ -451,7 +448,37 @@ public class OkHttpDownloadExecutor {
                 return false;
             }
         }
-        return cancel(id, destinationFile);
+        return cancelUnlessCommittedLocked(active, id, destinationFile);
+    }
+
+    private boolean cancelUnlessCommittedLocked(ActiveDownload active, String id, File destinationFile) {
+        synchronized (active) {
+            if (active.state == State.DONE || active.cancelled.get()) {
+                return false;
+            }
+            active.cancelled.set(true);
+        }
+        Call call = active.call;
+        if (call != null) {
+            call.cancel();
+        }
+        synchronized (active) {
+            if (active.state == State.DONE) {
+                return false;
+            }
+            File temp = active.tempFile;
+            if (temp != null && temp.exists()) {
+                temp.delete();
+            }
+            File committed = active.committedDestination;
+            if (committed != null && committed.exists()) {
+                committed.delete();
+            } else if (destinationFile != null && destinationFile.exists()) {
+                destinationFile.delete();
+            }
+        }
+        activeDownloads.remove(id, active);
+        return true;
     }
 
     public boolean cancel(String id, File destinationFile) {

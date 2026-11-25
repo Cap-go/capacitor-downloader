@@ -66,6 +66,14 @@ public class OkHttpDownloadExecutor {
         return activeDownloads.get(id);
     }
 
+    public long[] progressBytes(String id) {
+        ActiveDownload active = activeDownloads.get(id);
+        if (active == null) {
+            return new long[] { 0L, 0L };
+        }
+        return new long[] { active.bytesWritten, active.bytesTotal };
+    }
+
     int availableTransferSlots() {
         return transferSlots.availablePermits();
     }

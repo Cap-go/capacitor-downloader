@@ -109,7 +109,7 @@ final class DownloadBatchCoordinator {
         }
         let batchId = String(taskId[..<hashIndex])
         let generationPart = String(taskId[taskId.index(after: hashIndex)..<colonIndex])
-        guard let generation = UInt64(generationPart) else {
+        guard let generation = UInt64(generationPart), generationPart == String(generation) else {
             return nil
         }
         let indexPart = String(taskId[taskId.index(after: colonIndex)...])
@@ -340,7 +340,7 @@ final class DownloadBatchCoordinator {
         }
         batches[batchId] = batch
         startupPendingGenerations[batchId] = generation
-        persistBatchesLocked()
+        persistBatchesImmediatelyLocked()
         return BatchStartupSnapshot(allowed: true, paused: batch.paused)
     }
 
@@ -458,16 +458,17 @@ final class DownloadBatchCoordinator {
         )
     }
 
-    func beginFailure(batchId: String, generation: UInt64) -> Bool {
+    func beginFailure(batchId: String, generation: UInt64) -> [String]? {
         batchesLock.lock()
         defer { batchesLock.unlock() }
         guard var batch = batches[batchId], batch.generation == generation, !batch.failed, !batch.cancelled else {
-            return false
+            return nil
         }
+        let childTaskIds = Array(batch.childTaskIds)
         batch.failed = true
         batches[batchId] = batch
         persistBatchesImmediatelyLocked()
-        return true
+        return childTaskIds
     }
 
     enum BatchCompletionState {

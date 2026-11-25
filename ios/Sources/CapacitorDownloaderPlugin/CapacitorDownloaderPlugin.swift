@@ -33,6 +33,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     private var pendingRetryWorkItems: [String: DispatchWorkItem] = [:]
     private var foregroundRetryPausedDownloadIds = Set<String>()
     private let foregroundSessionLock = NSLock()
+    private let continuedProcessingGenerationsLock = NSLock()
+    private var continuedProcessingGenerations: [String: UInt64] = [:]
     internal private(set) var restoredBackgroundSessionIdentifiers: [String] = []
     internal private(set) var didRestoreGenerationsBeforeDelegateRegistration = false
 
@@ -105,7 +107,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func cancelDownloadFromContinuedProcessingExpiry(_ downloadId: String) {
-        if batchCoordinator.isBatch(batchId: downloadId), let generation = batchCoordinator.generation(for: downloadId) {
+        if batchCoordinator.isBatch(batchId: downloadId),
+           let generation = continuedProcessingGeneration(for: downloadId) ?? batchCoordinator.generation(for: downloadId) {
             failBatch(batchId: downloadId, generation: generation, fileIndex: nil, error: "Continued processing task expired")
             return
         }
@@ -605,6 +608,9 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let self else {
                 return
             }
+            if continuedRequest != nil, useForeground {
+                self.setContinuedProcessingGeneration(downloadId: id, generation: generation)
+            }
             self.tasksLock.lock()
             self.pendingDownloadStarts.remove(id)
             self.tasksLock.unlock()
@@ -642,6 +648,35 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         return DownloadContinuedProcessingCoordinator.Request(title: title, subtitle: subtitle)
     }
 
+    private func parseBatchContinuedProcessingRequest(_ call: CAPPluginCall) -> DownloadContinuedProcessingCoordinator.Request? {
+        guard call.getBool("iosContinuedProcessing") == true else {
+            return nil
+        }
+        guard let title = Self.nonEmpty(call.getString("title")) else {
+            return nil
+        }
+        let subtitle = Self.nonEmpty(call.getString("description"))
+        return DownloadContinuedProcessingCoordinator.Request(title: title, subtitle: subtitle)
+    }
+
+    private func setContinuedProcessingGeneration(downloadId: String, generation: UInt64) {
+        continuedProcessingGenerationsLock.lock()
+        continuedProcessingGenerations[downloadId] = generation
+        continuedProcessingGenerationsLock.unlock()
+    }
+
+    private func continuedProcessingGeneration(for downloadId: String) -> UInt64? {
+        continuedProcessingGenerationsLock.lock()
+        defer { continuedProcessingGenerationsLock.unlock() }
+        return continuedProcessingGenerations[downloadId]
+    }
+
+    private func clearContinuedProcessingGeneration(downloadId: String) {
+        continuedProcessingGenerationsLock.lock()
+        continuedProcessingGenerations.removeValue(forKey: downloadId)
+        continuedProcessingGenerationsLock.unlock()
+    }
+
     private static func nonEmpty(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed?.isEmpty == false ? trimmed : nil
@@ -649,6 +684,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func markContinuedProcessingFinished(downloadId: String, success: Bool) {
         continuedProcessing.finish(downloadId: downloadId, success: success)
+        clearContinuedProcessingGeneration(downloadId: downloadId)
         foregroundSessionLock.lock()
         foregroundSessionDownloadIds.remove(downloadId)
         foregroundSessionLock.unlock()
@@ -697,10 +733,13 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             generation: generation
         )
 
-        let continuedRequest = parseContinuedProcessingRequest(call)
+        let continuedRequest = parseBatchContinuedProcessingRequest(call)
         continuedProcessing.beginIfPossible(downloadId: batchId, request: continuedRequest) { [weak self] useForeground in
             guard let self else {
                 return
+            }
+            if continuedRequest != nil, useForeground {
+                self.setContinuedProcessingGeneration(downloadId: batchId, generation: generation)
             }
             guard self.batchCoordinator.batchStartupSnapshot(batchId: batchId, generation: generation).allowed else {
                 self.markContinuedProcessingFinished(downloadId: batchId, success: false)
@@ -923,10 +962,10 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     private func failBatch(batchId: String, generation: UInt64, fileIndex: Int?, error: String) {
-        guard batchCoordinator.beginFailure(batchId: batchId, generation: generation) else {
+        guard let childTaskIds = batchCoordinator.beginFailure(batchId: batchId, generation: generation) else {
             return
         }
-        cancelBatchTasks(batchId: batchId)
+        cancelBatchTasks(taskIds: childTaskIds)
         markBatchContinuedProcessingFinished(batchId: batchId, generation: generation, success: false)
         batchCoordinator.removeBatch(batchId: batchId, unregisterChildren: false)
         DownloadCompletedNotificationStore.shared.removeText(for: batchId, generation: generation)

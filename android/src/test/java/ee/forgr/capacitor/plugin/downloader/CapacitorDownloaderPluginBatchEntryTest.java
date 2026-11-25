@@ -60,6 +60,7 @@ public class CapacitorDownloaderPluginBatchEntryTest {
         setField(plugin, "downloadManagerExecutor", downloadManagerExecutor);
         setField(plugin, "okHttpTransferExecutor", Executors.newFixedThreadPool(4));
         setField(plugin, "okHttpDownloadExecutor", new OkHttpDownloadExecutor(context));
+        setField(plugin, "okHttpProgressNotifier", new OkHttpDownloadProgressNotifier(context));
         setField(plugin, "completedNotificationStore", new DownloadCompletedNotificationStore(context));
         setField(plugin, "failedNotificationStore", new DownloadFailedNotificationStore(context));
         setField(plugin, "handler", new android.os.Handler(Looper.getMainLooper()));

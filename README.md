@@ -119,7 +119,7 @@ await CapacitorDownloader.download({
 });
 ```
 
-On iOS, batch downloads share one `lengthHeader` name for every file in `files`. Android batches always use DownloadManager and ignore `lengthHeader`.
+On iOS, batch downloads share one `lengthHeader` name for every file in `files`. On Android, OkHttp batches honor the same header on every file; DownloadManager batches ignore it.
 
 Full docs: [Capgo downloader guide](https://capgo.app/docs/plugins/downloader/getting-started/#lengthheader-for-gzip-downloads) (once released on the website). Tracked with [capacitor-downloader#144](https://github.com/Cap-go/capacitor-downloader/pull/144).
 

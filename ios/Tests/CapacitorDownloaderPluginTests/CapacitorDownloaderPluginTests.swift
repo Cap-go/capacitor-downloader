@@ -254,8 +254,8 @@ final class DownloadBatchProgressTests: XCTestCase {
         }
         XCTAssertNotEqual(firstGeneration, secondGeneration)
         XCTAssertNil(coordinator.activeChildParts(for: staleTaskId))
-        XCTAssertFalse(coordinator.beginFailure(batchId: "bundle", generation: firstGeneration))
-        XCTAssertTrue(coordinator.beginFailure(batchId: "bundle", generation: secondGeneration))
+        XCTAssertNil(coordinator.beginFailure(batchId: "bundle", generation: firstGeneration))
+        XCTAssertNotNil(coordinator.beginFailure(batchId: "bundle", generation: secondGeneration))
         coordinator.removeBatch(batchId: "bundle")
         store.clear()
     }

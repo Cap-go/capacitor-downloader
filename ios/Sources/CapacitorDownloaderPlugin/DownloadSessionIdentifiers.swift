@@ -7,8 +7,12 @@ enum DownloadSessionIdentifiers {
     static let continuedProcessingSuffix = ".CapacitorDownloader.continuedProcessing."
 
     static func continuedProcessingTaskIdentifier() -> String {
+        continuedProcessingDefaultTaskIdentifier()
+    }
+
+    static func continuedProcessingDefaultTaskIdentifier() -> String {
         let bundleId = Bundle.main.bundleIdentifier ?? "CapacitorDownloader"
-        return bundleId + continuedProcessingSuffix + UUID().uuidString
+        return bundleId + continuedProcessingSuffix + "default"
     }
 
     static func continuedProcessingPermittedIdentifierPattern() -> String {

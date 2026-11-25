@@ -81,6 +81,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             DownloadSessionIdentifiers.main,
             DownloadSessionIdentifiers.wifiOnly
         ]
+        DownloadContinuedProcessingCoordinator.handlingInstance = continuedProcessing
+        continuedProcessing.registerContinuedProcessingTaskHandler()
         continuedProcessing.onDownloadExpired = { [weak self] downloadId in
             self?.cancelDownloadFromContinuedProcessingExpiry(downloadId)
         }
@@ -718,8 +720,16 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             fileCount: parsed.count,
             singleDownloadIds: singleDownloadIds()
         ) else {
-            call.reject("Download already exists")
+            call.reject("Download already exists. Call stop() with the same id first.")
             return
+        }
+
+        if call.getBool("iosContinuedProcessing") == true {
+            guard parseBatchContinuedProcessingRequest(call) != nil else {
+                _ = batchCoordinator.removeBatch(batchId: batchId, generation: generation, unregisterChildren: true)
+                call.reject("title is required when iosContinuedProcessing is true")
+                return
+            }
         }
 
         DownloadCompletedNotificationStore.shared.setText(
@@ -736,6 +746,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         let continuedRequest = parseBatchContinuedProcessingRequest(call)
         continuedProcessing.beginIfPossible(downloadId: batchId, request: continuedRequest) { [weak self] useForeground in
             guard let self else {
+                call.reject("Download plugin was deallocated before the batch could start")
                 return
             }
             if continuedRequest != nil, useForeground {

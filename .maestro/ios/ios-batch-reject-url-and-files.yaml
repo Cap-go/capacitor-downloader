@@ -1,13 +1,10 @@
 appId: app.capgo.downloader
 ---
 - launchApp
-- tapOn:
-    id: maestro-ios-batch-fail
+- tapOn: Maestro iOS batch fail
 - extendedWaitUntil:
     visible:
       text: Provide either url and destination or files, not both
     timeout: 15000
-- assertVisible:
-    id: plugin-output
 - assertVisible:
     text: 'Error:'

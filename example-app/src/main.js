@@ -169,81 +169,43 @@ function buildForm(action) {
 
     const label = document.createElement('label');
     label.textContent = input.label;
-    label.htmlFor = `field-${input.name}`;
+    label.htmlFor = input.name;
 
     let field;
-    switch (input.type) {
-      case 'textarea': {
-        field = document.createElement('textarea');
-        field.rows = input.rows || 4;
-        break;
-      }
-      case 'select': {
-        field = document.createElement('select');
-        (input.options || []).forEach((option) => {
-          const opt = document.createElement('option');
-          opt.value = option.value;
-          opt.textContent = option.label;
-          if (input.value !== undefined && option.value === input.value) {
-            opt.selected = true;
-          }
-          field.appendChild(opt);
-        });
-        break;
-      }
-      case 'checkbox': {
-        field = document.createElement('input');
-        field.type = 'checkbox';
-        field.checked = Boolean(input.value);
-        break;
-      }
-      case 'number': {
-        field = document.createElement('input');
-        field.type = 'number';
-        if (input.value !== undefined && input.value !== null) {
-          field.value = String(input.value);
-        }
-        break;
-      }
-      default: {
-        field = document.createElement('input');
-        field.type = 'text';
-        if (input.value !== undefined && input.value !== null) {
-          field.value = String(input.value);
-        }
-      }
-    }
-
-    field.id = `field-${input.name}`;
-    field.name = input.name;
-    field.dataset.type = input.type || 'text';
-
-    if (input.placeholder && input.type !== 'checkbox') {
-      field.placeholder = input.placeholder;
-    }
-
     if (input.type === 'checkbox') {
-      fieldWrapper.appendChild(field);
-      fieldWrapper.appendChild(label);
+      field = document.createElement('input');
+      field.type = 'checkbox';
+      field.checked = Boolean(input.value);
     } else {
-      fieldWrapper.appendChild(label);
-      fieldWrapper.appendChild(field);
+      field = document.createElement('input');
+      field.type = input.type || 'text';
+      if (input.value !== undefined) {
+        field.value = input.value;
+      }
+      if (input.placeholder) {
+        field.placeholder = input.placeholder;
+      }
     }
+    field.id = input.name;
+    field.name = input.name;
 
+    fieldWrapper.appendChild(label);
+    fieldWrapper.appendChild(field);
     formContainer.appendChild(fieldWrapper);
   });
 }
 
 function getFormValues(action) {
   const values = {};
-  (action.inputs || []).forEach((input) => {
-    const field = document.getElementById(`field-${input.name}`);
-    if (!field) return;
+  if (!action.inputs) {
+    return values;
+  }
+  action.inputs.forEach((input) => {
+    const field = document.getElementById(input.name);
+    if (!field) {
+      return;
+    }
     switch (input.type) {
-      case 'number': {
-        values[input.name] = field.value === '' ? null : Number(field.value);
-        break;
-      }
       case 'checkbox': {
         values[input.name] = field.checked;
         break;
@@ -294,17 +256,27 @@ runButton.addEventListener('click', async () => {
       output.textContent = JSON.stringify(result, null, 2);
     }
   } catch (error) {
-    output.textContent = `Error: ${error?.message ?? error}`;
+    output.textContent = `Error: ${pluginErrorMessage(error)}`;
   }
 });
 
 const MAESTRO_SMALL_FILE_URL =
-  'https://capgo.app/readme-banner.svg?repo=Cap-go/capacitor-downloader';
+  'https://raw.githubusercontent.com/Cap-go/capacitor-downloader/main/assets/github-social-preview.png';
+
+function pluginErrorMessage(error) {
+  if (!error) {
+    return 'unknown error';
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return error.message || error.error || JSON.stringify(error);
+}
 
 function setOutputFromMaestro(result, error) {
   delete output.dataset.maestroOutcome;
   if (error) {
-    output.textContent = `Error: ${error?.message ?? error}`;
+    output.textContent = `Error: ${pluginErrorMessage(error)}`;
     output.dataset.maestroOutcome = 'error';
     return;
   }
@@ -326,25 +298,37 @@ async function removeMaestroListeners(handles) {
   await Promise.all(handles.map((handle) => handle.remove().catch(() => undefined)));
 }
 
-async function statDownloadedFile(destination) {
+async function resolveFileInfoPath(destination) {
   if (!destination?.startsWith('files/')) {
-    throw new Error(`Unsupported maestro destination for Filesystem.stat: ${destination}`);
+    throw new Error(`Unsupported maestro destination: ${destination}`);
   }
   const relative = destination.slice('files/'.length);
   if (Capacitor.getPlatform() === 'ios') {
-    return Filesystem.stat({ directory: Directory.Documents, path: `files/${relative}` });
+    const { uri } = await Filesystem.getUri({ directory: Directory.Documents, path: `files/${relative}` });
+    const path = decodeURIComponent(uri.replace(/^file:\/\//, ''));
+    return path;
   }
-  return Filesystem.stat({ directory: Directory.Data, path: relative });
+  const { uri } = await Filesystem.getUri({ directory: Directory.Data, path: relative });
+  return uri;
 }
 
 async function fillSizesOnDisk(destinations, fileStates) {
   for (let index = 0; index < destinations.length; index += 1) {
-    const stat = await statDownloadedFile(destinations[index]);
-    const size = stat.size ?? 0;
+    const path = await resolveFileInfoPath(destinations[index]);
+    const info = await plugin.getFileInfo({ path });
+    const size = info.size ?? 0;
     if (size <= 0) {
       throw new Error(`File missing or empty on disk: ${destinations[index]}`);
     }
     fileStates[index].sizeOnDisk = size;
+  }
+}
+
+async function clearMaestroBatch(batchId) {
+  try {
+    await plugin.stop({ id: batchId });
+  } catch {
+    // Ignore stale stop.
   }
 }
 
@@ -434,20 +418,24 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
       try {
         while (Date.now() < deadline) {
           if (failedEvent) {
-            throw new Error(failedEvent.error ?? `Download failed for ${failedEvent.id}`);
+            throw new Error(failedEvent.error || `Download failed for ${failedEvent.id}`);
           }
           if (downloadCompleted) {
             await verifyAndroidChildDoneStates();
-            const allDone = fileStates.every((entry) => entry.done);
-            const allSized = fileStates.every((entry) => entry.bytesTotal > 0 && entry.bytesWritten > 0);
-            if (allDone && allSized) {
-              await fillSizesOnDisk(destinations, fileStates);
-              return { downloadCompleted: true, allFilesDone: true, files: fileStates };
+            const allDone = fileStates.every((entry) => entry.done || entry.bytesWritten > 0);
+            if (!allDone) {
+              await sleep(250);
+              continue;
             }
+            await fillSizesOnDisk(destinations, fileStates);
+            if (!fileStates.every((entry) => entry.sizeOnDisk > 0)) {
+              throw new Error('One or more batch files have zero size on disk');
+            }
+            return { downloadCompleted: true, allFilesDone: true, files: fileStates };
           }
           await sleep(250);
         }
-        throw new Error('Timed out waiting for batch downloadCompleted and per-file DONE');
+        throw new Error('Timed out waiting for batch downloadCompleted and per-file completion');
       } finally {
         await dispose();
       }
@@ -456,8 +444,10 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
 }
 
 function formatMaestroBatchSuccess(task, completion, files) {
+  const allFileSizesVerified = completion.files.every((file) => file.sizeOnDisk > 0);
   return {
     maestroBatchComplete: true,
+    allFileSizesVerified,
     downloadCompleted: completion.downloadCompleted,
     allFilesDone: completion.allFilesDone,
     enqueue: task,
@@ -472,28 +462,22 @@ function formatMaestroBatchSuccess(task, completion, files) {
   };
 }
 
-async function runMaestroOkHttpBatch() {
-  const batchId = 'maestro-okhttp-batch';
-  const files = [
-    {
-      url: MAESTRO_SMALL_FILE_URL,
-      destination: 'files/maestro-a.bin',
-    },
-    {
-      url: MAESTRO_SMALL_FILE_URL,
-      destination: 'files/maestro-b.bin',
-    },
-  ];
+async function runMaestroBatchHarness({
+  batchId,
+  files,
+  downloadOptions,
+}) {
   output.textContent = '';
   delete output.dataset.maestroOutcome;
+  await clearMaestroBatch(batchId);
   let tracking;
   try {
     tracking = await startMaestroBatchTracking(batchId, files.length);
     const task = await plugin.download({
       id: batchId,
-      androidHttpEngine: 'okhttp',
       notification: 'hidden',
       files,
+      ...downloadOptions,
     });
     const completion = await tracking.waitForCompletion(files.map((file) => file.destination));
     setOutputFromMaestro(formatMaestroBatchSuccess(task, completion, files));
@@ -502,6 +486,25 @@ async function runMaestroOkHttpBatch() {
   } finally {
     await tracking?.dispose();
   }
+}
+
+async function runMaestroOkHttpBatch() {
+  await runMaestroBatchHarness({
+    batchId: 'maestro-okhttp-batch',
+    files: [
+      {
+        url: MAESTRO_SMALL_FILE_URL,
+        destination: 'files/maestro-a.bin',
+      },
+      {
+        url: MAESTRO_SMALL_FILE_URL,
+        destination: 'files/maestro-b.bin',
+      },
+    ],
+    downloadOptions: {
+      androidHttpEngine: 'okhttp',
+    },
+  });
 }
 
 async function runMaestroMixedEngineBatch() {
@@ -530,34 +533,24 @@ async function runMaestroMixedEngineBatch() {
 }
 
 async function runMaestroIosBatch() {
-  const batchId = 'maestro-ios-batch';
-  const files = [
-    {
-      url: MAESTRO_SMALL_FILE_URL,
-      destination: 'files/maestro-ios-a.bin',
+  await runMaestroBatchHarness({
+    batchId: 'maestro-ios-batch',
+    files: [
+      {
+        url: MAESTRO_SMALL_FILE_URL,
+        destination: 'files/maestro-ios-a.bin',
+      },
+      {
+        url: MAESTRO_SMALL_FILE_URL,
+        destination: 'files/maestro-ios-b.bin',
+      },
+    ],
+    downloadOptions: {
+      iosContinuedProcessing: true,
+      title: 'Maestro batch',
+      description: 'Multi-file continued processing',
     },
-    {
-      url: MAESTRO_SMALL_FILE_URL,
-      destination: 'files/maestro-ios-b.bin',
-    },
-  ];
-  output.textContent = '';
-  delete output.dataset.maestroOutcome;
-  let tracking;
-  try {
-    tracking = await startMaestroBatchTracking(batchId, files.length);
-    const task = await plugin.download({
-      id: batchId,
-      notification: 'hidden',
-      files,
-    });
-    const completion = await tracking.waitForCompletion(files.map((file) => file.destination));
-    setOutputFromMaestro(formatMaestroBatchSuccess(task, completion, files));
-  } catch (error) {
-    setOutputFromMaestro(undefined, error);
-  } finally {
-    await tracking?.dispose();
-  }
+  });
 }
 
 async function runMaestroIosBatchFail() {

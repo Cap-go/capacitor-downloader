@@ -333,6 +333,12 @@ function setMaestroHarnessReady() {
   }
   maestroStatus.textContent = 'maestroReady';
   maestroStatus.dataset.maestroPhase = 'ready';
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      maestroStatus.textContent = 'maestroReady\nmaestroLayoutSettled';
+      maestroStatus.dataset.maestroPhase = 'layoutSettled';
+    });
+  });
 }
 
 function markMaestroHarnessRunning(flowId) {

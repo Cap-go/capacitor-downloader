@@ -49,6 +49,9 @@ final class DownloadBatchCoordinator {
     }
 
     private func activeChildPartsUnlocked(for taskId: String) -> (batchId: String, generation: UInt64, fileIndex: Int)? {
+        guard registeredChildren[taskId] != nil || inactiveBatchChildTaskIds.contains(taskId) else {
+            return nil
+        }
         guard let parts = parsedBatchChildTaskId(taskId),
               let batch = batches[parts.batchId],
               batch.generation == parts.generation,

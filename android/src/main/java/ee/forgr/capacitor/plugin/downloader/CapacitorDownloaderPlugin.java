@@ -715,13 +715,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             }
         };
 
-        ExecutorService executor = downloadManagerExecutor;
-        try {
-            if (executor == null) {
-                throw new RejectedExecutionException("Download manager is not available");
-            }
-            executor.execute(transfer);
-        } catch (RejectedExecutionException e) {
+        if (!runOkHttpTransferWork(transfer)) {
             okHttpDownloadExecutor.abandonTransfer(reservation);
             failOkHttpBatch(batch, "Download manager is shutting down", fileRequest.index);
         }

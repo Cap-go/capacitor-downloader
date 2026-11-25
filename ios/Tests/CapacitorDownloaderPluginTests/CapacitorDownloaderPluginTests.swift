@@ -444,6 +444,19 @@ final class DownloadBatchProgressTests: XCTestCase {
         store.clear()
     }
 
+    func testActiveChildPartsIgnoresUnregisteredBatchShapedSingleDownloadId() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let generation = coordinator.startBatch(batchId: "report", fileCount: 1, singleDownloadIds: []) else {
+            XCTFail("expected batch to start")
+            return
+        }
+        XCTAssertNotNil(coordinator.generation(for: "report"))
+        XCTAssertNil(coordinator.activeChildParts(for: "report#\(generation):99"))
+        coordinator.removeBatch(batchId: "report")
+        store.clear()
+    }
+
     func testPrepareDestinationReplacementAllowsBatchShapedSingleDownloadId() throws {
         let store = DownloadBatchStore(defaults: batchDefaults)
         let coordinator = DownloadBatchCoordinator(store: store)

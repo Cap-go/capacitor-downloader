@@ -8,11 +8,11 @@ import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 import android.app.DownloadManager;
@@ -75,11 +75,7 @@ public class CapacitorDownloaderPluginBatchEntryTest {
 
     @Test
     public void downloadBatchRejectsMixedHttpEngines() throws Exception {
-        PluginCall call = buildBatchCallWithDestinations(
-            "mixed-engine-batch",
-            new String[] { "files/a.bin", "offline/b.bin" },
-            "auto"
-        );
+        PluginCall call = buildBatchCallWithDestinations("mixed-engine-batch", new String[] { "files/a.bin", "offline/b.bin" }, "auto");
         plugin.download(call);
         Shadows.shadowOf(Looper.getMainLooper()).idle();
 

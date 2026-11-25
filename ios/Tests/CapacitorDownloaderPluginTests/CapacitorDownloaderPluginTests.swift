@@ -543,6 +543,32 @@ final class DownloadBatchProgressTests: XCTestCase {
         store.clear()
     }
 
+    func testStartBatchClearsOnlySameBatchIdFinishedChildren() {
+        let store = DownloadBatchStore(defaults: batchDefaults)
+        let coordinator = DownloadBatchCoordinator(store: store)
+        guard let archiveGeneration = coordinator.startBatch(batchId: "media#archive", fileCount: 1, singleDownloadIds: []) else {
+            XCTFail("expected archive batch")
+            return
+        }
+        let archiveChild = coordinator.fileTaskId(batchId: "media#archive", generation: archiveGeneration, fileIndex: 0)
+        _ = coordinator.registerStartupChildren(
+            batchId: "media#archive",
+            generation: archiveGeneration,
+            children: [(archiveChild, 0)]
+        )
+        _ = coordinator.markFileCompleted(batchId: "media#archive", generation: archiveGeneration, fileIndex: 0)
+        XCTAssertEqual(coordinator.childFileStatus(taskId: archiveChild)?.0, "DONE")
+
+        guard coordinator.startBatch(batchId: "media", fileCount: 1, singleDownloadIds: []) != nil else {
+            XCTFail("expected media batch")
+            return
+        }
+        XCTAssertEqual(coordinator.childFileStatus(taskId: archiveChild)?.0, "DONE")
+
+        coordinator.removeBatch(batchId: "media")
+        store.clear()
+    }
+
     func testBatchStartupResumeOutcomeTreatsFastCompletionAsProceed() {
         let store = DownloadBatchStore(defaults: batchDefaults)
         let coordinator = DownloadBatchCoordinator(store: store)

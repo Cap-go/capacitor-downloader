@@ -139,9 +139,6 @@ final class DownloadBatchCoordinator {
 
         let generation = (batchGenerations[batchId] ?? 0) + 1
         batchGenerations[batchId] = generation
-        finishedChildStatuses = finishedChildStatuses.filter { key, _ in
-            !key.hasPrefix("\(batchId)#")
-        }
 
         for index in 0..<fileCount {
             let childId = fileTaskId(batchId: batchId, generation: generation, fileIndex: index)
@@ -153,6 +150,8 @@ final class DownloadBatchCoordinator {
                 return nil
             }
         }
+
+        clearFinishedChildStatusesForBatchLocked(batchId: batchId)
 
         batches[batchId] = ActiveBatch(
             batchId: batchId,
@@ -530,10 +529,21 @@ final class DownloadBatchCoordinator {
         return childTaskIds
     }
 
-    private func clearFinishedChildStatusesLocked(batchId: String, generation: UInt64) {
-        let prefix = "\(batchId)#\(generation):"
+    private func clearFinishedChildStatusesForBatchLocked(batchId: String) {
         finishedChildStatuses = finishedChildStatuses.filter { key, _ in
-            !key.hasPrefix(prefix)
+            guard let parts = parsedBatchChildTaskId(key) else {
+                return true
+            }
+            return parts.batchId != batchId
+        }
+    }
+
+    private func clearFinishedChildStatusesLocked(batchId: String, generation: UInt64) {
+        finishedChildStatuses = finishedChildStatuses.filter { key, _ in
+            guard let parts = parsedBatchChildTaskId(key) else {
+                return true
+            }
+            return !(parts.batchId == batchId && parts.generation == generation)
         }
     }
 

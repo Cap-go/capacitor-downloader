@@ -481,8 +481,6 @@ public class OkHttpDownloadExecutor {
             File committed = active.committedDestination;
             if (committed != null && committed.exists()) {
                 committed.delete();
-            } else if (destinationFile != null && destinationFile.exists()) {
-                destinationFile.delete();
             }
         }
         activeDownloads.remove(id, active);

@@ -482,16 +482,16 @@ public class CapacitorDownloaderPlugin extends Plugin {
         final JSObject headers = call.getObject("headers");
         final String network = call.getString("network");
         final String lengthHeader = call.getString("lengthHeader");
-        final int batchRetries;
-        try {
-            batchRetries = DownloadConnectionRetry.normalizeRetries(call.getInt("retries"));
-        } catch (IllegalArgumentException e) {
-            rollbackBatch(batchState);
-            call.reject(e.getMessage(), e);
-            return;
-        }
 
         if (!fileRequests.isEmpty() && fileRequests.get(0).okHttp) {
+            final int batchRetries;
+            try {
+                batchRetries = DownloadConnectionRetry.normalizeRetries(call.getInt("retries"));
+            } catch (IllegalArgumentException e) {
+                rollbackBatch(batchState);
+                call.reject(e.getMessage(), e);
+                return;
+            }
             downloadBatchWithOkHttp(call, batchState, fileRequests, headers, network, notification, batchRetries, lengthHeader);
             return;
         }

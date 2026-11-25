@@ -5,6 +5,7 @@ Native checks for multi-file batch downloads. Build and install the example app 
 ## Prerequisites
 
 - [Maestro CLI](https://maestro.mobile.dev/) installed
+- Plugin build from the repo root: `bun install && bun run build` (the example app depends on the local `file:..` package)
 - Example app synced and installed on a device or emulator:
   - Android: `cd example-app && bun install && bun run build && bunx cap sync android`
   - iOS: `cd example-app && bun install && bun run build && bunx cap sync ios`

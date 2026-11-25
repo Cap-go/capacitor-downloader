@@ -4,11 +4,11 @@ appId: app.capgo.downloader
 - tapOn: Maestro OkHttp batch
 - extendedWaitUntil:
     visible:
-      text: '"maestroBatchComplete": true'
+      text: maestroBatchComplete
     timeout: 120000
 - assertVisible:
-    text: '"downloadCompleted": true'
+    text: allFileSizesVerified
 - assertVisible:
-    text: '"allFilesDone": true'
+    text: downloadCompleted
 - assertVisible:
-    text: '"allFileSizesVerified": true'
+    text: allFilesDone

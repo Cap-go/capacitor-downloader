@@ -1288,7 +1288,7 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                         ]
                     )
                 case .none:
-                    break
+                    try? FileManager.default.removeItem(at: destinationURL)
                 }
                 batchCoordinator.unregisterChildTask(id)
                 batchCoordinator.clearInactiveBatchChildTask(id)

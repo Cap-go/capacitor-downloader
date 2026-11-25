@@ -580,7 +580,7 @@ Configuration options for starting a single-file download.
 
 Configuration options for a multi-file batch download.
 
-On Android, each file uses the same `androidHttpEngine` destination rules as a single download. Since 8.9.0 a batch whose files all resolve to OkHttp runs through OkHttp, with one progress notification and foreground service for the whole batch when `notification` is `'progress'`; a batch that mixes engines is rejected.
+On Android, each file uses the same `androidHttpEngine` destination rules as a single download. Since 8.9.0 a batch whose files all resolve to OkHttp runs through OkHttp, with one progress notification and optional foreground service for the whole batch when `notification` is `'progress'` (transfers continue if the service cannot start). A batch that mixes engines is rejected.
 
 **Process death:** On Android, batch state lives in memory only and is lost when the host process is killed (DownloadManager work may still finish, but the plugin does not rebuild batch progress). On iOS, batch metadata is persisted in `DownloadBatchStore` (UserDefaults) and restored when the plugin initializes.
 

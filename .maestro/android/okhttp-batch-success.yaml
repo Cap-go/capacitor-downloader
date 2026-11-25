@@ -1,0 +1,13 @@
+appId: app.capgo.downloader
+---
+- launchApp
+- tapOn:
+    id: maestro-okhttp-batch
+- extendedWaitUntil:
+    visible:
+      text: '"state": "RUNNING"'
+    timeout: 15000
+- assertVisible:
+    id: plugin-output
+- assertVisible:
+    text: '"id": "maestro-okhttp-batch"'

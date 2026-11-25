@@ -1331,6 +1331,9 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
         let stillCurrent = tasks[id] === downloadTask
         tasksLock.unlock()
         guard stillCurrent else {
+            if batchCoordinator.childParts(for: id) != nil || batchCoordinator.isOwnedBatchChild(taskId: id) {
+                batchCoordinator.clearInactiveBatchChildTask(id)
+            }
             return
         }
 

@@ -27,6 +27,17 @@ body {
   padding: 2rem;
 }
 
+.maestro-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.maestro-actions button {
+  flex: 1 1 auto;
+  min-width: 8rem;
+}
+
 main.container {
   width: min(720px, 100%);
   background: rgba(15, 23, 42, 0.85);

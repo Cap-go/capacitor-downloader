@@ -297,6 +297,87 @@ runButton.addEventListener('click', async () => {
   }
 });
 
+function setOutputFromMaestro(result, error) {
+  if (error) {
+    output.textContent = `Error: ${error?.message ?? error}`;
+    output.dataset.maestroOutcome = 'error';
+    return;
+  }
+  if (result === undefined) {
+    output.textContent = 'Action completed.';
+    output.dataset.maestroOutcome = 'ok';
+    return;
+  }
+  if (typeof result === 'string') {
+    output.textContent = result;
+    output.dataset.maestroOutcome = 'ok';
+    return;
+  }
+  output.textContent = JSON.stringify(result, null, 2);
+  output.dataset.maestroOutcome = 'ok';
+}
+
+async function runMaestroOkHttpBatch() {
+  output.dataset.maestroOutcome = 'pending';
+  try {
+    const task = await plugin.download({
+      id: 'maestro-okhttp-batch',
+      androidHttpEngine: 'okhttp',
+      notification: 'hidden',
+      files: [
+        {
+          url: 'https://httpbin.org/bytes/128',
+          destination: 'files/maestro-a.bin',
+        },
+        {
+          url: 'https://httpbin.org/bytes/128',
+          destination: 'files/maestro-b.bin',
+        },
+      ],
+    });
+    setOutputFromMaestro(task);
+  } catch (error) {
+    setOutputFromMaestro(undefined, error);
+  }
+}
+
+async function runMaestroMixedEngineBatch() {
+  output.dataset.maestroOutcome = 'pending';
+  try {
+    const task = await plugin.download({
+      id: 'maestro-mixed-batch',
+      androidHttpEngine: 'auto',
+      notification: 'hidden',
+      files: [
+        {
+          url: 'https://httpbin.org/bytes/64',
+          destination: 'files/maestro-mixed-a.bin',
+        },
+        {
+          url: 'https://httpbin.org/bytes/64',
+          destination: 'offline/maestro-mixed-b.bin',
+        },
+      ],
+    });
+    setOutputFromMaestro(task);
+  } catch (error) {
+    setOutputFromMaestro(undefined, error);
+  }
+}
+
+const maestroOkHttpBatch = document.getElementById('maestro-okhttp-batch');
+const maestroMixedBatchFail = document.getElementById('maestro-mixed-batch-fail');
+if (maestroOkHttpBatch) {
+  maestroOkHttpBatch.addEventListener('click', () => {
+    void runMaestroOkHttpBatch();
+  });
+}
+if (maestroMixedBatchFail) {
+  maestroMixedBatchFail.addEventListener('click', () => {
+    void runMaestroMixedEngineBatch();
+  });
+}
+
 populateActions();
 
 if (Capacitor.isNativePlatform()) {

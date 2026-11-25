@@ -713,11 +713,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
                                 return;
                             }
                             if (!ownsBatch(batchId, batch)) {
-                                okHttpDownloadExecutor.clearCompleted(childId);
+                                okHttpDownloadExecutor.clearCompleted(reservation);
                                 return;
                             }
                             long[] bytes = okHttpDownloadExecutor.progressBytes(childId);
-                            okHttpDownloadExecutor.clearCompleted(childId);
+                            okHttpDownloadExecutor.clearCompleted(reservation);
                             if (success) {
                                 completeOkHttpBatchFile(batch, fileRequest.index, bytes[0], bytes[1]);
                             } else {

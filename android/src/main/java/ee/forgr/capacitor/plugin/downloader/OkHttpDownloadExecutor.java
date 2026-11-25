@@ -520,8 +520,17 @@ public class OkHttpDownloadExecutor {
 
     public void clearCompleted(String id) {
         ActiveDownload active = activeDownloads.get(id);
-        if (active != null && (active.state == State.DONE || active.state == State.ERROR || active.state == State.CANCELLED)) {
-            activeDownloads.remove(id, active);
+        if (active != null) {
+            clearCompleted(active);
+        }
+    }
+
+    public void clearCompleted(ActiveDownload reserved) {
+        if (reserved == null) {
+            return;
+        }
+        if (reserved.state == State.DONE || reserved.state == State.ERROR || reserved.state == State.CANCELLED) {
+            activeDownloads.remove(reserved.id, reserved);
         }
     }
 

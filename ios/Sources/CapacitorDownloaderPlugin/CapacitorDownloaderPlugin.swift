@@ -1076,7 +1076,8 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
-        if let childStatus = batchCoordinator.childFileStatus(taskId: id) {
+        if batchCoordinator.isOwnedBatchChild(taskId: id),
+           let childStatus = batchCoordinator.childFileStatus(taskId: id) {
             var payload: [String: Any] = [
                 "id": id,
                 "state": childStatus.state,
@@ -1109,6 +1110,19 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 "state": state,
                 "progress": task.progress.fractionCompleted
             ])
+            return
+        }
+
+        if let childStatus = batchCoordinator.childFileStatus(taskId: id) {
+            var payload: [String: Any] = [
+                "id": id,
+                "state": childStatus.state,
+                "progress": childStatus.progress
+            ]
+            if let path = childStatus.path {
+                payload["path"] = path
+            }
+            call.resolve(payload)
             return
         }
 

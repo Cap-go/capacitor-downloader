@@ -51,14 +51,17 @@ final class DownloadContinuedProcessingCoordinator {
 
   @available(iOS 26.0, *)
   private func handleContinuedProcessingTaskLaunch(_ task: BGTask) {
+    lock.lock()
     continuedLaunchFallback?.cancel()
     continuedLaunchFallback = nil
+    let downloadId = pendingContinuedDownloadId
+    lock.unlock()
     guard let continued = task as? BGContinuedProcessingTask else {
       task.setTaskCompleted(success: false)
       completePendingContinuedLaunch(useForeground: false)
       return
     }
-  guard let downloadId = pendingContinuedDownloadId else {
+    guard let downloadId else {
       task.setTaskCompleted(success: false)
       completePendingContinuedLaunch(useForeground: false)
       return
@@ -143,10 +146,12 @@ final class DownloadContinuedProcessingCoordinator {
             return
         }
         lock.lock()
+        let superseded = pendingContinuedLaunch
         pendingContinuedLaunch = onReady
         pendingContinuedDownloadId = downloadId
         continuedLaunchFallback?.cancel()
         lock.unlock()
+        superseded?(false)
 
         var fallback = DispatchWorkItem { [weak self] in
             self?.completePendingContinuedLaunch(useForeground: false)
@@ -166,7 +171,10 @@ final class DownloadContinuedProcessingCoordinator {
         do {
             try BGTaskScheduler.shared.submit(processingRequest)
         } catch {
+            lock.lock()
             continuedLaunchFallback?.cancel()
+            continuedLaunchFallback = nil
+            lock.unlock()
             completePendingContinuedLaunch(useForeground: false)
         }
     }

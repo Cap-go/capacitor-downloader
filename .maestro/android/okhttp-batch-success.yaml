@@ -12,3 +12,5 @@ appId: app.capgo.downloader
     text: downloadCompleted
 - assertVisible:
     text: allFilesDone
+- assertVisible:
+    text: '"done": true'

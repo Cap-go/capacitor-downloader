@@ -422,7 +422,7 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
           }
           if (downloadCompleted) {
             await verifyAndroidChildDoneStates();
-            const allDone = fileStates.every((entry) => entry.done || entry.bytesWritten > 0);
+            const allDone = fileStates.every((entry) => entry.done);
             if (!allDone) {
               await sleep(250);
               continue;

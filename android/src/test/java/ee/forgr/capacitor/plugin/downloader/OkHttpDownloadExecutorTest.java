@@ -700,7 +700,7 @@ public class OkHttpDownloadExecutorTest {
 
     @Test(timeout = 30_000)
     public void cancelUnlessCommittedPreservesPreexistingDestination() throws Exception {
-        byte[] payload = "partial".getBytes(StandardCharsets.UTF_8);
+        byte[] payload = new byte[512 * 1024];
         byte[] preexisting = "keep-me".getBytes(StandardCharsets.UTF_8);
         CountDownLatch requestStarted = new CountDownLatch(1);
         server.setDispatcher(
@@ -712,7 +712,7 @@ public class OkHttpDownloadExecutorTest {
                         return new MockResponse()
                             .setBody(new okio.Buffer().write(payload))
                             .addHeader("Content-Length", String.valueOf(payload.length))
-                            .setBodyDelay(5, TimeUnit.SECONDS);
+                            .throttleBody(512, 1, TimeUnit.SECONDS);
                     }
                     return new MockResponse().setResponseCode(404);
                 }
@@ -726,17 +726,20 @@ public class OkHttpDownloadExecutorTest {
         CountDownLatch finished = new CountDownLatch(1);
         OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer(taskId);
         assertNotNull(reservation);
-        executor.start(
-            reservation,
-            server.url("/preserve-dest").toString(),
-            destination,
-            new JSObject(),
-            "cellular",
-            0,
-            null,
-            (id, progress) -> {},
-            (id, ok, cancelled, errorMessage) -> finished.countDown()
+        Thread transfer = new Thread(() ->
+            executor.start(
+                reservation,
+                server.url("/preserve-dest").toString(),
+                destination,
+                new JSObject(),
+                "cellular",
+                0,
+                null,
+                (id, progress) -> {},
+                (id, ok, cancelled, errorMessage) -> finished.countDown()
+            )
         );
+        transfer.start();
 
         assertTrue(requestStarted.await(20, TimeUnit.SECONDS));
         assertTrue(executor.cancelUnlessCommitted(taskId, destination));

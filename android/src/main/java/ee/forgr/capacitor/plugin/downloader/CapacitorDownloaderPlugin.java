@@ -709,7 +709,11 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         }),
                     (childId, success, cancelled, errorMessage) ->
                         handler.post(() -> {
-                            if (cancelled || !ownsBatch(batchId, batch)) {
+                            if (cancelled) {
+                                return;
+                            }
+                            if (!ownsBatch(batchId, batch)) {
+                                okHttpDownloadExecutor.clearCompleted(childId);
                                 return;
                             }
                             okHttpDownloadExecutor.clearCompleted(childId);
@@ -737,9 +741,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
     }
 
     private void completeOkHttpBatchFile(DownloadBatchState batch, int fileIndex) {
-        completeBatchFile(batch.batchId, fileIndex, 0, 0);
-        if (!ownsBatch(batch.batchId, batch)) {
-            finishOkHttpBatchIfCurrent(batch, true);
+        BatchFileCompletionResult completion = completeBatchFile(batch.batchId, fileIndex, 0, 0);
+        if (completion.allDone && !ownsBatch(batch.batchId, batch)) {
+            finishOkHttpBatchIfCurrent(batch, true, !completion.usedCustomCompletionNotification);
         }
     }
 
@@ -761,12 +765,31 @@ public class CapacitorDownloaderPlugin extends Plugin {
         return okHttpBatches.remove(batch.batchId, ownership) ? ownership : null;
     }
 
-    private void finishOkHttpBatchIfCurrent(DownloadBatchState batch, boolean success) {
+    private void finishOkHttpBatchIfCurrent(DownloadBatchState batch, boolean success, boolean notifyDefaultCompletion) {
         OkHttpBatchOwnership ownership = takeOkHttpBatchOwnership(batch);
         if (ownership == null) {
             return;
         }
         okHttpProgressNotifier.finished(batch.batchId, success);
+        if (success && notifyDefaultCompletion) {
+            String notificationMode = batch.notification != null ? batch.notification : "completed";
+            if (!OkHttpDownloadProgressNotifier.shouldShowProgressForMode(notificationMode)) {
+                DownloadCompletionNotifier.notifyIfRequested(getContext(), batch.batchId, notificationMode, true);
+            }
+        }
+    }
+
+    private static final class BatchFileCompletionResult {
+
+        final boolean allDone;
+        final boolean usedCustomCompletionNotification;
+
+        BatchFileCompletionResult(boolean allDone, boolean usedCustomCompletionNotification) {
+            this.allDone = allDone;
+            this.usedCustomCompletionNotification = usedCustomCompletionNotification;
+        }
+
+        static final BatchFileCompletionResult IN_PROGRESS = new BatchFileCompletionResult(false, false);
     }
 
     /**
@@ -985,10 +1008,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
         notifyListeners("downloadProgress", progressData);
     }
 
-    private void completeBatchFile(String batchId, int fileIndex, long bytesDownloaded, long bytesTotal) {
+    private BatchFileCompletionResult completeBatchFile(String batchId, int fileIndex, long bytesDownloaded, long bytesTotal) {
         DownloadBatchState batch = batches.get(batchId);
         if (batch == null || batch.failed.get() || batch.cancelled.get()) {
-            return;
+            return BatchFileCompletionResult.IN_PROGRESS;
         }
 
         boolean allDone = batch.markFileCompleted(fileIndex);
@@ -998,7 +1021,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
             final long storedGeneration = batch.generation;
             stopBatchProgressPolling(batchId, storedGeneration);
             if (!batches.remove(batchId, batch)) {
-                return;
+                return BatchFileCompletionResult.IN_PROGRESS;
             }
             for (String childId : new ArrayList<>(batch.ownedChildIds)) {
                 unregisterBatchChild(batchId, childId);
@@ -1009,11 +1032,14 @@ public class CapacitorDownloaderPlugin extends Plugin {
             completedData.put("id", batchId);
             notifyListeners("downloadCompleted", completedData);
             String completionText = completedNotificationStore.takeText(batchId, storedGeneration);
-            if (completionText != null) {
+            boolean usedCustomCompletionNotification = completionText != null;
+            if (usedCustomCompletionNotification) {
                 DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), batchId, completionText);
             }
             discardFailedNotificationText(batchId, storedGeneration);
+            return new BatchFileCompletionResult(true, usedCustomCompletionNotification);
         }
+        return BatchFileCompletionResult.IN_PROGRESS;
     }
 
     private void downloadWithOkHttp(

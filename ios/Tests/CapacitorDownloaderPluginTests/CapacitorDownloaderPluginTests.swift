@@ -521,7 +521,7 @@ final class DownloadBatchProgressTests: XCTestCase {
         store.clear()
     }
 
-    func testTakeBatchForStopIsAtomicWithStartupRegistration() {
+    func testTakeBatchForStopRemovesBatchAndReturnsChildren() {
         let store = DownloadBatchStore(defaults: batchDefaults)
         let coordinator = DownloadBatchCoordinator(store: store)
         guard let generation = coordinator.startBatch(batchId: "bundle", fileCount: 1, singleDownloadIds: []) else {

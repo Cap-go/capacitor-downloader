@@ -611,9 +611,6 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let self else {
                 return
             }
-            if continuedRequest != nil, useForeground {
-                self.setContinuedProcessingGeneration(downloadId: id, generation: generation)
-            }
             self.tasksLock.lock()
             self.pendingDownloadStarts.remove(id)
             self.tasksLock.unlock()
@@ -970,7 +967,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
         }
         cancelBatchTasks(taskIds: childTaskIds)
         markBatchContinuedProcessingFinished(batchId: batchId, generation: generation, success: false)
-        batchCoordinator.removeBatch(batchId: batchId, unregisterChildren: false)
+        _ = batchCoordinator.removeBatch(batchId: batchId, generation: generation, unregisterChildren: false)
         DownloadCompletedNotificationStore.shared.removeText(for: batchId, generation: generation)
         presentFailedDownloadNotificationIfStored(downloadId: batchId, generation: generation)
         var data: [String: Any] = ["id": batchId, "error": error]

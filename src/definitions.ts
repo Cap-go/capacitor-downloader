@@ -101,8 +101,8 @@ export interface DownloadOptions {
    * Title shown on the Android DownloadManager progress notification, and on iOS on the continued processing task
    * when `iosContinuedProcessing` is set.
    *
-   * When omitted or empty, the system uses its default (typically the destination file name).
-   * On Android OkHttp, used when `notification` is `'progress'` (including OkHttp batches). Ignored on Web.
+   * When omitted or empty, DownloadManager uses its default (typically the destination file name). On Android OkHttp,
+   * used when `notification` is `'progress'`. iOS continued processing requires a non-empty `title`. Ignored on Web.
    *
    * @since 8.6.0
    */
@@ -276,7 +276,8 @@ export interface DownloadBatchOptions {
    * Title shown on the Android progress notification of the batch, and on iOS on the continued processing task when
    * `iosContinuedProcessing` is set.
    *
-   * When omitted or empty, the system uses its default (typically the destination file name). Ignored on Web.
+   * When omitted or empty, DownloadManager uses its default (typically the destination file name); OkHttp uses
+   * "Downloading". iOS continued processing requires a non-empty `title`. Ignored on Web.
    *
    * @since 8.6.0
    */

@@ -372,6 +372,17 @@ final class DownloadBatchCoordinator {
         removeBatchLocked(batchId: batchId, unregisterChildren: unregisterChildren)
     }
 
+    @discardableResult
+    func removeBatch(batchId: String, generation: UInt64, unregisterChildren: Bool) -> Bool {
+        batchesLock.lock()
+        defer { batchesLock.unlock() }
+        guard let batch = batches[batchId], batch.generation == generation else {
+            return false
+        }
+        removeBatchLocked(batchId: batchId, unregisterChildren: unregisterChildren)
+        return true
+    }
+
     func destinationsForCancellation(batchId: String) -> [String] {
         batchesLock.lock()
         defer { batchesLock.unlock() }

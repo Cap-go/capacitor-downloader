@@ -15,4 +15,6 @@ appId: app.capgo.downloader
 - assertVisible:
     text: '.*"allFilesDone": ?true.*'
 - assertVisible:
-    text: '.*"done": ?true.*'
+    text: '.*"allChildrenCompleted": ?true.*'
+- assertVisible:
+    text: '.*COMPLETED.*'

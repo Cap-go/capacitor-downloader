@@ -101,6 +101,9 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
                 semaphore.signal()
             }
             _ = semaphore.wait(timeout: .now() + 5)
+            if !didRestoreGenerationsBeforeDelegateRegistration {
+                registerDownloadDelegateIfGenerationsRestored()
+            }
         } else {
             DownloadBackgroundSessionManager.shared.rehydrateTasks(completion: finishLoad)
         }

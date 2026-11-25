@@ -445,11 +445,12 @@ final class DownloadBatchCoordinator {
         batches[batchId] = batch
         if batch.completedCount >= batch.fileCount {
             let generation = batch.generation
-            if startupPendingGenerations[batchId] == generation {
-                startupCompletedBeforeResolve[batchId] = generation
-            }
+            let fastStartup = startupPendingGenerations[batchId] == generation
             startupPendingGenerations.removeValue(forKey: batchId)
             removeBatchLocked(batchId: batchId, unregisterChildren: true)
+            if fastStartup {
+                startupCompletedBeforeResolve[batchId] = generation
+            }
             return .allSucceeded(batchId: batchId, generation: generation)
         }
         persistBatchesImmediatelyLocked()

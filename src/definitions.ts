@@ -452,9 +452,9 @@ export interface CapacitorDownloaderPlugin {
    * Check the current status of a download.
    *
    * Reports active URLSession/OkHttp/DownloadManager work. Batch child ids also resolve from in-memory batch
-   * progress while that batch row exists. On iOS, children that finish successfully keep resolving as `DONE`
-   * (with `path` when known) for the rest of the process lifetime; only after an app restart can they reject
-   * with "Task not found".
+   * progress while that batch row exists. On iOS, children from a finished batch keep resolving as `DONE`
+   * (with `path` when known) until the app restarts or a new batch reuses the same batch id; if a batch
+   * fails or is stopped, or after an app restart, those child ids reject with "Task not found".
    *
    * @param options - Options containing the download task ID
    * @returns Promise with current download task status

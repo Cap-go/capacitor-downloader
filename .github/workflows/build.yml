@@ -46,23 +46,36 @@ jobs:
         with:
           node-version: 26.x
           registry-url: 'https://registry.npmjs.org'
+      - name: Check if version is already published on npm
+        id: npm_check
+        run: |
+          PKG=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "${PKG}@${VERSION}" version >/dev/null 2>&1; then
+            echo "already_published=true" >> "$GITHUB_OUTPUT"
+            echo "Skipping npm stage: ${PKG}@${VERSION} is already published."
+          else
+            echo "already_published=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Install npm CLI for staged publishing
+        if: steps.npm_check.outputs.already_published != 'true'
         run: npm install -g npm@^11.15.0
       - name: Stage publish to npm
-        if: ${{ !contains(github.ref, '-alpha.') }}
+        if: ${{ steps.npm_check.outputs.already_published != 'true' && !contains(github.ref, '-alpha.') }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           npm --version
           npm stage publish --provenance --access public --ignore-scripts
       - name: Stage publish to npm with next tag
-        if: ${{ contains(github.ref, '-alpha.') }}
+        if: ${{ steps.npm_check.outputs.already_published != 'true' && contains(github.ref, '-alpha.') }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           npm --version
           npm stage publish --tag next --provenance --access public --ignore-scripts
       - name: Request stage approval
+        if: steps.npm_check.outputs.already_published != 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.NPM_STAGE_DISPATCH_TOKEN }}

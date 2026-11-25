@@ -153,7 +153,10 @@ const formContainer = document.getElementById('action-form');
 const descriptionBox = document.getElementById('action-description');
 const runButton = document.getElementById('run-action');
 const output = document.getElementById('plugin-output');
+const maestroStatus = document.getElementById('maestro-status');
 const maestroHarnessDiagnostics = [];
+const MAESTRO_STEP_TIMEOUT_MS = 15_000;
+const MAESTRO_CHILD_CHECKSTATUS_POLL_MS = 5_000;
 
 function buildForm(action) {
   formContainer.innerHTML = '';
@@ -325,13 +328,40 @@ function resetMaestroHarnessDiagnostics() {
 }
 
 function setMaestroHarnessReady() {
-  output.textContent = 'maestroReady';
-  output.dataset.maestroOutcome = 'ready';
+  if (!maestroStatus) {
+    return;
+  }
+  maestroStatus.textContent = 'maestroReady';
+  maestroStatus.dataset.maestroPhase = 'ready';
 }
 
 function markMaestroHarnessRunning(flowId) {
-  output.textContent = `maestroRunning: ${flowId}`;
-  output.dataset.maestroOutcome = 'running';
+  if (!maestroStatus) {
+    return;
+  }
+  maestroStatus.textContent = `maestroRunning: ${flowId}`;
+  maestroStatus.dataset.maestroPhase = 'running';
+}
+
+async function withMaestroStepTimeout(stepName, fn) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const message = `stuck at: ${stepName}`;
+      appendMaestroHarnessDiagnostic(message);
+      reject(new Error(message));
+    }, MAESTRO_STEP_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([Promise.resolve().then(fn), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function isMaestroStopNotFoundError(error) {
+  const message = pluginErrorMessage(error).toLowerCase();
+  return message.includes('task not found') || message.includes('download not found');
 }
 
 function appendMaestroHarnessDiagnostic(message) {
@@ -432,6 +462,9 @@ async function clearMaestroBatch(batchId) {
   try {
     await invokeCapacitor(`stop(${batchId})`, () => plugin.stop({ id: batchId }));
   } catch (error) {
+    if (isMaestroStopNotFoundError(error)) {
+      return;
+    }
     appendMaestroHarnessDiagnostic(`clearMaestroBatch stop(${batchId}): ${pluginErrorMessage(error)}`);
     throw error;
   }
@@ -549,17 +582,28 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
       throw new Error(`Missing child task id for file index ${fileIndex}`);
     }
     entry.childTaskId = childId;
-    const status = await invokeCapacitor('checkStatus', () => plugin.checkStatus({ id: childId }));
-    entry.checkStatusState = status.state ?? null;
-    entry.checkStatusLabel = maestroChildCheckStatusLabel(status);
-    entry.checkStatusSource = 'checkStatus';
-    if (!isMaestroChildCheckStatusCompleted(status)) {
-      throw new Error(
-        `checkStatus(${childId}): not completed (state=${String(status.state)}, status=${String(status.status)})`,
-      );
+    const deadline = Date.now() + MAESTRO_CHILD_CHECKSTATUS_POLL_MS;
+    let lastReject;
+    while (Date.now() < deadline) {
+      try {
+        const status = await invokeCapacitor('checkStatus', () => plugin.checkStatus({ id: childId }));
+        entry.checkStatusState = status.state ?? null;
+        entry.checkStatusLabel = maestroChildCheckStatusLabel(status);
+        entry.checkStatusSource = 'checkStatus';
+        if (isMaestroChildCheckStatusCompleted(status)) {
+          entry.checkStatusCompleted = true;
+          entry.done = true;
+          return;
+        }
+        lastReject = new Error(
+          `checkStatus(${childId}): not completed (state=${String(status.state)}, status=${String(status.status)})`,
+        );
+      } catch (error) {
+        lastReject = error instanceof Error ? error : new Error(pluginErrorMessage(error));
+      }
+      await sleep(200);
     }
-    entry.checkStatusCompleted = true;
-    entry.done = true;
+    throw lastReject ?? new Error(`checkStatus(${childId}): timed out waiting for COMPLETED`);
   };
 
   const verifyAllChildDoneStatesViaCheckStatus = async () => {
@@ -656,19 +700,22 @@ async function runMaestroBatchHarness({
   files,
   downloadOptions,
 }) {
-  markMaestroHarnessRunning(batchId);
   resetMaestroHarnessDiagnostics();
-  await clearMaestroBatch(batchId);
+  await withMaestroStepTimeout('clearMaestroBatch', () => clearMaestroBatch(batchId));
   let tracking;
   try {
-    tracking = await startMaestroBatchTracking(batchId, files.length);
-    const task = await invokeCapacitor('download', () =>
-      plugin.download({
-        id: batchId,
-        notification: 'hidden',
-        files,
-        ...downloadOptions,
-      }),
+    tracking = await withMaestroStepTimeout('startMaestroBatchTracking', () =>
+      startMaestroBatchTracking(batchId, files.length),
+    );
+    const task = await withMaestroStepTimeout('download', () =>
+      invokeCapacitor('download', () =>
+        plugin.download({
+          id: batchId,
+          notification: 'hidden',
+          files,
+          ...downloadOptions,
+        }),
+      ),
     );
     applyMaestroBatchEnqueueMetadata(task, tracking);
     if (
@@ -709,9 +756,9 @@ async function runMaestroOkHttpBatch() {
 }
 
 async function runMaestroMixedEngineBatch() {
-  markMaestroHarnessRunning('maestro-mixed-batch');
   try {
-    const task = await invokeCapacitor('download', () =>
+    const task = await withMaestroStepTimeout('download', () =>
+      invokeCapacitor('download', () =>
       plugin.download({
         id: 'maestro-mixed-batch',
         androidHttpEngine: 'auto',
@@ -727,6 +774,7 @@ async function runMaestroMixedEngineBatch() {
           },
         ],
       }),
+    ),
     );
     setOutputFromMaestro(task);
   } catch (error) {
@@ -756,9 +804,9 @@ async function runMaestroIosBatch() {
 }
 
 async function runMaestroIosBatchFail() {
-  markMaestroHarnessRunning('maestro-ios-batch-fail');
   try {
-    const task = await invokeCapacitor('download', () =>
+    const task = await withMaestroStepTimeout('download', () =>
+      invokeCapacitor('download', () =>
       plugin.download({
         id: 'maestro-ios-batch-fail',
         url: 'https://example.com/only-single',
@@ -771,6 +819,7 @@ async function runMaestroIosBatchFail() {
           },
         ],
       }),
+    ),
     );
     setOutputFromMaestro(task);
   } catch (error) {
@@ -784,21 +833,25 @@ const maestroIosBatch = document.getElementById('maestro-ios-batch');
 const maestroIosBatchFail = document.getElementById('maestro-ios-batch-fail');
 if (maestroOkHttpBatch) {
   maestroOkHttpBatch.addEventListener('click', () => {
+    markMaestroHarnessRunning('maestro-okhttp-batch');
     void runMaestroOkHttpBatch();
   });
 }
 if (maestroMixedBatchFail) {
   maestroMixedBatchFail.addEventListener('click', () => {
+    markMaestroHarnessRunning('maestro-mixed-batch');
     void runMaestroMixedEngineBatch();
   });
 }
 if (maestroIosBatch) {
   maestroIosBatch.addEventListener('click', () => {
+    markMaestroHarnessRunning('maestro-ios-batch');
     void runMaestroIosBatch();
   });
 }
 if (maestroIosBatchFail) {
   maestroIosBatchFail.addEventListener('click', () => {
+    markMaestroHarnessRunning('maestro-ios-batch-fail');
     void runMaestroIosBatchFail();
   });
 }

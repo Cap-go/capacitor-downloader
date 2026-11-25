@@ -3,11 +3,13 @@ appId: app.capgo.downloader
 - launchApp
 - extendedWaitUntil:
     visible:
+      id: maestro-status
       text: maestroReady
     timeout: 60000
 - tapOn: Maestro iOS batch fail
 - extendedWaitUntil:
     visible:
+      id: maestro-status
       text: '.*maestroRunning:.*'
     timeout: 15000
 - extendedWaitUntil:

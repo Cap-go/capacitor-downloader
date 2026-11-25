@@ -270,7 +270,53 @@ function pluginErrorMessage(error) {
   if (typeof error === 'string') {
     return error;
   }
-  return error.message || error.error || JSON.stringify(error);
+  const code = error.code ?? error.errorCode;
+  const message =
+    error.message ||
+    error.errorMessage ||
+    (typeof error.error === 'string' ? error.error : undefined);
+  const parts = [];
+  if (message) {
+    parts.push(message);
+  }
+  if (code) {
+    parts.push(`code=${code}`);
+  }
+  if (parts.length) {
+    return parts.join(' | ');
+  }
+  try {
+    const serialized = JSON.stringify(error);
+    if (serialized && serialized !== '{}') {
+      return serialized;
+    }
+  } catch {
+    // Ignore circular structures.
+  }
+  return 'unknown error';
+}
+
+function enrichCapacitorError(scope, error) {
+  const details = pluginErrorMessage(error);
+  if (error instanceof Error && error.message && error.message !== 'unknown error') {
+    if (!error.message.includes(scope)) {
+      error.message = `${scope}: ${error.message}`;
+    }
+    return error;
+  }
+  const wrapped = new Error(`${scope}: ${details}`);
+  if (error && typeof error === 'object' && (error.code ?? error.errorCode)) {
+    wrapped.code = error.code ?? error.errorCode;
+  }
+  return wrapped;
+}
+
+async function invokeCapacitor(scope, fn) {
+  try {
+    return await fn();
+  } catch (error) {
+    throw enrichCapacitorError(scope, error);
+  }
 }
 
 function setOutputFromMaestro(result, error) {
@@ -304,18 +350,22 @@ async function resolveFileInfoPath(destination) {
   }
   const relative = destination.slice('files/'.length);
   if (Capacitor.getPlatform() === 'ios') {
-    const { uri } = await Filesystem.getUri({ directory: Directory.Documents, path: `files/${relative}` });
+    const { uri } = await invokeCapacitor('Filesystem.getUri', () =>
+      Filesystem.getUri({ directory: Directory.Documents, path: `files/${relative}` }),
+    );
     const path = decodeURIComponent(uri.replace(/^file:\/\//, ''));
     return path;
   }
-  const { uri } = await Filesystem.getUri({ directory: Directory.Data, path: relative });
+  const { uri } = await invokeCapacitor('Filesystem.getUri', () =>
+    Filesystem.getUri({ directory: Directory.Data, path: relative }),
+  );
   return uri;
 }
 
 async function fillSizesOnDisk(destinations, fileStates) {
   for (let index = 0; index < destinations.length; index += 1) {
     const path = await resolveFileInfoPath(destinations[index]);
-    const info = await plugin.getFileInfo({ path });
+    const info = await invokeCapacitor('getFileInfo', () => plugin.getFileInfo({ path }));
     const size = info.size ?? 0;
     if (size <= 0) {
       throw new Error(`File missing or empty on disk: ${destinations[index]}`);
@@ -368,7 +418,9 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
       if (typeof event.bytesTotal === 'number' && event.bytesTotal > 0) {
         entry.bytesTotal = event.bytesTotal;
       }
-      if (event.fileProgress >= 1) {
+      if (typeof event.fileProgress === 'number' && event.fileProgress >= 1) {
+        entry.done = true;
+      } else if (entry.bytesTotal > 0 && entry.bytesWritten >= entry.bytesTotal) {
         entry.done = true;
       }
     }),
@@ -377,6 +429,9 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
     await plugin.addListener('downloadCompleted', (event) => {
       if (event.id === batchId) {
         downloadCompleted = true;
+        fileStates.forEach((entry) => {
+          entry.done = true;
+        });
       }
     }),
   );
@@ -446,6 +501,7 @@ async function startMaestroBatchTracking(batchId, fileCount, timeoutMs = 120_000
 function formatMaestroBatchSuccess(task, completion, files) {
   const allFileSizesVerified = completion.files.every((file) => file.sizeOnDisk > 0);
   return {
+    maestroHarnessDone: true,
     maestroBatchComplete: true,
     allFileSizesVerified,
     downloadCompleted: completion.downloadCompleted,
@@ -473,12 +529,14 @@ async function runMaestroBatchHarness({
   let tracking;
   try {
     tracking = await startMaestroBatchTracking(batchId, files.length);
-    const task = await plugin.download({
-      id: batchId,
-      notification: 'hidden',
-      files,
-      ...downloadOptions,
-    });
+    const task = await invokeCapacitor('download', () =>
+      plugin.download({
+        id: batchId,
+        notification: 'hidden',
+        files,
+        ...downloadOptions,
+      }),
+    );
     const completion = await tracking.waitForCompletion(files.map((file) => file.destination));
     setOutputFromMaestro(formatMaestroBatchSuccess(task, completion, files));
   } catch (error) {
@@ -511,21 +569,23 @@ async function runMaestroMixedEngineBatch() {
   output.textContent = '';
   delete output.dataset.maestroOutcome;
   try {
-    const task = await plugin.download({
-      id: 'maestro-mixed-batch',
-      androidHttpEngine: 'auto',
-      notification: 'hidden',
-      files: [
-        {
-          url: MAESTRO_SMALL_FILE_URL,
-          destination: 'files/maestro-mixed-a.bin',
-        },
-        {
-          url: MAESTRO_SMALL_FILE_URL,
-          destination: 'offline/maestro-mixed-b.bin',
-        },
-      ],
-    });
+    const task = await invokeCapacitor('download', () =>
+      plugin.download({
+        id: 'maestro-mixed-batch',
+        androidHttpEngine: 'auto',
+        notification: 'hidden',
+        files: [
+          {
+            url: MAESTRO_SMALL_FILE_URL,
+            destination: 'files/maestro-mixed-a.bin',
+          },
+          {
+            url: MAESTRO_SMALL_FILE_URL,
+            destination: 'offline/maestro-mixed-b.bin',
+          },
+        ],
+      }),
+    );
     setOutputFromMaestro(task);
   } catch (error) {
     setOutputFromMaestro(undefined, error);
@@ -557,18 +617,20 @@ async function runMaestroIosBatchFail() {
   output.textContent = '';
   delete output.dataset.maestroOutcome;
   try {
-    const task = await plugin.download({
-      id: 'maestro-ios-batch-fail',
-      url: 'https://example.com/only-single',
-      destination: 'files/maestro-ios-single.bin',
-      notification: 'hidden',
-      files: [
-        {
-          url: MAESTRO_SMALL_FILE_URL,
-          destination: 'files/maestro-ios-batch-only.bin',
-        },
-      ],
-    });
+    const task = await invokeCapacitor('download', () =>
+      plugin.download({
+        id: 'maestro-ios-batch-fail',
+        url: 'https://example.com/only-single',
+        destination: 'files/maestro-ios-single.bin',
+        notification: 'hidden',
+        files: [
+          {
+            url: MAESTRO_SMALL_FILE_URL,
+            destination: 'files/maestro-ios-batch-only.bin',
+          },
+        ],
+      }),
+    );
     setOutputFromMaestro(task);
   } catch (error) {
     setOutputFromMaestro(undefined, error);

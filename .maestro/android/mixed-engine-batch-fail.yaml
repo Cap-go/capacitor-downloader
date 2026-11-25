@@ -4,7 +4,7 @@ appId: app.capgo.downloader
 - tapOn: Maestro mixed-engine batch
 - extendedWaitUntil:
     visible:
-      text: All files of a batch must resolve to the same Android HTTP engine
+      text: '.*All files of a batch must resolve to the same Android HTTP engine.*'
     timeout: 15000
 - assertVisible:
-    text: 'Error:'
+    text: '.*Error:.*All files of a batch must resolve to the same Android HTTP engine.*'

@@ -4,13 +4,15 @@ appId: app.capgo.downloader
 - tapOn: Maestro iOS batch
 - extendedWaitUntil:
     visible:
-      text: maestroBatchComplete
+      text: '.*"maestroHarnessDone": ?true.*'
     timeout: 120000
 - assertVisible:
-    text: allFileSizesVerified
+    text: '.*"maestroBatchComplete": ?true.*'
 - assertVisible:
-    text: downloadCompleted
+    text: '.*"allFileSizesVerified": ?true.*'
 - assertVisible:
-    text: allFilesDone
+    text: '.*"downloadCompleted": ?true.*'
 - assertVisible:
-    text: '"done": true'
+    text: '.*"allFilesDone": ?true.*'
+- assertVisible:
+    text: '.*"done": ?true.*'

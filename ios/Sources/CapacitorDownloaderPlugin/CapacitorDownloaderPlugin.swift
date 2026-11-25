@@ -611,6 +611,7 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
 
         continuedProcessing.beginIfPossible(downloadId: id, request: continuedRequest) { [weak self] useForeground in
             guard let self else {
+                call.reject("Download plugin was deallocated before the download could start")
                 return
             }
             self.tasksLock.lock()
@@ -1270,6 +1271,15 @@ extension CapacitorDownloaderPlugin: URLSessionDownloadDelegate {
                     movedDestination: destinationURL.path
                 ) {
                 case .allSucceeded(let batchId, let generation):
+                    notifyListeners(
+                        "downloadProgress",
+                        data: [
+                            "id": batchParts.batchId,
+                            "progress": 1,
+                            "fileIndex": batchParts.fileIndex,
+                            "fileProgress": 1
+                        ]
+                    )
                     notifyListeners("downloadCompleted", data: ["id": batchId])
                     if let completionText = DownloadCompletedNotificationStore.shared.takeText(for: batchId, generation: generation) {
                         DownloadCompletedNotificationPresenter.presentIfAllowed(downloadId: batchId, body: completionText)

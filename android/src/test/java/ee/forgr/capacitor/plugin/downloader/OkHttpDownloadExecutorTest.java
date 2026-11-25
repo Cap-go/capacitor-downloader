@@ -703,6 +703,7 @@ public class OkHttpDownloadExecutorTest {
         byte[] payload = new byte[512 * 1024];
         byte[] preexisting = "keep-me".getBytes(StandardCharsets.UTF_8);
         CountDownLatch requestStarted = new CountDownLatch(1);
+        CountDownLatch downloadInProgress = new CountDownLatch(1);
         server.setDispatcher(
             new Dispatcher() {
                 @Override
@@ -712,7 +713,7 @@ public class OkHttpDownloadExecutorTest {
                         return new MockResponse()
                             .setBody(new okio.Buffer().write(payload))
                             .addHeader("Content-Length", String.valueOf(payload.length))
-                            .throttleBody(512, 1, TimeUnit.SECONDS);
+                            .throttleBody(1024, 500, TimeUnit.MILLISECONDS);
                     }
                     return new MockResponse().setResponseCode(404);
                 }
@@ -735,13 +736,18 @@ public class OkHttpDownloadExecutorTest {
                 "cellular",
                 0,
                 null,
-                (id, progress) -> {},
+                (id, progress) -> {
+                    if (progress > 0f) {
+                        downloadInProgress.countDown();
+                    }
+                },
                 (id, ok, cancelled, errorMessage) -> finished.countDown()
             )
         );
         transfer.start();
 
         assertTrue(requestStarted.await(20, TimeUnit.SECONDS));
+        assertTrue(downloadInProgress.await(20, TimeUnit.SECONDS));
         assertTrue(executor.cancelUnlessCommitted(taskId, destination));
         assertTrue(finished.await(20, TimeUnit.SECONDS));
         assertTrue(destination.exists());

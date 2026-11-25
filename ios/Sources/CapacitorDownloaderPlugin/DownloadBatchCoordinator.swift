@@ -310,14 +310,14 @@ final class DownloadBatchCoordinator {
     func batchStartupResumeOutcome(batchId: String, generation: UInt64) -> BatchStartupResumeOutcome {
         batchesLock.lock()
         defer { batchesLock.unlock() }
-        let pendingGeneration = startupPendingGenerations.removeValue(forKey: batchId)
+        startupPendingGenerations.removeValue(forKey: batchId)
         if let batch = batches[batchId], batch.generation == generation {
             if batch.cancelled || batch.failed {
                 return .abort
             }
             return .proceed(paused: batch.paused)
         }
-        if pendingGeneration == generation, startupCompletedBeforeResolve.removeValue(forKey: batchId) == generation {
+        if startupCompletedBeforeResolve.removeValue(forKey: batchId) == generation {
             return .proceed(paused: false)
         }
         return .abort

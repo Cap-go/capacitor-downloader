@@ -61,6 +61,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private ExecutorService okHttpTransferExecutor;
     private final Map<String, BatchProgressPoll> batchProgressPolls = new ConcurrentHashMap<>();
     private final Object batchPollRegistrationLock = new Object();
+    private final Object taskIdReservationLock = new Object();
     private OkHttpDownloadExecutor okHttpDownloadExecutor;
     private OkHttpDownloadProgressNotifier okHttpProgressNotifier;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -164,6 +165,24 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
     private boolean isDownloadIdTaken(String id) {
         return downloads.containsKey(id) || batches.containsKey(id);
+    }
+
+    private boolean reserveBatchRootIfAvailable(String batchId, DownloadBatchState batchState) {
+        synchronized (taskIdReservationLock) {
+            if (isDownloadIdTaken(batchId)) {
+                return false;
+            }
+            return batches.putIfAbsent(batchId, batchState) == null;
+        }
+    }
+
+    private boolean reserveTaskIdIfAvailable(String id, long trackedDownloadId) {
+        synchronized (taskIdReservationLock) {
+            if (isDownloadIdTaken(id)) {
+                return false;
+            }
+            return downloads.putIfAbsent(id, trackedDownloadId) == null;
+        }
     }
 
     private boolean isCurrentOkHttpDownload(String id) {
@@ -441,7 +460,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         setDownloadNotificationTexts(batchId, completionNotificationText, failedNotificationText, batchGeneration);
 
         final DownloadBatchState batchState = new DownloadBatchState(batchId, files.length(), batchGeneration, notification);
-        if (batches.putIfAbsent(batchId, batchState) != null) {
+        if (!reserveBatchRootIfAvailable(batchId, batchState)) {
             removeDownloadNotificationTexts(batchId, batchGeneration);
             call.reject("Download already exists");
             return;
@@ -523,15 +542,8 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         }
 
                         String childId = DownloadBatchState.fileTaskId(batchId, batchState.generation, fileRequest.index);
-                        if (isDownloadIdTaken(childId)) {
-                            removeSystemDownloads(enqueuedIds);
-                            rollbackBatch(batchState);
-                            call.reject("Download already exists");
-                            return;
-                        }
-
                         final long childPendingToken = reservePendingDownload();
-                        if (downloads.putIfAbsent(childId, childPendingToken) != null) {
+                        if (!reserveTaskIdIfAvailable(childId, childPendingToken)) {
                             removeSystemDownloads(enqueuedIds);
                             rollbackBatch(batchState);
                             call.reject("Download already exists");
@@ -656,40 +668,23 @@ public class CapacitorDownloaderPlugin extends Plugin {
         List<OkHttpDownloadExecutor.ActiveDownload> reservations = new ArrayList<>();
         for (BatchFileRequest fileRequest : fileRequests) {
             String childId = DownloadBatchState.fileTaskId(batchId, batch.generation, fileRequest.index);
-            if (isDownloadIdTaken(childId)) {
-                for (OkHttpDownloadExecutor.ActiveDownload reserved : reservations) {
-                    okHttpDownloadExecutor.abandonTransfer(reserved);
-                }
+            if (!reserveTaskIdIfAvailable(childId, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID)) {
+                releaseOkHttpBatchChildReservations(batchId, batch, reservations);
                 rollbackBatch(batch);
                 call.reject("Download already exists");
                 return;
             }
             OkHttpDownloadExecutor.ActiveDownload reservation = okHttpDownloadExecutor.beginTransfer(childId);
             if (reservation == null) {
-                for (OkHttpDownloadExecutor.ActiveDownload reserved : reservations) {
-                    okHttpDownloadExecutor.abandonTransfer(reserved);
-                }
+                downloads.remove(childId, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID);
+                releaseOkHttpBatchChildReservations(batchId, batch, reservations);
                 rollbackBatch(batch);
                 call.reject("Download already exists");
                 return;
             }
+            batchChildOwners.put(childId, batchId);
+            batch.trackChildId(childId);
             reservations.add(reservation);
-        }
-
-        for (OkHttpDownloadExecutor.ActiveDownload reservation : reservations) {
-            if (downloads.putIfAbsent(reservation.id, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID) != null) {
-                for (OkHttpDownloadExecutor.ActiveDownload reserved : reservations) {
-                    okHttpDownloadExecutor.abandonTransfer(reserved);
-                    batchChildOwners.remove(reserved.id, batchId);
-                    downloads.remove(reserved.id, OkHttpDownloadExecutor.TRACKED_DOWNLOAD_ID);
-                }
-                batch.ownedChildIds.clear();
-                rollbackBatch(batch);
-                call.reject("Download already exists");
-                return;
-            }
-            batchChildOwners.put(reservation.id, batchId);
-            batch.trackChildId(reservation.id);
         }
 
         okHttpBatches.put(batchId, new OkHttpBatchOwnership(batch.generation, fileRequests));
@@ -835,6 +830,18 @@ public class CapacitorDownloaderPlugin extends Plugin {
      * Cancels the transfers of a batch that did not finish yet, keeping the files that already completed, including
      * one whose file is in place while its completion callback is still queued.
      */
+    private void releaseOkHttpBatchChildReservations(
+        String batchId,
+        DownloadBatchState batch,
+        List<OkHttpDownloadExecutor.ActiveDownload> reservations
+    ) {
+        for (OkHttpDownloadExecutor.ActiveDownload reserved : reservations) {
+            okHttpDownloadExecutor.abandonTransfer(reserved);
+            unregisterBatchChild(batchId, reserved.id);
+        }
+        batch.ownedChildIds.clear();
+    }
+
     private void cancelOkHttpBatchFiles(DownloadBatchState batch, List<BatchFileRequest> fileRequests) {
         for (BatchFileRequest fileRequest : fileRequests) {
             String childId = DownloadBatchState.fileTaskId(batch.batchId, batch.generation, fileRequest.index);

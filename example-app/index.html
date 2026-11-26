@@ -17,12 +17,19 @@
     <main class="container">
       <h1>@capgo/capacitor-downloader</h1>
       <p class="lead">Run native plugin APIs with the source linked locally.</p>
+      <div id="maestro-actions" class="maestro-actions">
+        <button type="button" id="maestro-okhttp-batch">Maestro OkHttp batch</button>
+        <button type="button" id="maestro-mixed-batch-fail">Maestro mixed-engine batch</button>
+        <button type="button" id="maestro-ios-batch">Maestro iOS batch</button>
+        <button type="button" id="maestro-ios-batch-fail">Maestro iOS batch fail</button>
+      </div>
+      <pre id="maestro-status" aria-live="polite" data-maestro-phase="boot">&#8203;</pre>
+      <pre id="plugin-output">Select an action to begin.</pre>
       <label for="action-select">Available actions</label>
       <select id="action-select"></select>
       <div id="action-description" class="action-description"></div>
       <div id="action-form" class="form-grid"></div>
       <button id="run-action">Run action</button>
-      <pre id="plugin-output">Select an action to begin.</pre>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>

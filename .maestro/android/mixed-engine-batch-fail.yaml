@@ -1,0 +1,26 @@
+appId: app.capgo.downloader
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      text: '.*maestroReady.*'
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      text: '.*maestroLayoutSettled.*'
+    timeout: 15000
+- tapOn:
+    text: '^Maestro mixed-engine batch$'
+    waitUntilVisible: true
+    retryTapIfNoChange: true
+    waitToSettleTimeoutMs: 2000
+- extendedWaitUntil:
+    visible:
+      text: '.*maestroRunning: maestro-mixed-batch.*'
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      text: '.*All files of a batch must resolve to the same Android HTTP engine.*'
+    timeout: 15000
+- assertVisible:
+    text: '.*Error:.*All files of a batch must resolve to the same Android HTTP engine.*'

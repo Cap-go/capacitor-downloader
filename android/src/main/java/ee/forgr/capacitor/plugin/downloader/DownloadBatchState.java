@@ -7,8 +7,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 final class DownloadBatchState {
 
-    static String fileTaskId(String batchId, int fileIndex) {
-        return batchId + "#" + fileIndex;
+    static String fileTaskId(String batchId, long generation, int fileIndex) {
+        return batchId + "#" + generation + ":" + fileIndex;
     }
 
     static BatchIdParts parseFileTaskId(String taskId) {
@@ -16,10 +16,22 @@ final class DownloadBatchState {
         if (hashIndex < 0) {
             return null;
         }
+        int colonIndex = taskId.lastIndexOf(':');
         String batchId = taskId.substring(0, hashIndex);
+        if (colonIndex > hashIndex) {
+            String generationPart = taskId.substring(hashIndex + 1, colonIndex);
+            String indexPart = taskId.substring(colonIndex + 1);
+            try {
+                long generation = Long.parseLong(generationPart);
+                int fileIndex = Integer.parseInt(indexPart);
+                return new BatchIdParts(batchId, generation, fileIndex);
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
         try {
             int fileIndex = Integer.parseInt(taskId.substring(hashIndex + 1));
-            return new BatchIdParts(batchId, fileIndex);
+            return new BatchIdParts(batchId, -1L, fileIndex);
         } catch (NumberFormatException e) {
             return null;
         }
@@ -28,10 +40,12 @@ final class DownloadBatchState {
     static final class BatchIdParts {
 
         final String batchId;
+        final long generation;
         final int fileIndex;
 
-        BatchIdParts(String batchId, int fileIndex) {
+        BatchIdParts(String batchId, long generation, int fileIndex) {
             this.batchId = batchId;
+            this.generation = generation;
             this.fileIndex = fileIndex;
         }
     }

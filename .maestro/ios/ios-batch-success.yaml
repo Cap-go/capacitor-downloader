@@ -1,0 +1,36 @@
+appId: app.capgo.downloader
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      text: '.*maestroReady.*'
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      text: '.*maestroLayoutSettled.*'
+    timeout: 15000
+- tapOn:
+    text: '^Maestro iOS batch$'
+    waitUntilVisible: true
+    retryTapIfNoChange: true
+    waitToSettleTimeoutMs: 2000
+- extendedWaitUntil:
+    visible:
+      text: '.*maestroRunning: maestro-ios-batch.*'
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      text: '.*"maestroHarnessDone": ?true.*'
+    timeout: 120000
+- assertVisible:
+    text: '.*"maestroBatchComplete": ?true.*'
+- assertVisible:
+    text: '.*"allFileSizesVerified": ?true.*'
+- assertVisible:
+    text: '.*"downloadCompleted": ?true.*'
+- assertVisible:
+    text: '.*"allFilesDone": ?true.*'
+- assertVisible:
+    text: '.*"allChildrenCompleted": ?true.*'
+- assertVisible:
+    text: '.*COMPLETED.*'

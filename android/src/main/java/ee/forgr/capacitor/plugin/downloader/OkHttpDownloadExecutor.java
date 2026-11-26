@@ -66,6 +66,14 @@ public class OkHttpDownloadExecutor {
         return activeDownloads.get(id);
     }
 
+    public long[] progressBytes(String id) {
+        ActiveDownload active = activeDownloads.get(id);
+        if (active == null) {
+            return new long[] { 0L, 0L };
+        }
+        return new long[] { active.bytesWritten, active.bytesTotal };
+    }
+
     int availableTransferSlots() {
         return transferSlots.availablePermits();
     }
@@ -438,6 +446,47 @@ public class OkHttpDownloadExecutor {
         return null;
     }
 
+    public boolean cancelUnlessCommitted(String id, File destinationFile) {
+        ActiveDownload active = activeDownloads.get(id);
+        if (active == null) {
+            return false;
+        }
+        synchronized (active) {
+            if (active.state == State.DONE) {
+                return false;
+            }
+        }
+        return cancelUnlessCommittedLocked(active, id, destinationFile);
+    }
+
+    private boolean cancelUnlessCommittedLocked(ActiveDownload active, String id, File destinationFile) {
+        synchronized (active) {
+            if (active.state == State.DONE || active.cancelled.get()) {
+                return false;
+            }
+            active.cancelled.set(true);
+        }
+        Call call = active.call;
+        if (call != null) {
+            call.cancel();
+        }
+        synchronized (active) {
+            if (active.state == State.DONE) {
+                return false;
+            }
+            File temp = active.tempFile;
+            if (temp != null && temp.exists()) {
+                temp.delete();
+            }
+            File committed = active.committedDestination;
+            if (committed != null && committed.exists()) {
+                committed.delete();
+            }
+        }
+        activeDownloads.remove(id, active);
+        return true;
+    }
+
     public boolean cancel(String id, File destinationFile) {
         ActiveDownload active = activeDownloads.get(id);
         if (active == null) {
@@ -469,8 +518,17 @@ public class OkHttpDownloadExecutor {
 
     public void clearCompleted(String id) {
         ActiveDownload active = activeDownloads.get(id);
-        if (active != null && (active.state == State.DONE || active.state == State.ERROR || active.state == State.CANCELLED)) {
-            activeDownloads.remove(id, active);
+        if (active != null) {
+            clearCompleted(active);
+        }
+    }
+
+    public void clearCompleted(ActiveDownload reserved) {
+        if (reserved == null) {
+            return;
+        }
+        if (reserved.state == State.DONE || reserved.state == State.ERROR || reserved.state == State.CANCELLED) {
+            activeDownloads.remove(reserved.id, reserved);
         }
     }
 

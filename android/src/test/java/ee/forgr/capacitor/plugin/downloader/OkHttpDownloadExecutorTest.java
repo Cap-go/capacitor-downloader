@@ -1,5 +1,6 @@
 package ee.forgr.capacitor.plugin.downloader;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -695,6 +696,62 @@ public class OkHttpDownloadExecutorTest {
         workers.shutdown();
         assertTrue(workers.awaitTermination(10, TimeUnit.SECONDS));
         assertEquals(4, executor.availableTransferSlots());
+    }
+
+    @Test(timeout = 30_000)
+    public void cancelUnlessCommittedPreservesPreexistingDestination() throws Exception {
+        byte[] payload = new byte[512 * 1024];
+        byte[] preexisting = "keep-me".getBytes(StandardCharsets.UTF_8);
+        CountDownLatch requestStarted = new CountDownLatch(1);
+        CountDownLatch downloadInProgress = new CountDownLatch(1);
+        server.setDispatcher(
+            new Dispatcher() {
+                @Override
+                public MockResponse dispatch(RecordedRequest request) {
+                    if ("/preserve-dest".equals(request.getPath())) {
+                        requestStarted.countDown();
+                        return new MockResponse()
+                            .setBody(new okio.Buffer().write(payload))
+                            .addHeader("Content-Length", String.valueOf(payload.length))
+                            .throttleBody(1024, 500, TimeUnit.MILLISECONDS);
+                    }
+                    return new MockResponse().setResponseCode(404);
+                }
+            }
+        );
+
+        String taskId = "preserve-cancel";
+        File destination = new File(tempDir, taskId + ".bin");
+        java.nio.file.Files.write(destination.toPath(), preexisting);
+
+        CountDownLatch finished = new CountDownLatch(1);
+        OkHttpDownloadExecutor.ActiveDownload reservation = executor.beginTransfer(taskId);
+        assertNotNull(reservation);
+        Thread transfer = new Thread(() ->
+            executor.start(
+                reservation,
+                server.url("/preserve-dest").toString(),
+                destination,
+                new JSObject(),
+                "cellular",
+                0,
+                null,
+                (id, progress) -> {
+                    if (progress > 0f) {
+                        downloadInProgress.countDown();
+                    }
+                },
+                (id, ok, cancelled, errorMessage) -> finished.countDown()
+            )
+        );
+        transfer.start();
+
+        assertTrue(requestStarted.await(20, TimeUnit.SECONDS));
+        assertTrue(downloadInProgress.await(20, TimeUnit.SECONDS));
+        assertTrue(executor.cancelUnlessCommitted(taskId, destination));
+        assertTrue(finished.await(20, TimeUnit.SECONDS));
+        assertTrue(destination.exists());
+        assertArrayEquals(preexisting, java.nio.file.Files.readAllBytes(destination.toPath()));
     }
 
     private void installOutcomeDispatcher(byte[] payload, int successCount, int http500Count) {

@@ -27,6 +27,17 @@ body {
   padding: 2rem;
 }
 
+.maestro-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.maestro-actions button {
+  flex: 1 1 auto;
+  min-width: 8rem;
+}
+
 main.container {
   width: min(720px, 100%);
   background: rgba(15, 23, 42, 0.85);
@@ -107,6 +118,22 @@ button#run-action {
 
 button#run-action:hover {
   filter: brightness(1.08);
+}
+
+pre#maestro-status {
+  margin: 0;
+  min-height: 2.75rem;
+  box-sizing: border-box;
+  padding: 0.65rem 1rem;
+  background: rgba(34, 211, 238, 0.12);
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 10px;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+  font-size: 0.9rem;
+  color: #a5f3fc;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 pre#plugin-output {

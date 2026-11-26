@@ -8,6 +8,7 @@ import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.times;
@@ -59,6 +60,7 @@ public class CapacitorDownloaderPluginBatchEntryTest {
         setField(plugin, "downloadManagerExecutor", downloadManagerExecutor);
         setField(plugin, "okHttpTransferExecutor", Executors.newFixedThreadPool(4));
         setField(plugin, "okHttpDownloadExecutor", new OkHttpDownloadExecutor(context));
+        setField(plugin, "okHttpProgressNotifier", new OkHttpDownloadProgressNotifier(context));
         setField(plugin, "completedNotificationStore", new DownloadCompletedNotificationStore(context));
         setField(plugin, "failedNotificationStore", new DownloadFailedNotificationStore(context));
         setField(plugin, "handler", new android.os.Handler(Looper.getMainLooper()));
@@ -70,6 +72,26 @@ public class CapacitorDownloaderPluginBatchEntryTest {
             downloadManagerExecutor.shutdown();
             downloadManagerExecutor.awaitTermination(5, TimeUnit.SECONDS);
         }
+    }
+
+    @Test
+    public void downloadBatchRejectsMixedHttpEngines() throws Exception {
+        PluginCall call = buildBatchCallWithDestinations("mixed-engine-batch", new String[] { "files/a.bin", "offline/b.bin" }, "auto");
+        plugin.download(call);
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+
+        verify(call, timeout(5000)).reject(Mockito.eq("All files of a batch must resolve to the same Android HTTP engine"));
+        verify(downloadManager, never()).enqueue(any(DownloadManager.Request.class));
+    }
+
+    @Test
+    public void downloadOkHttpBatchDoesNotEnqueueDownloadManager() throws Exception {
+        PluginCall call = buildBatchCallWithDestinations("okhttp-batch", new String[] { "files/a.bin", "files/b.bin" }, "okhttp");
+        plugin.download(call);
+        Shadows.shadowOf(Looper.getMainLooper()).idle();
+
+        verify(call, timeout(5000)).resolve(any());
+        verify(downloadManager, never()).enqueue(any(DownloadManager.Request.class));
     }
 
     @Test
@@ -210,6 +232,26 @@ public class CapacitorDownloaderPluginBatchEntryTest {
             cursor.addRow(new Object[] { systemDownloadId, DownloadManager.STATUS_RUNNING, 10L, 100L });
         }
         return cursor;
+    }
+
+    private static PluginCall buildBatchCallWithDestinations(String batchId, String[] destinations, String androidHttpEngine)
+        throws Exception {
+        JSArray filesArray = Mockito.mock(JSArray.class);
+        when(filesArray.length()).thenReturn(destinations.length);
+        when(filesArray.getJSONObject(Mockito.anyInt())).thenAnswer((invocation) -> {
+            int index = invocation.getArgument(0);
+            JSONObject file = new JSONObject();
+            file.put("url", "https://example.com/" + index + ".bin");
+            file.put("destination", destinations[index]);
+            return file;
+        });
+        PluginCall call = Mockito.mock(PluginCall.class);
+        when(call.getString("id")).thenReturn(batchId);
+        when(call.getArray("files")).thenReturn(filesArray);
+        when(call.getString("url")).thenReturn(null);
+        when(call.getString("androidHttpEngine")).thenReturn(androidHttpEngine);
+        when(call.getString("notification")).thenReturn("hidden");
+        return call;
     }
 
     private static PluginCall buildBatchCall(String batchId, int fileCount) throws Exception {

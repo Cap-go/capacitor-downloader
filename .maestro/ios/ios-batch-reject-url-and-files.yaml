@@ -1,0 +1,26 @@
+appId: app.capgo.downloader
+---
+- launchApp
+- extendedWaitUntil:
+    visible:
+      text: '.*maestroReady.*'
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      text: '.*maestroLayoutSettled.*'
+    timeout: 15000
+- tapOn:
+    text: '^Maestro iOS batch fail$'
+    waitUntilVisible: true
+    retryTapIfNoChange: true
+    waitToSettleTimeoutMs: 2000
+- extendedWaitUntil:
+    visible:
+      text: '.*maestroRunning: maestro-ios-batch-fail.*'
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      text: '.*Provide either url and destination or files, not both.*'
+    timeout: 15000
+- assertVisible:
+    text: '.*Error:.*Provide either url and destination or files, not both.*'

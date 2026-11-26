@@ -831,10 +831,6 @@ public class CapacitorDownloaderPlugin extends Plugin {
         static final BatchFileCompletionResult IN_PROGRESS = new BatchFileCompletionResult(false, false);
     }
 
-    /**
-     * Cancels the transfers of a batch that did not finish yet, keeping the files that already completed, including
-     * one whose file is in place while its completion callback is still queued.
-     */
     private void releaseOkHttpBatchChildReservations(
         String batchId,
         DownloadBatchState batch,
@@ -847,6 +843,10 @@ public class CapacitorDownloaderPlugin extends Plugin {
         batch.ownedChildIds.clear();
     }
 
+    /**
+     * Cancels the transfers of a batch that did not finish yet, keeping the files that already completed, including
+     * one whose file is in place while its completion callback is still queued.
+     */
     private void cancelOkHttpBatchFiles(DownloadBatchState batch, List<BatchFileRequest> fileRequests) {
         for (BatchFileRequest fileRequest : fileRequests) {
             String childId = DownloadBatchState.fileTaskId(batch.batchId, batch.generation, fileRequest.index);

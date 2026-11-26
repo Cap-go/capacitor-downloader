@@ -523,7 +523,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
                         }
 
                         String childId = DownloadBatchState.fileTaskId(batchId, batchState.generation, fileRequest.index);
-                        if (downloads.containsKey(childId)) {
+                        if (isDownloadIdTaken(childId)) {
                             removeSystemDownloads(enqueuedIds);
                             rollbackBatch(batchState);
                             call.reject("Download already exists");
@@ -655,9 +655,16 @@ public class CapacitorDownloaderPlugin extends Plugin {
 
         List<OkHttpDownloadExecutor.ActiveDownload> reservations = new ArrayList<>();
         for (BatchFileRequest fileRequest : fileRequests) {
-            OkHttpDownloadExecutor.ActiveDownload reservation = okHttpDownloadExecutor.beginTransfer(
-                DownloadBatchState.fileTaskId(batchId, batch.generation, fileRequest.index)
-            );
+            String childId = DownloadBatchState.fileTaskId(batchId, batch.generation, fileRequest.index);
+            if (isDownloadIdTaken(childId)) {
+                for (OkHttpDownloadExecutor.ActiveDownload reserved : reservations) {
+                    okHttpDownloadExecutor.abandonTransfer(reserved);
+                }
+                rollbackBatch(batch);
+                call.reject("Download already exists");
+                return;
+            }
+            OkHttpDownloadExecutor.ActiveDownload reservation = okHttpDownloadExecutor.beginTransfer(childId);
             if (reservation == null) {
                 for (OkHttpDownloadExecutor.ActiveDownload reserved : reservations) {
                     okHttpDownloadExecutor.abandonTransfer(reserved);
@@ -942,6 +949,9 @@ public class CapacitorDownloaderPlugin extends Plugin {
     boolean shouldPreserveBatchChild(DownloadBatchState batch, int fileIndex, Long systemDownloadId) {
         if (batch.isFileCompleted(fileIndex)) {
             return true;
+        }
+        if (systemDownloadId != null && isOkHttpDownload(systemDownloadId)) {
+            return false;
         }
         if (systemDownloadId == null || isPendingDownload(systemDownloadId)) {
             return false;

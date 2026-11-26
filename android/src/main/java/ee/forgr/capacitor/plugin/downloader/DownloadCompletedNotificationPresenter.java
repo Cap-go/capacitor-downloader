@@ -26,6 +26,10 @@ final class DownloadCompletedNotificationPresenter {
     }
 
     static void showIfAllowed(Context context, String downloadId, String bodyText) {
+        showIfAllowed(context, downloadId, bodyText, android.R.drawable.stat_sys_download_done);
+    }
+
+    static void showIfAllowed(Context context, String downloadId, String bodyText, int smallIcon) {
         String body = DownloadCompletedNotificationText.normalize(bodyText);
         if (body == null || downloadId == null) {
             return;
@@ -53,7 +57,7 @@ final class DownloadCompletedNotificationPresenter {
         CharSequence appLabel = context.getApplicationInfo().loadLabel(context.getPackageManager());
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setSmallIcon(smallIcon)
             .setContentTitle(appLabel)
             .setContentText(body)
             .setStyle(new NotificationCompat.BigTextStyle().bigText(body))

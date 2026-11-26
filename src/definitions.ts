@@ -193,7 +193,7 @@ export interface DownloadOptions {
    * automatically. The host app must allow `$(PRODUCT_BUNDLE_IDENTIFIER).CapacitorDownloader.continuedProcessing.*` in
    * `BGTaskSchedulerPermittedIdentifiers` (see plugin README). Ignored on Android and Web.
    *
-   * @since 8.9.0
+   * @since 8.12.0
    */
   iosContinuedProcessing?: boolean;
   /**

@@ -94,7 +94,12 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private void presentFailedDownloadNotification(String downloadId, long generation) {
         String failedText = failedNotificationStore.takeText(downloadId, generation);
         if (failedText != null) {
-            DownloadCompletedNotificationPresenter.showIfAllowed(getContext(), downloadId, failedText);
+            DownloadCompletedNotificationPresenter.showIfAllowed(
+                getContext(),
+                downloadId,
+                failedText,
+                android.R.drawable.stat_notify_error
+            );
         }
     }
 
@@ -865,7 +870,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
         }
         batch.ownedChildIds.clear();
         batches.remove(batchId, batch);
-        completedNotificationStore.remove(batchId, batch.generation);
+        removeDownloadNotificationTexts(batchId, batch.generation);
         call.resolve(new JSObject().put("removed", true));
     }
 

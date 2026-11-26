@@ -7,15 +7,7 @@ final class DownloadContinuedProcessingCoordinator {
         DownloadSessionIdentifiers.continuedProcessingPermittedIdentifierPattern()
     }
 
-  private static let registrationLock = NSLock()
-  private static var continuedProcessingHandlerRegistered = false
-  /// Routes launch callbacks to the plugin-owned coordinator instance.
-  weak static var handlingInstance: DownloadContinuedProcessingCoordinator?
-
     private let lock = NSLock()
-  private var pendingContinuedLaunch: ((_ useForegroundCapableSession: Bool) -> Void)?
-  private var pendingContinuedDownloadId: String?
-  private var continuedLaunchFallback: DispatchWorkItem?
     private var activeTasks: [String: Any] = [:]
     private var totalUnitCounts: [String: Int64] = [:]
 
@@ -25,59 +17,6 @@ final class DownloadContinuedProcessingCoordinator {
         let title: String
         let subtitle: String?
     }
-
-  static func prepareContinuedProcessingRegistration() {
-    DownloadContinuedProcessingCoordinator().registerContinuedProcessingTaskHandler()
-  }
-
-  func registerContinuedProcessingTaskHandler() {
-    guard #available(iOS 26.0, *) else {
-      return
-    }
-    Self.registrationLock.lock()
-    defer { Self.registrationLock.unlock() }
-    guard !Self.continuedProcessingHandlerRegistered else {
-      return
-    }
-    let identifier = DownloadSessionIdentifiers.continuedProcessingDefaultTaskIdentifier()
-    Self.continuedProcessingHandlerRegistered = BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil) { task in
-      guard let coordinator = Self.handlingInstance else {
-        task.setTaskCompleted(success: false)
-        return
-      }
-      coordinator.handleContinuedProcessingTaskLaunch(task)
-    }
-  }
-
-  @available(iOS 26.0, *)
-  private func handleContinuedProcessingTaskLaunch(_ task: BGTask) {
-    lock.lock()
-    continuedLaunchFallback?.cancel()
-    continuedLaunchFallback = nil
-    let downloadId = pendingContinuedDownloadId
-    lock.unlock()
-    guard let continued = task as? BGContinuedProcessingTask else {
-      task.setTaskCompleted(success: false)
-      completePendingContinuedLaunch(useForeground: false)
-      return
-    }
-    guard let downloadId else {
-      task.setTaskCompleted(success: false)
-      completePendingContinuedLaunch(useForeground: false)
-      return
-    }
-    activate(task: continued, downloadId: downloadId)
-    completePendingContinuedLaunch(useForeground: true)
-  }
-
-  private func completePendingContinuedLaunch(useForeground: Bool) {
-    lock.lock()
-    let onReady = pendingContinuedLaunch
-    pendingContinuedLaunch = nil
-    pendingContinuedDownloadId = nil
-    lock.unlock()
-    onReady?(useForeground)
-  }
 
     func beginIfPossible(
         downloadId: String,
@@ -140,28 +79,40 @@ final class DownloadContinuedProcessingCoordinator {
         request: Request,
         onReady: @escaping (_ useForegroundCapableSession: Bool) -> Void
     ) {
-        registerContinuedProcessingTaskHandler()
-        guard Self.continuedProcessingHandlerRegistered else {
-            onReady(false)
-            return
+        let identifier = DownloadSessionIdentifiers.continuedProcessingTaskIdentifier()
+        let launchLock = NSLock()
+        var completed = false
+        let completeOnce: (_ useForegroundCapableSession: Bool) -> Void = { useForeground in
+            launchLock.lock()
+            defer { launchLock.unlock() }
+            if completed {
+                return
+            }
+            completed = true
+            onReady(useForeground)
         }
-        lock.lock()
-        let superseded = pendingContinuedLaunch
-        pendingContinuedLaunch = onReady
-        pendingContinuedDownloadId = downloadId
-        continuedLaunchFallback?.cancel()
-        lock.unlock()
-        superseded?(false)
-
-        var fallback = DispatchWorkItem { [weak self] in
-            self?.completePendingContinuedLaunch(useForeground: false)
+        var fallback: DispatchWorkItem!
+        fallback = DispatchWorkItem {
+            completeOnce(false)
         }
-        lock.lock()
-        continuedLaunchFallback = fallback
-        lock.unlock()
         DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: fallback)
 
-        let identifier = DownloadSessionIdentifiers.continuedProcessingDefaultTaskIdentifier()
+        let registered = BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil) { [weak self] task in
+            fallback.cancel()
+            guard let continued = task as? BGContinuedProcessingTask else {
+                task.setTaskCompleted(success: false)
+                completeOnce(false)
+                return
+            }
+            self?.activate(task: continued, downloadId: downloadId)
+            completeOnce(true)
+        }
+        guard registered else {
+            fallback.cancel()
+            completeOnce(false)
+            return
+        }
+
         let processingRequest = BGContinuedProcessingTaskRequest(
             identifier: identifier,
             title: request.title,
@@ -171,11 +122,8 @@ final class DownloadContinuedProcessingCoordinator {
         do {
             try BGTaskScheduler.shared.submit(processingRequest)
         } catch {
-            lock.lock()
-            continuedLaunchFallback?.cancel()
-            continuedLaunchFallback = nil
-            lock.unlock()
-            completePendingContinuedLaunch(useForeground: false)
+            fallback.cancel()
+            completeOnce(false)
         }
     }
 

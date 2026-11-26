@@ -5,7 +5,6 @@ import Foundation
 @objc(CapacitorDownloaderLifecycle)
 public class CapacitorDownloaderLifecycle: NSObject {
   @objc public static func warmUpBackgroundSessions() {
-    DownloadContinuedProcessingCoordinator.prepareContinuedProcessingRegistration()
     DownloadBackgroundSessionManager.shared.warmUp()
   }
 

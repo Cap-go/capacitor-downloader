@@ -81,8 +81,6 @@ public class CapacitorDownloaderPlugin: CAPPlugin, CAPBridgedPlugin {
             DownloadSessionIdentifiers.main,
             DownloadSessionIdentifiers.wifiOnly
         ]
-        DownloadContinuedProcessingCoordinator.handlingInstance = continuedProcessing
-        continuedProcessing.registerContinuedProcessingTaskHandler()
         continuedProcessing.onDownloadExpired = { [weak self] downloadId in
             self?.cancelDownloadFromContinuedProcessingExpiry(downloadId)
         }

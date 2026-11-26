@@ -62,6 +62,7 @@ public class CapacitorDownloaderPlugin extends Plugin {
     private final Map<String, BatchProgressPoll> batchProgressPolls = new ConcurrentHashMap<>();
     private final Object batchPollRegistrationLock = new Object();
     private final Object taskIdReservationLock = new Object();
+    private final Object okHttpBatchHandoffLock = new Object();
     private OkHttpDownloadExecutor okHttpDownloadExecutor;
     private OkHttpDownloadProgressNotifier okHttpProgressNotifier;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -780,20 +781,24 @@ public class CapacitorDownloaderPlugin extends Plugin {
     }
 
     private void completeOkHttpBatchFile(DownloadBatchState batch, int fileIndex, long bytesWritten, long bytesTotal) {
-        BatchFileCompletionResult completion = completeBatchFile(batch, fileIndex, bytesWritten, bytesTotal);
-        if (completion.allDone && !ownsBatch(batch.batchId, batch)) {
-            finishOkHttpBatchIfCurrent(batch, true, !completion.usedCustomCompletionNotification);
+        synchronized (okHttpBatchHandoffLock) {
+            BatchFileCompletionResult completion = completeBatchFile(batch, fileIndex, bytesWritten, bytesTotal);
+            if (completion.allDone) {
+                finishOkHttpBatchIfCurrent(batch, true, !completion.usedCustomCompletionNotification);
+            }
         }
     }
 
     private void failOkHttpBatch(DownloadBatchState batch, String error, int fileIndex) {
-        OkHttpBatchOwnership ownership = takeOkHttpBatchOwnership(batch);
-        if (ownership == null) {
-            return;
+        synchronized (okHttpBatchHandoffLock) {
+            OkHttpBatchOwnership ownership = takeOkHttpBatchOwnership(batch);
+            if (ownership == null) {
+                return;
+            }
+            cancelOkHttpBatchFiles(batch, ownership.fileRequests);
+            okHttpProgressNotifier.finished(batch.batchId, false);
+            failBatch(batch.batchId, error, fileIndex);
         }
-        cancelOkHttpBatchFiles(batch, ownership.fileRequests);
-        okHttpProgressNotifier.finished(batch.batchId, false);
-        failBatch(batch.batchId, error, fileIndex);
     }
 
     private OkHttpBatchOwnership takeOkHttpBatchOwnership(DownloadBatchState batch) {
@@ -1640,9 +1645,15 @@ public class CapacitorDownloaderPlugin extends Plugin {
             return;
         }
 
-        OkHttpBatchOwnership okHttpBatchOwnership = okHttpBatches.remove(id);
-        if (okHttpBatchOwnership != null) {
-            stopOkHttpBatch(call, id, okHttpBatchOwnership.fileRequests);
+        if (okHttpBatches.containsKey(id)) {
+            synchronized (okHttpBatchHandoffLock) {
+                OkHttpBatchOwnership okHttpBatchOwnership = okHttpBatches.remove(id);
+                if (okHttpBatchOwnership == null) {
+                    call.reject("Download not found");
+                    return;
+                }
+                stopOkHttpBatch(call, id, okHttpBatchOwnership.fileRequests);
+            }
             return;
         }
 
